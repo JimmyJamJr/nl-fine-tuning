@@ -46,6 +46,7 @@ if "MASTER_PORT" not in os.environ:
         _jid = 0
     os.environ["MASTER_PORT"] = str(10000 + (_jid % 50000))
 
+
 # Util functions for multi-GPU
 
 def dist_is_initialized() -> bool:
@@ -128,7 +129,8 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
             cs = json.load(f)
         dataset.stage = int(cs.get("stage", dataset.stage))
         curriculum.stage_start_step = int(cs.get("stage_start_step", 0))
-        rank_print(f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step} from {fp}")
+        rank_print(
+            f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step} from {fp}")
         return True
     except Exception as e:
         rank_print(f"[CURRICULUM][WARN] Failed to restore from {fp}: {e}")
@@ -194,7 +196,8 @@ def _extract_name_and_given_word(text: str) -> Tuple[Optional[str], Optional[str
     return None, None
 
 
-def _redact_given_and_first_proof_line(text: str, token: str = "_____") -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def _redact_given_and_first_proof_line(text: str, token: str = "_____") -> Tuple[
+    Optional[str], Optional[str], Optional[str]]:
     name, word = _extract_name_and_given_word(text)
     if not (name and word):
         return None, None, None
@@ -241,13 +244,14 @@ def _redact_first_k_successors(text: str,
 
     return s
 
+
 # Build a evaluation dataset where some of the attributes are redacted
 # as sanity check (should expect low accuracy)
 def build_redacted_eval_set(
-    inputs: List[str],
-    labels: List[List[str]],
-    token: str = "_____",
-    max_n: Optional[int] = None,
+        inputs: List[str],
+        labels: List[List[str]],
+        token: str = "_____",
+        max_n: Optional[int] = None,
 ) -> Tuple[List[str], List[List[str]]]:
     red_inputs, red_labels = [], []
     for x, y in zip(inputs, labels):
@@ -261,21 +265,22 @@ def build_redacted_eval_set(
             break
     return red_inputs, red_labels
 
+
 class SinglePathARDataset(Dataset):
     def __init__(
-        self,
-        task: str,
-        tokenizer,
-        stage: int = 1,
-        n_stages: int = 10,
-        base_alpha: float = 0.15,
-        max_input_size: int = 256,
-        reserved_inputs: Optional[Set[str]] = None,
-        num_shots: int = 0,
-        seed: Optional[int] = None,
-        store_examples: bool = False,
-        store_cap: int = 1000,
-        **task_kwargs,
+            self,
+            task: str,
+            tokenizer,
+            stage: int = 1,
+            n_stages: int = 10,
+            base_alpha: float = 0.15,
+            max_input_size: int = 256,
+            reserved_inputs: Optional[Set[str]] = None,
+            num_shots: int = 0,
+            seed: Optional[int] = None,
+            store_examples: bool = False,
+            store_cap: int = 1000,
+            **task_kwargs,
     ):
         self.task = task
         self.tokenizer = tokenizer
@@ -296,11 +301,12 @@ class SinglePathARDataset(Dataset):
         self.few_shot_examples = self._build_few_shots(num_shots, seed)
         self.trunc_warns = 0
         self.trunc_warns_max = 10
-        
+
         # Epoch size - number of samples per "epoch"
         self.epoch_size = 50000
 
-        rank_print(f"[DATASET] Map-style dataset | epoch_size={self.epoch_size} | store_seen={self._store} cap={self._store_cap}")
+        rank_print(
+            f"[DATASET] Map-style dataset | epoch_size={self.epoch_size} | store_seen={self._store} cap={self._store_cap}")
 
     def __len__(self):
         """Return epoch size for PyTorch DataLoader"""
@@ -358,7 +364,7 @@ class SinglePathARDataset(Dataset):
         rank = get_rank()
         worker = torch.utils.data.get_worker_info()
         worker_id = worker.id if worker is not None else 0
-        
+
         # Unique seed per sample: base_seed + rank_offset + worker_offset + index
         sample_seed = (self.seed or 0) + rank * 9973 + worker_id * 997 + idx
         rng = random.Random(sample_seed)
@@ -377,10 +383,10 @@ class SinglePathARDataset(Dataset):
                 alpha=self._stage_alpha(),
                 **self.task_kwargs
             )
-            
+
             if not (batch and batch[0] and batch[0].output_texts):
                 continue
-            
+
             ex = batch[0]
             if ex.input_text in self.reserved_inputs or not ex.output_texts:
                 continue
@@ -398,7 +404,7 @@ class SinglePathARDataset(Dataset):
             ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
             end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
             full_len = len(prompt_ids) + len(ans_ids) + len(end_ids)
-            
+
             # Skip if too long
             if full_len > max_len:
                 self._warn_trunc(full_len, max_len)
@@ -428,7 +434,7 @@ class SinglePathARDataset(Dataset):
                 "prompt_len": len(prompt_ids),
                 "valid_first_targets": first_union,
             }
-        
+
         # Failed to generate valid sample after max_attempts
         raise RuntimeError(
             f"[DATASET] Failed to generate valid sample after {max_attempts} attempts. "
@@ -436,15 +442,16 @@ class SinglePathARDataset(Dataset):
             f"This may indicate curriculum is too aggressive or max_input_size is too small."
         )
 
+
 # ================== Collator ==================
 
 def make_collate(tokenizer):
     def collate(features):
         pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
-        
+
         # Dynamic sequence length (batch-specific)
         max_len = max(len(f["input_ids"]) for f in features)
-        
+
         # Dynamic first_k size (batch-specific, minimum 16 for safety)
         dyn_max_k = max(len(f["valid_first_targets"]) for f in features)
         max_k = max(dyn_max_k, 16)  # Keep minimum of 16 as safety margin
@@ -460,7 +467,7 @@ def make_collate(tokenizer):
             labels.append(f["labels"] + [-100] * pad)
             prompt_lens.append(f["prompt_len"])
 
-            K = len(f["valid_first_targets"])  
+            K = len(f["valid_first_targets"])
             pad_k = max_k - K
             vtargets.append(f["valid_first_targets"] + [pad_id] * pad_k)
             vmask.append([1] * K + [0] * pad_k)
@@ -473,7 +480,9 @@ def make_collate(tokenizer):
             "valid_first_targets": torch.tensor(vtargets, dtype=torch.long),
             "valid_first_mask": torch.tensor(vmask, dtype=torch.bool),
         }
+
     return collate
+
 
 # ================== Trainer (soft first-token CE) ==================
 class SinglePathARTrainer(Trainer):
@@ -520,8 +529,8 @@ class SinglePathARTrainer(Trainer):
                 soft[ids] = 1.0 / ids.numel()
                 soft_ce = -(soft * logp).sum()
                 ce_all[i, first_idx] = (
-                    self.first_token_soft_weight * soft_ce +
-                    (1.0 - self.first_token_soft_weight) * ce_all[i, first_idx]
+                        self.first_token_soft_weight * soft_ce +
+                        (1.0 - self.first_token_soft_weight) * ce_all[i, first_idx]
                 )
 
         denom = valid_mask.sum().clamp_min(1)
@@ -559,19 +568,18 @@ class SinglePathARTrainer(Trainer):
 # ================== Eval helpers ==================
 @torch.inference_mode()
 def run_eval_teacher_forced_parity(
-    model,
-    tokenizer,
-    task: str,
-    eval_inputs: List[str],
-    eval_labels: List[List[str]],
-    num_shots: int,
-    max_input_size: int,
-    seed: Optional[int],
-    print_mistakes: int = 0,
-    gc_every: int = 0,
-    **task_kwargs,
+        model,
+        tokenizer,
+        task: str,
+        eval_inputs: List[str],
+        eval_labels: List[List[str]],
+        num_shots: int,
+        max_input_size: int,
+        seed: Optional[int],
+        print_mistakes: int = 0,
+        gc_every: int = 0,
+        **task_kwargs,
 ) -> Dict[str, Any]:
-
     # CRITICAL: Synchronize all ranks before starting eval
     barrier()
     rank_print(f"[EVAL-TF] Rank {get_rank()} starting eval on {len(eval_inputs)} samples")
@@ -592,7 +600,8 @@ def run_eval_teacher_forced_parity(
     def shots_prefix():
         if not few_shots:
             return ""
-        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in few_shots]
+        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in
+                 few_shots]
         return "\n\n".join(parts) + "\n\n"
 
     first_ok, full_ok, total = 0, 0, 0
@@ -654,7 +663,7 @@ def run_eval_teacher_forced_parity(
 
         if not matched and allow_print and mistakes_printed < print_mistakes:
             print("\n" + "=" * 60)
-            print(f"[TF MISTAKE #{mistakes_printed+1}] (rank {get_rank()})")
+            print(f"[TF MISTAKE #{mistakes_printed + 1}] (rank {get_rank()})")
             print("Prompt fed to model:\n" + prompt)
             print("Expected any of:", ys_list)
             print(f"Predicted first-token id: {pred_first_id} (word guess: '{pred_word}')")
@@ -683,111 +692,94 @@ def run_eval_teacher_forced_parity(
 
 @torch.inference_mode()
 def run_eval_greedy_readable(
-    model,
-    tokenizer,
-    task: str,
-    inputs: List[str],
-    labels: List[List[str]],
-    num_shots: int,
-    max_input_size: int,
-    seed: Optional[int],
-    print_examples: int = 0,
-    **task_kwargs,
+        model,
+        tokenizer,
+        task: str,
+        inputs: List[str],
+        labels: List[List[str]],
+        print_examples: int = 0,
+        **kwargs,
 ) -> Dict[str, Any]:
-    
     barrier()
-    rank_print(f"[EVAL-GREEDY] Rank {get_rank()} starting eval on {len(inputs)} samples")
-    
+    rank_print(f"[EVAL-GREEDY] Rank {get_rank()} starting generation on {len(inputs)} samples")
     device = next(model.parameters()).device
 
-    few_shots = []
-    if num_shots > 0:
-        fs_seed = (seed or 0) + 12345
-        gfs = NaturalLanguageGraphGenerator(max_input_size, seed=fs_seed)
-        batch = gfs.generate_batch(task, batch_size=max(num_shots, 3), alpha=0.5, **task_kwargs)
-        for ex in batch:
-            if ex and ex.output_texts:
-                few_shots.append({"input": ex.input_text, "output": ex.output_texts[0]})
-                if len(few_shots) >= num_shots:
-                    break
+    correct_first, correct_full, total = 0, 0, 0
 
-    def shots_prefix():
-        if not few_shots:
-            return ""
-        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in few_shots]
-        return "\n\n".join(parts) + "\n\n"
+    # Ensure pad token exists for generation
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    def stop_on(tok_text: str) -> bool:
-        return ("." in tok_text) or ("," in tok_text)
+    for i, (x, ys) in enumerate(zip(inputs, labels)):
+        ys = ys if isinstance(ys, list) else [ys]
 
-    first_hits, full_hits, total = 0, 0, 0
-    rows = []
-    allow_print = is_main_process() and print_examples > 0
+        # 1. Tokenize Prompt
+        enc = tokenizer(x, return_tensors="pt").to(device)
+        prompt_len = enc.input_ids.shape[1]
 
-    for x, ys in zip(inputs, labels):
-        ys_list = ys if isinstance(ys, list) else [ys]
-        prompt = (shots_prefix() + x) if few_shots else x
-        enc = tokenizer(prompt, return_tensors="pt", truncation=True).to(device)
-        cur = enc["input_ids"]
-        gen = []
-        for _ in range(24):
-            out = model(cur)
-            nt = torch.argmax(out.logits[0, -1, :])
-            gen.append(nt.item())
-            piece = tokenizer.decode([nt.item()], skip_special_tokens=False)
-            if stop_on(piece):
-                break
-            cur = torch.cat([cur, nt.view(1, 1)], dim=1)
+        # 2. Optimized Generation (Greedy)
+        # do_sample=False ensures deterministic greedy decoding
+        gen_out = model.generate(
+            **enc,
+            max_new_tokens=24,
+            pad_token_id=tokenizer.pad_token_id,
+            do_sample=False
+        )
 
-        valid_first = sorted({
-            _tokenize_leading_space(tokenizer, g)[0]
-            for g in ys_list
-            if _tokenize_leading_space(tokenizer, g)
-        })
-        first_ok = (len(gen) > 0 and gen[0] in set(valid_first))
-        first_hits += int(first_ok)
+        # 3. Extract Answer
+        # We slice [prompt_len:] to get only the new tokens
+        gen_ids = gen_out[0][prompt_len:]
+        gen_text = tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
 
-        text = tokenizer.decode(gen, skip_special_tokens=True).strip()
-        word = re.split(r"[.,\s]+", text)[0] if text else ""
-        full_ok = any(word.lower() == y.lower() for y in ys_list)
-        full_hits += int(full_ok)
+        # Split at punctuation or space to isolate the "answer word"
+        pred_word = re.split(r"[.,\s]+", gen_text)[0] if gen_text else ""
+
+        # 4. Calculate Metrics
+        # Metric A: First Token Accuracy
+        valid_first_ids = {
+            _tokenize_leading_space(tokenizer, y)[0]
+            for y in ys
+            if _tokenize_leading_space(tokenizer, y)
+        }
+        first_ok = (len(gen_ids) > 0 and gen_ids[0].item() in valid_first_ids)
+        correct_first += int(first_ok)
+
+        # Metric B: Full Word Accuracy
+        full_ok = any(pred_word.lower() == y.lower() for y in ys)
+        correct_full += int(full_ok)
         total += 1
 
-        if allow_print and (not first_ok or not full_ok) and len(rows) < print_examples:
-            rows.append((prompt, ys_list, word, text, first_ok, full_ok, valid_first))
-
-    if allow_print:
-        for i, r in enumerate(rows, 1):
-            p, ys_list, w, t, f_ok, full_ok, vf = r
+        # 5. Print Mistakes (Optional)
+        if is_main_process() and (not first_ok or not full_ok) and print_examples > 0:
             print("\n" + "=" * 60)
-            print(f"[GREEDY MISTAKE #{i}] (rank {get_rank()})")
-            print("Prompt:\n" + p)
-            print("Expected any of:", ys_list)
-            print(f"Predicted word: {w} (full: '{t}')")
-            print(f"First-ok: {f_ok} | Full-ok: {full_ok}")
-            if vf:
-                print("Valid first token ids:", vf)
-    
+            print(f"[GREEDY MISTAKE] (rank {get_rank()})")
+            print(f"Prompt (tail): ...{x[-100:]}")
+            print(f"Gold Options: {ys}")
+            print(f"Predicted Word: '{pred_word}'")
+            print(f"Full Generation: '{gen_text}'")
+            print_examples -= 1
+
     barrier()
     rank_print(f"[EVAL-GREEDY] Rank {get_rank()} completed eval")
 
     return {
-        "first_token_acc": (first_hits / total) if total else 0.0,
-        "full_word_acc": (full_hits / total) if total else 0.0,
-        "first_token_hits": first_hits,
-        "full_word_hits": full_hits,
+        "first_token_acc": (correct_first / total) if total else 0.0,
+        "full_word_acc": (correct_full / total) if total else 0.0,
+        "first_token_hits": correct_first,
+        "full_word_hits": correct_full,
         "total": total,
     }
+
 
 # ================== Curriculum callback (FULL-word metric only) ==================
 class FirstTokenCurriculum(TrainerCallback):
     def __init__(
-        self,
-        dataset: SinglePathARDataset,
-        n_stages: int,
-        accuracy_threshold: float,
-        min_steps_per_stage: int,
-        check_every: int,
+            self,
+            dataset: SinglePathARDataset,
+            n_stages: int,
+            accuracy_threshold: float,
+            min_steps_per_stage: int,
+            check_every: int,
     ):
         self.dataset = dataset
         self.n_stages = n_stages
@@ -798,7 +790,7 @@ class FirstTokenCurriculum(TrainerCallback):
         self.stage_start_step = 0
         self._last_log = -1
         self.finished = False
-        
+
         # Speed tracking
         self.samples_processed = 0
         self.last_time = None
@@ -808,7 +800,7 @@ class FirstTokenCurriculum(TrainerCallback):
         # Resume cooldown
         self.resume_cooldown_steps = 50
         self.last_resume_step = -1
-        
+
         # NEW: Capture grad_norm from logs
         self.last_grad_norm = 0.0
         self.last_lr = 0.0
@@ -848,14 +840,14 @@ class FirstTokenCurriculum(TrainerCallback):
             if time_delta > 0:
                 # Samples per step = batch_size * gradient_accumulation_steps * world_size
                 samples_per_step = (
-                    self.trainer.args.per_device_train_batch_size * 
-                    self.trainer.args.gradient_accumulation_steps * 
-                    get_world_size()
+                        self.trainer.args.per_device_train_batch_size *
+                        self.trainer.args.gradient_accumulation_steps *
+                        get_world_size()
                 )
                 samples_per_sec = samples_per_step / time_delta
                 self.speed_history.append(samples_per_sec)
                 self.samples_processed += samples_per_step
-        
+
         self.last_time = current_time
 
         # Log every 10 steps
@@ -863,15 +855,15 @@ class FirstTokenCurriculum(TrainerCallback):
             loss = np.mean(self.trainer.recent_losses) if self.trainer.recent_losses else 0.0
             f1 = self.trainer.get_first_token_acc()
             fw = self.trainer.get_full_word_acc()
-            
+
             # Calculate speed metrics
             instant_speed = self.speed_history[-1] if self.speed_history else 0
             avg_speed = np.mean(self.speed_history) if self.speed_history else 0
-            
+
             # Time in current stage
             if self.stage_start_time:
                 stage_time = (current_time - self.stage_start_time).total_seconds()
-                stage_time_str = f"{stage_time/60:.1f}m"
+                stage_time_str = f"{stage_time / 60:.1f}m"
             else:
                 stage_time_str = "0m"
 
@@ -887,14 +879,14 @@ class FirstTokenCurriculum(TrainerCallback):
 
             # Show loss window size
             loss_window = len(self.trainer.recent_losses)
-            
+
             print(f"[Stage {self.dataset.stage}/{self.n_stages}] step {state.global_step} | "
                   f"loss_avg={loss:.4f}({loss_window}) | First={f1:.2%} | Full={fw:.2%} | "
                   f"lr={lr:.2e} | grad_norm={grad_norm:.2f} | "
                   f"Speed={instant_speed:.1f} samples/s (avg={avg_speed:.1f}) | "
                   f"Stage time={stage_time_str}{warmup_msg}")
             self._last_log = state.global_step
-        
+
         # Skip curriculum checks during warmup period after resume
         if self.last_resume_step >= 0 and (state.global_step - self.last_resume_step) < self.resume_cooldown_steps:
             if is_main_process() and state.global_step % 10 == 0:
@@ -914,10 +906,10 @@ class FirstTokenCurriculum(TrainerCallback):
                         total_stage_time = (current_time - self.stage_start_time).total_seconds()
                         steps_in_stage = state.global_step - self.stage_start_step
                         print(f"[COMPLETE] Stage {self.dataset.stage} complete in {steps_in_stage} steps, "
-                              f"{total_stage_time/60:.1f} minutes")
+                              f"{total_stage_time / 60:.1f} minutes")
                     else:
                         print(f"[COMPLETE] Stage {self.dataset.stage} complete")
-                
+
                 if self.dataset.stage < self.n_stages:
                     self.dataset.stage += 1
                     self.stage_start_step = state.global_step
@@ -946,7 +938,7 @@ class FirstTokenCurriculum(TrainerCallback):
                               f"Avg speed: {np.mean(self.speed_history):.1f} samples/s")
                     control.should_training_stop = True
                     self.finished = True
-        
+
         # Periodic memory cleanup (every 100 steps)
         if state.global_step > 0 and state.global_step % 100 == 0:
             if torch.cuda.is_available():
@@ -954,17 +946,18 @@ class FirstTokenCurriculum(TrainerCallback):
                 if is_main_process() and state.global_step % 1000 == 0:
                     mem_allocated = torch.cuda.memory_allocated() / 1e9
                     mem_reserved = torch.cuda.memory_reserved() / 1e9
-                    print(f"[MEM] Step {state.global_step} | Allocated: {mem_allocated:.2f}GB | Reserved: {mem_reserved:.2f}GB")
-        
+                    print(
+                        f"[MEM] Step {state.global_step} | Allocated: {mem_allocated:.2f}GB | Reserved: {mem_reserved:.2f}GB")
+
         return control
 
 
 # out-of-memory auto-scaling batch size and gradient accumulation training loop
 def train_with_oom_autoscale(
-    trainer,
-    init_bs: int,
-    init_gas: int,
-    resume_from_checkpoint: Optional[str]
+        trainer,
+        init_bs: int,
+        init_gas: int,
+        resume_from_checkpoint: Optional[str]
 ) -> None:
     bs = max(1, int(init_bs))
     gas = max(1, int(init_gas))
@@ -972,31 +965,31 @@ def train_with_oom_autoscale(
 
     max_retries = max(int(math.ceil(math.log2(bs))) + 2, 5)
     min_bs = 1
-    
+
     for attempt in range(1, max_retries + 1):
         if is_main_process():
             print(f"\n[OOM-AUTO] Attempt {attempt}/{max_retries} | BS={bs} GAS={gas}")
             if current_resume_ckpt:
                 print(f"[OOM-AUTO] Resuming from: {current_resume_ckpt}")
-        
+
         trainer.args.per_device_train_batch_size = bs
         trainer.args.gradient_accumulation_steps = gas
-        
+
         try:
             trainer.train(resume_from_checkpoint=current_resume_ckpt)
-            return 
-            
+            return
+
         except RuntimeError as e:
             if "out of memory" not in str(e).lower():
                 raise  # Not OOM, re-raise
-            
+
             if is_main_process():
                 print(f"[OOM-AUTO] OOM on attempt {attempt}")
 
             # Clear cache immediately
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            
+
             # Find last good checkpoint
             if current_resume_ckpt is None:
                 last_ckpt = get_last_checkpoint(trainer.args.output_dir)
@@ -1004,34 +997,35 @@ def train_with_oom_autoscale(
                     current_resume_ckpt = last_ckpt
                     if is_main_process():
                         print(f"[OOM-AUTO] Found checkpoint: {current_resume_ckpt}")
-            
+
             if bs > min_bs:
                 old_bs = bs
                 bs = max(min_bs, bs // 2)
                 gas = gas * 2
                 if is_main_process():
-                    print(f"[OOM-AUTO] Reducing: BS {old_bs}->{bs}, GAS {gas//2}→{gas}")
+                    print(f"[OOM-AUTO] Reducing: BS {old_bs}->{bs}, GAS {gas // 2}→{gas}")
             else:
                 if is_main_process():
                     print("[OOM-AUTO] Already at min batch size, retrying...")
-    
+
     # Final attempt without catching
     if is_main_process():
         print("[OOM-AUTO] Final attempt without error handling")
     trainer.train(resume_from_checkpoint=current_resume_ckpt)
 
+
 # Generate eval set in a similar way to the training data
 @torch.inference_mode()
 def generate_eval_like_training(
-    n_samples: int,
-    task: str,
-    tokenizer,
-    max_input_size: int,
-    alpha: float,
-    num_shots: int,
-    reserved_inputs: Set[str],
-    seed: Optional[int],
-    **task_kwargs,
+        n_samples: int,
+        task: str,
+        tokenizer,
+        max_input_size: int,
+        alpha: float,
+        num_shots: int,
+        reserved_inputs: Set[str],
+        seed: Optional[int],
+        **task_kwargs,
 ) -> Tuple[List[str], List[List[str]], List[str]]:
     g = NaturalLanguageGraphGenerator(max_input_size, seed=seed)
     eval_inputs, eval_labels, picked_answers = [], [], []
@@ -1053,7 +1047,8 @@ def generate_eval_like_training(
     few_shots = build_shots()
     shots_prefix = ""
     if few_shots:
-        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in few_shots]
+        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in
+                 few_shots]
         shots_prefix = "\n\n".join(parts) + "\n\n"
 
     max_len = getattr(tokenizer, "model_max_length", 512)
@@ -1103,7 +1098,8 @@ def main():
 
     # FSDP
     p.add_argument("--fsdp_enable", action="store_true")
-    p.add_argument("--fsdp_min_num_params", type=int, default=int(os.environ.get("ACCELERATE_FSDP_MIN_NUM_PARAMS", "100000000")))
+    p.add_argument("--fsdp_min_num_params", type=int,
+                   default=int(os.environ.get("ACCELERATE_FSDP_MIN_NUM_PARAMS", "100000000")))
 
     # LoRA
     p.add_argument("--use_lora", action="store_true", default=False)
@@ -1157,7 +1153,8 @@ def main():
     p.add_argument("--eval_seen_train", action="store_true")
 
     # Scratch / resume
-    p.add_argument("--scratch_dir", type=str, default=os.environ.get("SCRATCH") or os.path.join("/scratch", os.environ.get("USER", "user")))
+    p.add_argument("--scratch_dir", type=str,
+                   default=os.environ.get("SCRATCH") or os.path.join("/scratch", os.environ.get("USER", "user")))
     p.add_argument("--job_id", type=str, default=os.environ.get("SLURM_JOB_ID") or os.environ.get("LSB_JOBID"))
     p.add_argument("--resume_from_job", type=str, default=None)
 
@@ -1169,7 +1166,7 @@ def main():
         # Set device rank
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
         torch.cuda.set_device(local_rank)
-        
+
         # Initialize PyTorch distributed
         torch.distributed.init_process_group(backend="nccl", init_method="env://")
         rank_print(f"[DISTRIBUTED] Initialized rank {get_rank()}/{get_world_size()} on device cuda:{local_rank}")
@@ -1291,7 +1288,7 @@ def main():
             dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             model = model.to(dtype)
             rank_print(f"[FSDP] Converted all parameters to {dtype} for FSDP compatibility")
- 
+
     # Reserved inputs for deduplication
     reserved_inputs: Set[str] = set()
 
@@ -1324,7 +1321,7 @@ def main():
         if _try_restore_curriculum_state(resume_ckpt, dataset, curriculum):
             rank_print(f"[CURRICULUM] Synced state with checkpoint: {resume_ckpt}")
         else:
-             rank_print(f"[CURRICULUM] WARNING: Resuming model from {resume_ckpt} but no curriculum state found there.")
+            rank_print(f"[CURRICULUM] WARNING: Resuming model from {resume_ckpt} but no curriculum state found there.")
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -1349,7 +1346,7 @@ def main():
         fsdp_config=({"min_num_params": int(args.fsdp_min_num_params)} if args.fsdp_enable else None),
         load_best_model_at_end=False,
     )
-    
+
     callbacks = [curriculum]
     # Create trainer (handles GPU placement)
     trainer = SinglePathARTrainer(
@@ -1369,7 +1366,7 @@ def main():
     # Baseline eval
     if not args.skip_baseline:
         rank_print("[BASELINE] Starting baseline evaluation...")
-        
+
         # For FSDP, we need to use the model through trainer's infrastructure
         # For DDP, we can prepare the model manually
         if not args.fsdp_enable and torch.cuda.is_available():
@@ -1385,13 +1382,13 @@ def main():
                 device = torch.device(f"cuda:{local_rank}")
                 trainer.model = trainer.model.to(device)
                 rank_print(f"[BASELINE] Model moved to device: {device} (FSDP will wrap during forward)")
-        
+
         if torch.cuda.is_available():
             mem = torch.cuda.memory_allocated() / 1e9
             rank_print(f"[BASELINE] GPU memory after preparation: {mem:.2f}GB")
 
         trainer.model.eval()
-        
+
         # Only rank 0 generates eval data
         if is_main_process():
             rank_print("[BASELINE] Generating eval data...")
@@ -1407,7 +1404,7 @@ def main():
                 seed=(args.seed or 0) + 42,
                 **task_kwargs,
             )
-            
+
             # Samples with starting complexity (alpha=base_alpha)
             eval_inputs_2, eval_labels_2, _ = generate_eval_like_training(
                 n_samples=args.eval_samples,
@@ -1420,24 +1417,24 @@ def main():
                 seed=(args.seed or 0) + 99,
                 **task_kwargs,
             )
-            rank_print(f"[BASELINE] Generated {len(eval_inputs_1)} + {len(eval_inputs_2)} eval samples")            
-        
-        # Synchronize and broadcast to all GPUs
+            rank_print(f"[BASELINE] Generated {len(eval_inputs_1)} + {len(eval_inputs_2)} eval samples")
+
+            # Synchronize and broadcast to all GPUs
         barrier()
         eval_inputs_1 = broadcast_object(eval_inputs_1, src=0)
         eval_labels_1 = broadcast_object(eval_labels_1, src=0)
         eval_inputs_2 = broadcast_object(eval_inputs_2, src=0)
         eval_labels_2 = broadcast_object(eval_labels_2, src=0)
-        
+
         # Update reserved inputs
         if eval_inputs_1:
             reserved_inputs.update(eval_inputs_1)
         if eval_inputs_2:
             reserved_inputs.update(eval_inputs_2)
         dataset.reserved_inputs = reserved_inputs
-        
+
         rank_print("[BASELINE] Running evaluation...")
-        
+
         # For FSDP, wrap the evaluation in a try-catch to handle potential issues
         try:
             base_tf_1 = run_eval_teacher_forced_parity(
@@ -1452,10 +1449,12 @@ def main():
                 num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
                 print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
             )
-            
-            rank_print(f"\n[BASELINE-TF-α1.0] α={1.0:.2f} | First={base_tf_1['first_token_acc']:.2%} | Full={base_tf_1['full_word_acc']:.2%} | N={base_tf_1['total']}")
-            rank_print(f"[BASELINE-TF-αbase] α={args.base_alpha:.2f} | First={base_tf_2['first_token_acc']:.2%} | Full={base_tf_2['full_word_acc']:.2%} | N={base_tf_2['total']}\n")
-            
+
+            rank_print(
+                f"\n[BASELINE-TF-α1.0] α={1.0:.2f} | First={base_tf_1['first_token_acc']:.2%} | Full={base_tf_1['full_word_acc']:.2%} | N={base_tf_1['total']}")
+            rank_print(
+                f"[BASELINE-TF-αbase] α={args.base_alpha:.2f} | First={base_tf_2['first_token_acc']:.2%} | Full={base_tf_2['full_word_acc']:.2%} | N={base_tf_2['total']}\n")
+
         except RuntimeError as e:
             if "size mismatch" in str(e) and args.fsdp_enable:
                 rank_print("[BASELINE][WARNING] FSDP evaluation failed - model needs proper FSDP context")
@@ -1515,7 +1514,6 @@ def main():
     else:
         trainer.train(resume_from_checkpoint=resume_ckpt)
 
-
     rank_print("\n[TRAIN] Training complete.\n")
 
     if args.skip_final_eval:
@@ -1525,11 +1523,11 @@ def main():
     if args.eval_seen_train and args.store_seen_train:
         # Step 1: Each rank gets its own seen samples
         local_inputs, local_labels = dataset.get_seen_samples()
-        
+
         # Step 2: Gather all samples to rank 0 (ALL ranks participate in each broadcast)
         all_inputs_list = []
         all_labels_list = []
-        
+
         for rank_id in range(get_world_size()):
             if rank_id == get_rank():
                 # This rank sends its data
@@ -1545,30 +1543,30 @@ def main():
                 if is_main_process():
                     all_inputs_list.append(rank_inputs)
                     all_labels_list.append(rank_labels)
-        
+
         # Step 3: Deduplicate on rank 0
         if is_main_process():
             seen_set = set()
             seen_inputs = []
             seen_labels = []
-            
+
             for inputs, labels in zip(all_inputs_list, all_labels_list):
                 for inp, lab in zip(inputs, labels):
                     if inp not in seen_set:
                         seen_inputs.append(inp)
                         seen_labels.append(lab)
                         seen_set.add(inp)
-            
+
             rank_print(f"[SEEN-TF] Gathered {len(seen_inputs)} unique samples from {get_world_size()} ranks")
         else:
             seen_inputs = None
             seen_labels = None
-        
+
         # Step 4: Broadcast the combined deduplicated set to all ranks
         barrier()
         seen_inputs = broadcast_object(seen_inputs, src=0)
         seen_labels = broadcast_object(seen_labels, src=0)
-        
+
         if seen_inputs:
             rank_print(f"[SEEN-TF] Evaluating on {len(seen_inputs)} seen samples from all ranks")
             trainer.model.eval()
@@ -1578,17 +1576,18 @@ def main():
                 num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
                 print_mistakes=min(5, args.print_eval_examples), gc_every=50, **task_kwargs
             )
-            rank_print(f"[SEEN-TF] First={seen_tf['first_token_acc']:.2%} | Full={seen_tf['full_word_acc']:.2%} | N={seen_tf['total']}")
-        
+            rank_print(
+                f"[SEEN-TF] First={seen_tf['first_token_acc']:.2%} | Full={seen_tf['full_word_acc']:.2%} | N={seen_tf['total']}")
+
         barrier()
 
     # Final eval 2: eval at final curriculum alpha, give teacher forced acc and greedy acc
     trainer.model.eval()
-    
+
     # Reuse eval sets from baseline (or generate if baseline was skipped)
     if eval_inputs_1 is None:
         rank_print(f"[FINAL EVAL] Generating eval data...")
-        
+
         if is_main_process():
             eval_inputs_1, eval_labels_1, _ = generate_eval_like_training(
                 n_samples=args.eval_samples,
@@ -1601,7 +1600,7 @@ def main():
                 seed=(args.seed or 0) + 42,  # Same seed as baseline
                 **task_kwargs,
             )
-            
+
             eval_inputs_2, eval_labels_2, _ = generate_eval_like_training(
                 n_samples=args.eval_samples,
                 task=args.task,
@@ -1616,7 +1615,7 @@ def main():
         else:
             eval_inputs_1, eval_labels_1 = None, None
             eval_inputs_2, eval_labels_2 = None, None
-        
+
         barrier()
         eval_inputs_1 = broadcast_object(eval_inputs_1, src=0)
         eval_labels_1 = broadcast_object(eval_labels_1, src=0)
@@ -1624,14 +1623,15 @@ def main():
         eval_labels_2 = broadcast_object(eval_labels_2, src=0)
     else:
         rank_print(f"[FINAL EVAL] Reusing eval data from baseline")
-    
+
     # Use eval_inputs_1 for main eval (alpha=1.0 is hardest)
     final_tf = run_eval_teacher_forced_parity(
         trainer.model, tokenizer, args.task, eval_inputs_1, eval_labels_1,
         num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
         print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
     )
-    rank_print(f"[FINAL-TF-α1.0] α={1.0:.2f} | First={final_tf['first_token_acc']:.2%} | Full={final_tf['full_word_acc']:.2%} | N={final_tf['total']}")
+    rank_print(
+        f"[FINAL-TF-α1.0] α={1.0:.2f} | First={final_tf['first_token_acc']:.2%} | Full={final_tf['full_word_acc']:.2%} | N={final_tf['total']}")
 
     greedy_read = run_eval_greedy_readable(
         trainer.model, tokenizer, args.task,
@@ -1639,7 +1639,8 @@ def main():
         num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
         print_examples=min(3, args.print_eval_examples), **task_kwargs
     )
-    rank_print(f"[FINAL-GREEDY-α1.0] α={1.0:.2f} | First={greedy_read['first_token_acc']:.2%} | Full={greedy_read['full_word_acc']:.2%} | N={greedy_read['total']}")
+    rank_print(
+        f"[FINAL-GREEDY-α1.0] α={1.0:.2f} | First={greedy_read['first_token_acc']:.2%} | Full={greedy_read['full_word_acc']:.2%} | N={greedy_read['total']}")
 
     # Optionally evaluate on base alpha set too
     if eval_inputs_2 is not None:  # Only if we have it
@@ -1648,7 +1649,8 @@ def main():
             num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
             print_mistakes=0, gc_every=50, **task_kwargs
         )
-        rank_print(f"[FINAL-TF-αbase] α={args.base_alpha:.2f} | First={base_final_tf['first_token_acc']:.2%} | Full={base_final_tf['full_word_acc']:.2%} | N={base_final_tf['total']}")
+        rank_print(
+            f"[FINAL-TF-αbase] α={args.base_alpha:.2f} | First={base_final_tf['first_token_acc']:.2%} | Full={base_final_tf['full_word_acc']:.2%} | N={base_final_tf['total']}")
 
     # Final eval 3: eval with redacted data for sanity check (should be low acc)
     red_n = args.eval_redacted_samples
@@ -1666,7 +1668,8 @@ def main():
             num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
             print_mistakes=min(2, args.print_eval_examples), gc_every=50, **task_kwargs
         )
-        rank_print(f"[FINAL-TF-REDACTED] First={red_tf['first_token_acc']:.2%} | Full={red_tf['full_word_acc']:.2%} | N={red_tf['total']}")
+        rank_print(
+            f"[FINAL-TF-REDACTED] First={red_tf['first_token_acc']:.2%} | Full={red_tf['full_word_acc']:.2%} | N={red_tf['total']}")
 
         red_greedy = run_eval_greedy_readable(
             trainer.model,
@@ -1675,7 +1678,8 @@ def main():
             num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
             print_examples=min(3, args.print_eval_examples), **task_kwargs
         )
-        rank_print(f"[FINAL-GREEDY-REDACTED] First={red_greedy['first_token_acc']:.2%} | Full={red_greedy['full_word_acc']:.2%} | N={red_greedy['total']}")
+        rank_print(
+            f"[FINAL-GREEDY-REDACTED] First={red_greedy['first_token_acc']:.2%} | Full={red_greedy['full_word_acc']:.2%} | N={red_greedy['total']}")
     else:
         rank_print("[FINAL-REDACTED] Skipped (could not redact any eval items cleanly)")
 
@@ -1692,13 +1696,14 @@ def main():
         os.makedirs(args.output_dir, exist_ok=True)
         with open(os.path.join(args.output_dir, "final_tf_metrics.json"), "w") as f:
             json.dump(final_tf, f, indent=2)
-    
+
     # Save model and tokenizer (all ranks participate for FSDP)
     trainer.save_model(os.path.join(args.output_dir, "final"))
     tokenizer.save_pretrained(os.path.join(args.output_dir, "final"))
-    
+
     rank_print("\n[DONE] Training/evaluation complete.")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
