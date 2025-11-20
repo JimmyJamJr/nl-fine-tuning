@@ -11,7 +11,10 @@ from collections import deque
 from typing import List, Tuple, Dict, Any, Optional, Set
 
 import numpy as np
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
+
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
@@ -989,14 +992,15 @@ def train_with_oom_autoscale(
             # Clear cache immediately
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            gc.collect()
 
             # Find last good checkpoint
-            if current_resume_ckpt is None:
-                last_ckpt = get_last_checkpoint(trainer.args.output_dir)
-                if last_ckpt:
-                    current_resume_ckpt = last_ckpt
-                    if is_main_process():
-                        print(f"[OOM-AUTO] Found checkpoint: {current_resume_ckpt}")
+            last_ckpt = get_last_checkpoint(trainer.args.output_dir)
+            if last_ckpt:
+                current_resume_ckpt = last_ckpt
+                if is_main_process():
+                    print(f"[OOM-AUTO] Found checkpoint: {current_resume_ckpt}")
 
             if bs > min_bs:
                 old_bs = bs
@@ -1345,6 +1349,9 @@ def main():
         fsdp=(['full_shard', 'auto_wrap'] if args.fsdp_enable else []),
         fsdp_config=({"min_num_params": int(args.fsdp_min_num_params)} if args.fsdp_enable else None),
         load_best_model_at_end=False,
+
+        ddp_find_unused_parameters=False,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
     )
 
     callbacks = [curriculum]
