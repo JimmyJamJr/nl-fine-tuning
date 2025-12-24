@@ -490,30 +490,6 @@ class SinglePathARDataset(Dataset):
 def make_collate(tokenizer, pad_to_multiple_of=64):
     def collate(features):
         pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
-
-        # # Dynamic sequence length (batch-specific)
-        # max_len = max(len(f["input_ids"]) for f in features)
-
-        # # Dynamic first_k size (batch-specific, minimum 16 for safety)
-        # dyn_max_k = max(len(f["valid_first_targets"]) for f in features)
-        # max_k = max(dyn_max_k, 16)  # Keep minimum of 16 as safety margin
-
-        # input_ids, attn, labels, prompt_lens = [], [], [], []
-        # vtargets, vmask = [], []
-
-        # for f in features:
-        #     L = len(f["input_ids"])
-        #     pad = max_len - L
-        #     input_ids.append(f["input_ids"] + [pad_id] * pad)
-        #     attn.append(f["attention_mask"] + [0] * pad)
-        #     labels.append(f["labels"] + [-100] * pad)
-        #     prompt_lens.append(f["prompt_len"])
-
-        #     K = len(f["valid_first_targets"])
-        #     pad_k = max_k - K
-        #     vtargets.append(f["valid_first_targets"] + [pad_id] * pad_k)
-        #     vmask.append([1] * K + [0] * pad_k)
-
         raw_max_len = max(len(f["input_ids"]) for f in features)
 
         # Round up to the nearest multiple of 64 to stabilize shapes for torch.compile
@@ -577,17 +553,6 @@ class SinglePathARTrainer(Trainer):
 
         if self.use_chunked_ce:
             print(f"[TRAINER] Using chunked cross-entropy (chunk_size={ce_chunk_size})")
-
-    def _get_lm_head_weight(self, model):
-        """Extract lm_head weight from potentially wrapped model."""
-        unwrapped = model
-        while hasattr(unwrapped, "module"):
-            unwrapped = unwrapped.module
-        if hasattr(unwrapped, "base_model"):  # LoRA
-            unwrapped = unwrapped.base_model
-        if hasattr(unwrapped, "model"):
-            unwrapped = unwrapped.model
-        return unwrapped.lm_head.weight
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         prompt_len = inputs.pop("prompt_len")
@@ -1165,6 +1130,7 @@ class FirstTokenCurriculum(TrainerCallback):
             accuracy_threshold: float,
             min_steps_per_stage: int,
             check_every: int,
+            # Stage eval config
             do_stage_eval: bool = False,
             eval_inputs_hard: List[str] = None,
             eval_labels_hard: List[List[str]] = None,
@@ -1196,12 +1162,11 @@ class FirstTokenCurriculum(TrainerCallback):
         self.resume_cooldown_steps = 50
         self.last_resume_step = -1
 
-        # NEW: Capture grad_norm from logs
+        # Capture grad_norm and lr from Trainer logs
         self.last_grad_norm = 0.0
         self.last_lr = 0.0
 
-        # Track stage eval results
-        self.stage_eval_history = []
+        # Stage eval config
         self.do_stage_eval = do_stage_eval
         self.eval_inputs_hard = eval_inputs_hard
         self.eval_labels_hard = eval_labels_hard
@@ -1212,6 +1177,7 @@ class FirstTokenCurriculum(TrainerCallback):
         self.num_shots = num_shots
         self.max_input_size = max_input_size
         self.seed = seed
+        self.stage_eval_history = []
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
@@ -1228,27 +1194,20 @@ class FirstTokenCurriculum(TrainerCallback):
         return control
 
     def _current_metric(self) -> float:
-        # if self.trainer is None:
-        #     return 0.0
-        # return self.trainer.get_full_word_acc()
-
-        # Get Local Accuracy
+        """Get synchronized full-word accuracy across all GPUs"""
         local_acc = self.trainer.get_full_word_acc()
 
-        # Synchronize across all GPUs (Average the accuracy)
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             device = self.trainer.args.device
-            # Move scalar to tensor on device
             metric_tensor = torch.tensor([local_acc], dtype=torch.float32, device=device)
-            # Sum across all ranks
             torch.distributed.all_reduce(metric_tensor, op=torch.distributed.ReduceOp.SUM)
-            # Divide by world size to get average
             global_acc = metric_tensor.item() / torch.distributed.get_world_size()
             return global_acc
 
         return local_acc
 
     def on_save(self, args, state, control, **kwargs):
+        """Save curriculum state alongside checkpoint"""
         if is_main_process():
             checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
             _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step)
@@ -1324,46 +1283,140 @@ class FirstTokenCurriculum(TrainerCallback):
             except Exception as e:
                 rank_print(f"[STAGE-EVAL] Warning: Could not save history: {e}")
 
-    def on_step_end(self, args, state: TrainerState, control: TrainerControl, **kwargs):
-        step = state.global_step
-
-        # Skip checks during cooldown after resume
-        if self.last_resume_step > 0:
-            steps_since_resume = step - self.last_resume_step
-            if steps_since_resume < self.resume_cooldown_steps:
-                return control
-
-        # Only check periodically
-        if step % self.check_every != 0:
+    def on_step_end(self, args, state, control, **kwargs):
+        # Early exit conditions
+        if self.trainer is None or self.finished or state.global_step == 0:
             return control
 
-        # Don't advance past final stage
-        if self.dataset.stage >= self.n_stages:
+        current_time = datetime.datetime.now()
+
+        # ==================== Speed Tracking ====================
+        if self.last_time is not None:
+            time_delta = (current_time - self.last_time).total_seconds()
+            if time_delta > 0:
+                samples_per_step = (
+                        self.trainer.args.per_device_train_batch_size *
+                        self.trainer.args.gradient_accumulation_steps *
+                        get_world_size()
+                )
+                samples_per_sec = samples_per_step / time_delta
+                self.speed_history.append(samples_per_sec)
+                self.samples_processed += samples_per_step
+
+        self.last_time = current_time
+
+        # ==================== Logging (every 10 steps) ====================
+        if state.global_step % 10 == 0 and state.global_step != self._last_log and is_main_process():
+            loss = np.mean(self.trainer.recent_losses) if self.trainer.recent_losses else 0.0
+            f1 = self.trainer.get_first_token_acc()
+            fw = self.trainer.get_full_word_acc()
+
+            # Speed metrics
+            instant_speed = self.speed_history[-1] if self.speed_history else 0
+            avg_speed = np.mean(self.speed_history) if self.speed_history else 0
+
+            # Time in current stage
+            stage_time_str = "0m"
+            if self.stage_start_time:
+                stage_time = (current_time - self.stage_start_time).total_seconds()
+                stage_time_str = f"{stage_time / 60:.1f}m"
+
+            # Warmup indicator
+            warmup_msg = ""
+            if self.last_resume_step >= 0 and (state.global_step - self.last_resume_step) < self.resume_cooldown_steps:
+                remaining = self.resume_cooldown_steps - (state.global_step - self.last_resume_step)
+                warmup_msg = f" | Warmup={remaining}"
+
+            print(f"[Stage {self.dataset.stage}/{self.n_stages}] step {state.global_step} | "
+                  f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
+                  f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
+                  f"Speed={instant_speed:.1f} samples/s (avg={avg_speed:.1f}) | "
+                  f"Stage time={stage_time_str}{warmup_msg}")
+            self._last_log = state.global_step
+
+        # ==================== Resume Warmup ====================
+        if self.last_resume_step >= 0 and (state.global_step - self.last_resume_step) < self.resume_cooldown_steps:
+            if is_main_process() and state.global_step % 10 == 0:
+                remaining = self.resume_cooldown_steps - (state.global_step - self.last_resume_step)
+                print(f"[CURRICULUM] Skipping checks during warmup ({remaining} steps remaining)")
             return control
 
-        # Check minimum steps
-        steps_in_stage = step - self.stage_start_step
-        if steps_in_stage < self.min_steps:
-            return control
+        # ==================== Stage Advancement Check ====================
+        if state.global_step % self.check_every == 0 and (state.global_step - self.stage_start_step) >= self.min_steps:
 
-        # Check accuracy
-        acc = self._current_metric()
-        if acc >= self.acc_thr:
-            old_stage = self.dataset.stage
-            self.dataset.stage = old_stage + 1
-            self.stage_start_step = step
+            m = self._current_metric()
 
-            new_alpha = self.dataset._stage_alpha()
-            rank_print(
-                f"\n[CURRICULUM] Stage {old_stage} → {self.dataset.stage} "
-                f"(α={new_alpha:.3f}) at step {step} (acc={acc:.2%})\n"
-            )
+            if is_main_process():
+                print(f"[CHECK] Stage {self.dataset.stage} full={m:.2%} target>={self.acc_thr:.2%}")
 
-            # Save curriculum state
-            _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
+            if m >= self.acc_thr:
+                old_stage = self.dataset.stage
 
-            # Run stage eval after advancement
-            self._run_stage_eval(old_stage, step)
+                if is_main_process():
+                    # Summary for completed stage
+                    if self.stage_start_time:
+                        total_stage_time = (current_time - self.stage_start_time).total_seconds()
+                        steps_in_stage = state.global_step - self.stage_start_step
+                        print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
+                              f"{total_stage_time / 60:.1f} minutes")
+                    else:
+                        print(f"[COMPLETE] Stage {old_stage} complete")
+
+                # Run stage eval BEFORE advancing (captures model state at end of stage)
+                self._run_stage_eval(old_stage, state.global_step)
+
+                if self.dataset.stage < self.n_stages:
+                    # Advance to next stage
+                    self.dataset.stage += 1
+                    self.stage_start_step = state.global_step
+                    self.stage_start_time = current_time
+
+                    # Clear accuracy tracking for fresh measurement
+                    self.trainer.first_token_correct.clear()
+                    self.trainer.full_word_correct.clear()
+
+                    new_alpha = self.dataset._stage_alpha()
+                    if is_main_process():
+                        # Show if alpha is capped
+                        uncapped_alpha = self.dataset.base_alpha + (1.0 - self.dataset.base_alpha) * (
+                                    self.dataset.stage - 1) / max(self.dataset.n_stages - 1, 1)
+                        cap_msg = f" (capped from {uncapped_alpha:.3f})" if new_alpha < uncapped_alpha else ""
+                        msg = f" -> Advanced to stage {self.dataset.stage} | alpha={new_alpha:.3f}{cap_msg}"
+
+                        # Show effective lookahead for search task
+                        if getattr(self.dataset, "task", None) == "search":
+                            n = getattr(self.dataset, "max_input_size", 256)
+                            cap = None
+                            try:
+                                cap = int(self.dataset.task_kwargs.get("max_lookahead", 0)) or None
+                            except Exception:
+                                cap = None
+                            L_eff = effective_search_L(new_alpha, n, max_lookahead_cap=cap)
+                            msg += f" | effective max_lookahead={L_eff} (n={n}, cap={cap})"
+                        print(msg)
+
+                    # Save curriculum state
+                    _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
+                else:
+                    # Curriculum complete
+                    if is_main_process():
+                        print("[FINISHED] Curriculum complete")
+                        print(f"[SUMMARY] Total samples: {self.samples_processed:,} | "
+                              f"Avg speed: {np.mean(self.speed_history):.1f} samples/s")
+                    control.should_training_stop = True
+                    self.finished = True
+
+        # ==================== Memory Cleanup (every 100 steps) ====================
+        if state.global_step > 0 and state.global_step % 100 == 0:
+            if torch.cuda.is_available():
+                peak_mem = torch.cuda.max_memory_allocated() / 1e9
+                torch.cuda.empty_cache()
+                if is_main_process() and state.global_step % 1000 == 0:
+                    curr_mem = torch.cuda.memory_allocated() / 1e9
+                    print(f"[MEM] Step {state.global_step} | "
+                          f"Current: {curr_mem:.2f}GB (Resting) | "
+                          f"Peak: {peak_mem:.2f}GB (Active)")
+                torch.cuda.reset_peak_memory_stats()
 
         return control
 
@@ -1847,8 +1900,8 @@ def main():
     if is_main_process():
         model.print_trainable_parameters()
 
-    # Find hard limit to avoid OOM
-    _ = estimate_worst_case_length(args, tokenizer)
+    # Find hard limit to avoid OOM (no longer needed but kept for debug)
+    # _ = estimate_worst_case_length(args, tokenizer)
 
     # Reserved inputs for deduplication
     reserved_inputs: Set[str] = set()
@@ -2048,7 +2101,7 @@ def main():
         args=training_args,
         train_dataset=dataset,
         tokenizer=tokenizer,
-        data_collator=make_collate(tokenizer, pad_to_multiple_of=64),
+        data_collator=make_collate(tokenizer, pad_to_multiple_of=None),
         callbacks=[curriculum, baseline_cb],
         first_token_soft_weight=args.first_token_soft_weight,
         use_chunked_ce=args.use_chunked_ce,
