@@ -1369,7 +1369,8 @@ class FirstTokenCurriculum(TrainerCallback):
                     # Advance to next stage
                     self.dataset.stage += 1
                     self.stage_start_step = state.global_step
-                    self.stage_start_time = current_time
+                    # self.stage_start_time = current_time
+                    self.stage_start_time = datetime.datetime.now()
 
                     # Clear accuracy tracking for fresh measurement
                     self.trainer.first_token_correct.clear()
