@@ -601,8 +601,13 @@ class SinglePathARTrainer(Trainer):
                 ids = valid_first[i][mask]
                 logp = F.log_softmax(shift_logits[i, first_idx, :], dim=-1)
                 soft = torch.zeros_like(logp)
-                soft[ids] = 1.0 / ids.numel()
-                soft_ce = -(soft * logp).sum()
+
+                # soft[ids] = 1.0 / ids.numel()
+                # soft_ce = -(soft * logp).sum()
+
+                ids = torch.unique(ids)
+                soft_ce = -logp[ids].mean()
+
                 ce_all[i, first_idx] = (
                         self.first_token_soft_weight * soft_ce +
                         (1.0 - self.first_token_soft_weight) * ce_all[i, first_idx]
@@ -1235,13 +1240,13 @@ class FirstTokenCurriculum(TrainerCallback):
 
         with torch.no_grad():
             # Teacher-forced eval
-            tf_result = run_eval_teacher_forced_parity(
-                model, self.tokenizer, self.task,
-                self.eval_inputs_hard, self.eval_labels_hard,
-                num_shots=self.num_shots, max_input_size=self.max_input_size,
-                seed=self.seed, print_mistakes=0, gc_every=50,
-                **self.task_kwargs
-            )
+            # tf_result = run_eval_teacher_forced_parity(
+            #     model, self.tokenizer, self.task,
+            #     self.eval_inputs_hard, self.eval_labels_hard,
+            #     num_shots=self.num_shots, max_input_size=self.max_input_size,
+            #     seed=self.seed, print_mistakes=0, gc_every=50,
+            #     **self.task_kwargs
+            # )
 
             # Greedy eval
             greedy_result = run_eval_greedy_readable(
@@ -1259,7 +1264,7 @@ class FirstTokenCurriculum(TrainerCallback):
         # Log results
         rank_print(
             f"[STAGE-EVAL] Stage {stage} | Step {global_step} | "
-            f"TF: First={tf_result['first_token_acc']:.2%}, Full={tf_result['full_word_acc']:.2%} | "
+            # f"TF: First={tf_result['first_token_acc']:.2%}, Full={tf_result['full_word_acc']:.2%} | "
             f"Greedy: First={greedy_result['first_token_acc']:.2%}, Full={greedy_result['full_word_acc']:.2%}"
         )
 
@@ -1268,8 +1273,8 @@ class FirstTokenCurriculum(TrainerCallback):
             "stage": stage,
             "step": global_step,
             "alpha_training": self.dataset._stage_alpha(),
-            "tf_first": tf_result['first_token_acc'],
-            "tf_full": tf_result['full_word_acc'],
+            # "tf_first": tf_result['first_token_acc'],
+            # "tf_full": tf_result['full_word_acc'],
             "greedy_first": greedy_result['first_token_acc'],
             "greedy_full": greedy_result['full_word_acc'],
         })
@@ -1840,7 +1845,7 @@ def main():
         "cache_dir": args.cache_dir,
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        "attn_implementation": "flash_attention_2",
+        "attn_implementation": "sdpa",
     }
 
     # Apply Liger fused ops (NOT cross entropy)
@@ -2027,13 +2032,17 @@ def main():
         logging_first_step=False,
         report_to="none",
         save_strategy="steps",
-        save_steps=100,
+        save_steps=500,
         save_total_limit=5,
         save_safetensors=True,
         bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
         optim="adamw_torch_fused",
-        dataloader_num_workers=0,
+        # dataloader_num_workers=0,
+
+        dataloader_num_workers=4,  # or 8
+        prefetch_factor=4,
+
         dataloader_pin_memory=True,
         seed=args.seed if args.seed is not None else 42,
         fsdp=(['full_shard', 'auto_wrap'] if args.fsdp_enable else []),
@@ -2060,35 +2069,36 @@ def main():
     def baseline_runner(eval_model, trainer):
         rank_print(f"[BASELINE] Model prepared (Backend: {type(eval_model).__name__})")
 
-        # Verify we're using the same data
+        # Verify eval data
         fp_hard = _eval_data_fingerprint(eval_inputs_hard, eval_labels_hard)
         fp_easy = _eval_data_fingerprint(eval_inputs_easy, eval_labels_easy)
         rank_print(f"[BASELINE] Verifying eval data: hard={fp_hard}, easy={fp_easy}")
-        assert fp_hard == eval_fingerprint_hard, f"Hard eval fingerprint mismatch! {fp_hard} != {eval_fingerprint_hard}"
-        assert fp_easy == eval_fingerprint_easy, f"Easy eval fingerprint mismatch! {fp_easy} != {eval_fingerprint_easy}"
-        rank_print(f"[BASELINE] Fingerprints verified ✓")
+        assert fp_hard == eval_fingerprint_hard, f"Hard eval fingerprint mismatch!"
+        assert fp_easy == eval_fingerprint_easy, f"Easy eval fingerprint mismatch!"
 
         # Hard eval: α=1.0
-        base_tf_hard = run_eval_teacher_forced_parity(
-            eval_model, tokenizer, args.task, eval_inputs_hard, eval_labels_hard,
+        base_hard = run_eval_greedy_readable(
+            eval_model, tokenizer, args.task,
+            eval_inputs_hard, eval_labels_hard,
             num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-            print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
+            print_examples=args.print_eval_examples, **task_kwargs
         )
 
         # Easy eval: α=base_alpha
-        base_tf_easy = run_eval_teacher_forced_parity(
-            eval_model, tokenizer, args.task, eval_inputs_easy, eval_labels_easy,
+        base_easy = run_eval_greedy_readable(
+            eval_model, tokenizer, args.task,
+            eval_inputs_easy, eval_labels_easy,
             num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-            print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
+            print_examples=args.print_eval_examples, **task_kwargs
         )
 
         rank_print(
-            f"\n[BASELINE-TF-α1.0] First={base_tf_hard['first_token_acc']:.2%} "
-            f"| Full={base_tf_hard['full_word_acc']:.2%} | N={base_tf_hard['total']}"
+            f"\n[BASELINE-α1.0] First={base_hard['first_token_acc']:.2%} "
+            f"| Full={base_hard['full_word_acc']:.2%} | N={base_hard['total']}"
         )
         rank_print(
-            f"[BASELINE-TF-α{args.base_alpha}] First={base_tf_easy['first_token_acc']:.2%} "
-            f"| Full={base_tf_easy['full_word_acc']:.2%} | N={base_tf_easy['total']}\n"
+            f"[BASELINE-α{args.base_alpha}] First={base_easy['first_token_acc']:.2%} "
+            f"| Full={base_easy['full_word_acc']:.2%} | N={base_easy['total']}\n"
         )
 
     # Skip baseline if not requested OR if resuming
@@ -2207,14 +2217,14 @@ def main():
         if seen_inputs:
             rank_print(f"[SEEN-EVAL] Evaluating on {len(seen_inputs)} seen samples")
             trainer.model.eval()
-            seen_tf = run_eval_teacher_forced_parity(
-                trainer.model,
-                tokenizer, args.task, seen_inputs, seen_labels,
+            seen_result = run_eval_greedy_readable(
+                trainer.model, tokenizer, args.task,
+                seen_inputs, seen_labels,
                 num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-                print_mistakes=min(5, args.print_eval_examples), gc_every=50, **task_kwargs
+                print_examples=min(5, args.print_eval_examples), **task_kwargs
             )
             rank_print(
-                f"[SEEN-EVAL] First={seen_tf['first_token_acc']:.2%} | Full={seen_tf['full_word_acc']:.2%} | N={seen_tf['total']}")
+                f"[SEEN-EVAL] First={seen_result['first_token_acc']:.2%} | Full={seen_result['full_word_acc']:.2%} | N={seen_result['total']}")
 
         barrier()
 
@@ -2231,13 +2241,12 @@ def main():
         rank_print(f"[FINAL-EVAL] Fingerprints verified ✓")
 
         # Hard eval: α=1.0
-        final_tf_hard = run_eval_teacher_forced_parity(
-            trainer.model, tokenizer, args.task, eval_inputs_hard, eval_labels_hard,
-            num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-            print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
-        )
-        rank_print(
-            f"[FINAL-TF-α1.0] First={final_tf_hard['first_token_acc']:.2%} | Full={final_tf_hard['full_word_acc']:.2%} | N={final_tf_hard['total']}")
+        # final_tf_hard = run_eval_teacher_forced_parity(
+        #     trainer.model, tokenizer, args.task, eval_inputs_hard, eval_labels_hard,
+        #     num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
+        #     print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
+        # )
+        # rank_print(f"[FINAL-TF-α1.0] First={final_tf_hard['first_token_acc']:.2%} | Full={final_tf_hard['full_word_acc']:.2%} | N={final_tf_hard['total']}")
 
         greedy_hard = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
@@ -2249,13 +2258,12 @@ def main():
             f"[FINAL-GREEDY-α1.0] First={greedy_hard['first_token_acc']:.2%} | Full={greedy_hard['full_word_acc']:.2%} | N={greedy_hard['total']}")
 
         # Easy eval: α=base_alpha
-        final_tf_easy = run_eval_teacher_forced_parity(
-            trainer.model, tokenizer, args.task, eval_inputs_easy, eval_labels_easy,
-            num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-            print_mistakes=0, gc_every=50, **task_kwargs
-        )
-        rank_print(
-            f"[FINAL-TF-α{args.base_alpha}] First={final_tf_easy['first_token_acc']:.2%} | Full={final_tf_easy['full_word_acc']:.2%} | N={final_tf_easy['total']}")
+        # final_tf_easy = run_eval_teacher_forced_parity(
+        #     trainer.model, tokenizer, args.task, eval_inputs_easy, eval_labels_easy,
+        #     num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
+        #     print_mistakes=0, gc_every=50, **task_kwargs
+        # )
+        # rank_print(f"[FINAL-TF-α{args.base_alpha}] First={final_tf_easy['first_token_acc']:.2%} | Full={final_tf_easy['full_word_acc']:.2%} | N={final_tf_easy['total']}")
 
         greedy_easy = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
@@ -2273,9 +2281,9 @@ def main():
                 json.dump({
                     "eval_fingerprint_hard": eval_fingerprint_hard,
                     "eval_fingerprint_easy": eval_fingerprint_easy,
-                    "tf_hard": final_tf_hard,
+                    # "tf_hard": final_tf_hard,
                     "greedy_hard": greedy_hard,
-                    "tf_easy": final_tf_easy,
+                    # "tf_easy": final_tf_easy,
                     "greedy_easy": greedy_easy,
                 }, f, indent=2)
 
@@ -2301,24 +2309,14 @@ def main():
         )
 
         if red_inputs:
-            red_tf = run_eval_teacher_forced_parity(
-                trainer.model,
-                tokenizer, args.task, red_inputs, red_labels,
-                num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-                print_mistakes=min(2, args.print_eval_examples), gc_every=50, **task_kwargs
-            )
-            rank_print(
-                f"[REDACTED-TF] First={red_tf['first_token_acc']:.2%} | Full={red_tf['full_word_acc']:.2%} | N={red_tf['total']}")
-
-            red_greedy = run_eval_greedy_readable(
-                trainer.model,
-                tokenizer, args.task,
+            red_result = run_eval_greedy_readable(
+                trainer.model, tokenizer, args.task,
                 red_inputs, red_labels,
                 num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
                 print_examples=min(3, args.print_eval_examples), **task_kwargs
             )
             rank_print(
-                f"[REDACTED-GREEDY] First={red_greedy['first_token_acc']:.2%} | Full={red_greedy['full_word_acc']:.2%} | N={red_greedy['total']}")
+                f"[REDACTED] First={red_result['first_token_acc']:.2%} | Full={red_result['full_word_acc']:.2%} | N={red_result['total']}")
         else:
             rank_print("[REDACTED-EVAL] Skipped (could not redact any eval items cleanly)")
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J nl_search_768_1.7B_la128_a0.1-0.7
+#SBATCH -J nl_search_1536_1.7B_la256_a0.1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:8
@@ -28,7 +28,6 @@ echo "JOB START $(date)"
 
 # ========== Environment ==========
 module load conda
-module load cuda/12.6.0
 conda activate search
 
 export SCRATCH="/scratch/gautschi/$USER"
@@ -86,15 +85,15 @@ FSDP_MIN_NUM_PARAMS=20000000
 # Curriculum
 N_STAGES=10
 BASE_ALPHA=0.1
-MAX_ALPHA=0.7                    # Cap training alpha (eval always uses 1.0)
+MAX_ALPHA=1.0                    # Cap training alpha (eval always uses 1.0)
 ACCURACY_THRESHOLD=0.98
 MIN_STEPS_PER_STAGE=500
 CHECK_EVERY=50
 FIRST_TOKEN_SOFT_WEIGHT=1.0
 
 # Task parameters
-MAX_INPUT_SIZE=768
-MAX_LOOKAHEAD=128                # search
+MAX_INPUT_SIZE=1536
+MAX_LOOKAHEAD=256                # search
 MAX_FRONTIER_SIZE=12             # si
 MAX_BRANCH_SIZE=12               # si
 REQUESTED_BACKTRACK=3            # dfs
@@ -115,7 +114,7 @@ DO_BASELINE=true                 # Pre-training baseline accuracy
 DO_FINAL_EVAL=true               # Post-training TF + greedy eval
 DO_REDACTED_EVAL=true            # Redacted sanity check (should be low)
 DO_SEEN_EVAL=true                # Seen-samples sanity check (should be ~100%)
-DO_STAGE_EVAL=true               # Eval at α=1.0 after each stage advancement
+DO_STAGE_EVAL=true              # Eval at α=1.0 after each stage advancement
 
 # Resume from previous job (leave empty for fresh start)
 PREV_JOB_ID=""
