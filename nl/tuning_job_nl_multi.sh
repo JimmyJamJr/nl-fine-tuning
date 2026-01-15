@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH -J nl_search_1536_1.7B_la256_a0.1
+#SBATCH -J nl_search_1536_1.7B_la256_a1.0_timing_test
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=112
 #SBATCH --mem=128G
-#SBATCH --time=48:00:00
+#SBATCH --time=4:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
-#SBATCH -q preemptible
+#SBATCH -q normal
 #SBATCH --mail-user=huan2073@purdue.edu
 #SBATCH --mail-type=END,FAIL
 #SBATCH -o ./slurm/%j_%x.out
@@ -68,7 +68,7 @@ MODEL_NAME="Qwen/Qwen3-1.7B"
 # Training
 BATCH_SIZE=16
 GRADIENT_ACCUMULATION_STEPS=1
-LEARNING_RATE=2e-5
+LEARNING_RATE=3e-5
 WARMUP_STEPS=500
 SEED=1234
 NUM_SHOTS=0                      # 0, 1, or 2
@@ -78,13 +78,9 @@ USE_LORA=true
 LORA_RANK=16
 LORA_DROPOUT=0.10
 
-# FSDP (alternative to DDP for larger models)
-USE_FSDP=false
-FSDP_MIN_NUM_PARAMS=20000000
-
 # Curriculum
-N_STAGES=10
-BASE_ALPHA=0.1
+N_STAGES=1
+BASE_ALPHA=1.0
 MAX_ALPHA=1.0                    # Cap training alpha (eval always uses 1.0)
 ACCURACY_THRESHOLD=0.98
 MIN_STEPS_PER_STAGE=500
@@ -110,11 +106,11 @@ OOM_AUTOSCALE=true
 # Evaluation
 EVAL_SAMPLES=500
 PRINT_EVAL_EXAMPLES=0
-DO_BASELINE=true                 # Pre-training baseline accuracy
-DO_FINAL_EVAL=true               # Post-training TF + greedy eval
-DO_REDACTED_EVAL=true            # Redacted sanity check (should be low)
-DO_SEEN_EVAL=true                # Seen-samples sanity check (should be ~100%)
-DO_STAGE_EVAL=true              # Eval at α=1.0 after each stage advancement
+DO_BASELINE=false                 # Pre-training baseline accuracy
+DO_FINAL_EVAL=false               # Post-training TF + greedy eval
+DO_REDACTED_EVAL=false            # Redacted sanity check (should be low)
+DO_SEEN_EVAL=false                # Seen-samples sanity check (should be ~100%)
+DO_STAGE_EVAL=false              # Eval at α=1.0 after each stage advancement
 
 # Resume from previous job (leave empty for fresh start)
 PREV_JOB_ID=""
@@ -154,7 +150,7 @@ ARGS=(
     --output_dir "$SCRATCH/nl_output"
     --scratch_dir "$SCRATCH"
     --job_id "$SLURM_JOB_ID"
-    
+
     # Training
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
@@ -163,7 +159,7 @@ ARGS=(
     --seed "$SEED"
     --num_shots "$NUM_SHOTS"
     --first_token_soft_weight "$FIRST_TOKEN_SOFT_WEIGHT"
-    
+
     # Curriculum
     --n_stages "$N_STAGES"
     --base_alpha "$BASE_ALPHA"
@@ -171,22 +167,25 @@ ARGS=(
     --accuracy_threshold "$ACCURACY_THRESHOLD"
     --min_steps_per_stage "$MIN_STEPS_PER_STAGE"
     --check_every "$CHECK_EVERY"
-    
+
     # Task parameters
     --max_input_size "$MAX_INPUT_SIZE"
     --max_lookahead "$MAX_LOOKAHEAD"
     --max_frontier_size "$MAX_FRONTIER_SIZE"
     --max_branch_size "$MAX_BRANCH_SIZE"
     --requested_backtrack "$REQUESTED_BACKTRACK"
-    
+
     # Evaluation
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
+
+    --use_packing
+    --pack_length 16384
+    --pack_batch_size 16
 )
 
 # Conditional flags
 $USE_LORA && ARGS+=(--use_lora --lora_rank "$LORA_RANK" --lora_dropout "$LORA_DROPOUT")
-$USE_FSDP && ARGS+=(--fsdp_enable --fsdp_min_num_params "$FSDP_MIN_NUM_PARAMS")
 $GRADIENT_CHECKPOINTING && ARGS+=(--gradient_checkpointing)
 $USE_LIGER && ARGS+=(--use_liger)
 $USE_CHUNKED_CE && ARGS+=(--use_chunked_ce --ce_chunk_size "$CE_CHUNK_SIZE")
