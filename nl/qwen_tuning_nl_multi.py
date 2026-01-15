@@ -20,7 +20,6 @@ import torch
 
 import torch.nn.functional as F
 from torch.utils.data import Dataset, IterableDataset
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from transformers import (
     AutoModelForCausalLM,
@@ -50,13 +49,12 @@ except ImportError:
 warnings.filterwarnings("ignore")
 hf_logging.set_verbosity_error()
 
-# --- Runtime env sanity for Accelerate / FSDP / NCCL (must be set before Trainer builds Accelerator) ---
+# --- Runtime env sanity for Accelerate / NCCL (must be set before Trainer builds Accelerator) ---
 os.environ.setdefault("ACCELERATE_DISPATCH_BATCHES", "false")
 os.environ.setdefault("ACCELERATE_SPLIT_BATCHES", "true")
 os.environ.setdefault("ACCELERATE_USE_DATA_LOADER_SHARDING", "false")
 os.environ.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
-if os.environ.get("ACCELERATE_FSDP_MIN_NUM_PARAMS", "").endswith(".0"):
-    os.environ["ACCELERATE_FSDP_MIN_NUM_PARAMS"] = os.environ["ACCELERATE_FSDP_MIN_NUM_PARAMS"].split(".")[0]
+
 if "MASTER_PORT" not in os.environ:
     try:
         _jid = int(os.environ.get("SLURM_JOB_ID", "0") or 0)
@@ -1891,208 +1889,6 @@ class TimingSummaryCallback(TrainerCallback):
 
 # ================== Eval helpers ==================
 @torch.no_grad()
-def run_eval_teacher_forced_parity(
-        model,
-        tokenizer,
-        task: str,
-        eval_inputs: List[str],
-        eval_labels: List[List[str]],
-        num_shots: int,
-        max_input_size: int,
-        seed: Optional[int],
-        print_mistakes: int = 0,
-        gc_every: int = 0,
-        **task_kwargs,
-) -> Dict[str, Any]:
-    barrier()
-    rank = get_rank()
-    world_size = get_world_size()
-    device = next(model.parameters()).device
-
-    # --- CONSTANTS ---
-    # CRITICAL for FSDP: Every rank must run exactly the same number of model steps.
-    # We cap the number of candidates we check per sample.
-    # If a sample has fewer candidates, we run dummy passes to fill the quota.
-    MAX_CANDIDATES_PER_SAMPLE = 5
-
-    # 1. Data Sharding & Padding (Sample Level)
-    total_len = len(eval_inputs)
-    chunk_size = math.ceil(total_len / world_size)
-
-    start_idx = rank * chunk_size
-    end_idx = min(start_idx + chunk_size, total_len)
-
-    my_inputs = eval_inputs[start_idx:end_idx]
-    my_labels = eval_labels[start_idx:end_idx]
-
-    actual_count = len(my_inputs)
-
-    # Pad samples to ensure every rank processes the same number of "rows"
-    pad_needed = chunk_size - actual_count
-    if pad_needed > 0:
-        dummy_in = my_inputs[-1] if my_inputs else ""
-        dummy_la = my_labels[-1] if my_labels else []
-        my_inputs.extend([dummy_in] * pad_needed)
-        my_labels.extend([dummy_la] * pad_needed)
-
-    rank_print(f"[EVAL-TF] Starting eval on {total_len} samples (Local: {actual_count}, Pad: {pad_needed})")
-
-    # 2. Setup Few-Shot
-    few_shots = []
-    if num_shots > 0:
-        fs_seed = (seed or 0) + 12345
-        gfs = NaturalLanguageGraphGenerator(max_input_size, seed=fs_seed)
-        batch = gfs.generate_batch(task, batch_size=max(num_shots, 3), alpha=0.5, **task_kwargs)
-        for ex in batch:
-            if ex and ex.output_texts:
-                few_shots.append({"input": ex.input_text, "output": ex.output_texts[0]})
-                if len(few_shots) >= num_shots:
-                    break
-
-    def shots_prefix():
-        if not few_shots:
-            return ""
-        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in
-                 few_shots]
-        return "\n\n".join(parts) + "\n\n"
-
-    # 3. Inference Loop
-    local_first_ok = 0
-    local_full_ok = 0
-    local_total = 0
-    mistakes_printed = 0
-    allow_print = is_main_process() and (print_mistakes > 0)
-
-    for idx, (x, ys) in enumerate(zip(my_inputs, my_labels)):
-        is_padding_sample = (idx >= actual_count)
-
-        ys_list = ys if isinstance(ys, list) else [ys]
-        prompt = (shots_prefix() + x) if few_shots else x
-        enc = tokenizer(prompt, return_tensors="pt", truncation=True).to(device)
-        prompt_len = enc["input_ids"].shape[1]
-        ttype = _determine_task_type(task, x)
-        end_ids = tokenizer(_get_end_tokens(ttype), add_special_tokens=False)["input_ids"]
-
-        # --- First Token Check (1 Forward Pass) ---
-        # This is safe because it runs exactly once per sample on all ranks.
-        out_prompt = model(**enc)  # <--- Forward Pass 1 (Sync Point)
-
-        if is_padding_sample:
-            # We still had to run the forward pass above to keep FSDP sync,
-            # but we stop processing this sample now.
-            # However, we MUST still run the "Candidate Loop" below as dummies
-            # so we stay in sync with ranks that are processing real samples.
-            pass
-        else:
-            # Calculate First Token Acc
-            union = set()
-            candidates = []
-            for gold in ys_list:
-                ids = _tokenize_leading_space(tokenizer, gold)
-                if ids:
-                    union.add(ids[0])
-                    candidates.append(ids + end_ids)
-
-            if not candidates:
-                local_total += 1
-                # We still fall through to the loop to run dummy passes
-            else:
-                fidx = prompt_len - 1
-                pred_first_id = torch.argmax(out_prompt.logits[0, fidx, :]).item()
-                local_first_ok += int(pred_first_id in union)
-
-        # --- Candidate Loop (Variable number of Forward Passes) ---
-        # CRITICAL FIX: Pad this loop so every rank runs exactly MAX_CANDIDATES steps.
-
-        # 1. Get real candidates (if any, and not padding sample)
-        real_candidates = []
-        if not is_padding_sample and 'candidates' in locals():
-            real_candidates = candidates[:MAX_CANDIDATES_PER_SAMPLE]
-
-        matched = False
-        pred_word = None
-
-        # 2. Run fixed number of steps
-        for i in range(MAX_CANDIDATES_PER_SAMPLE):
-            if i < len(real_candidates):
-                # === REAL CANDIDATE CHECK ===
-                cand = real_candidates[i]
-                full = torch.tensor(
-                    enc["input_ids"].tolist()[0] + cand,
-                    dtype=torch.long, device=device
-                ).unsqueeze(0)
-                attn = torch.ones_like(full)
-
-                out = model(input_ids=full, attention_mask=attn)  # <--- Forward Pass (Sync Point)
-
-                # Check match
-                slogits = out.logits[:, :-1, :]
-                slabels = full[:, 1:]
-                start = prompt_len - 1
-                ok = True
-                for j in range(start, slabels.shape[1]):
-                    gold_tok = slabels[0, j].item()
-                    pred_tok = torch.argmax(slogits[0, j, :]).item()
-                    if pred_tok != gold_tok:
-                        ok = False
-                        if pred_word is None and j == start:
-                            pred_word = tokenizer.decode([pred_tok], skip_special_tokens=True).strip()
-                        break
-                if ok:
-                    matched = True
-            else:
-                # === DUMMY PASS (Prevent Deadlock) ===
-                # Run the model on the prompt again just to participate in FSDP comms
-                _ = model(**enc)  # <--- Forward Pass (Sync Point)
-
-        # --- Metrics Update ---
-        if not is_padding_sample:
-            if pred_word is None and 'pred_first_id' in locals():
-                pred_word = tokenizer.decode([pred_first_id], skip_special_tokens=True).strip()
-
-            if not matched and allow_print and mistakes_printed < print_mistakes:
-                print("\n" + "=" * 60)
-                print(f"[TF MISTAKE #{mistakes_printed + 1}] (Rank {rank})")
-                print("Prompt fed to model:\n" + prompt)
-                print("Expected any of:", ys_list)
-                print(f"Predicted first-token id: {locals().get('pred_first_id', '?')} (word guess: '{pred_word}')")
-                mistakes_printed += 1
-
-            local_full_ok += int(matched)
-            if 'candidates' in locals() and candidates:
-                # Only increment total if valid candidates existed
-                # (If candidates was empty, we already incremented total above)
-                pass
-            if not ('candidates' in locals() and not candidates):
-                local_total += 1
-
-        if gc_every > 0 and (idx % gc_every == 0):
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-    # 4. Global Aggregation
-    metrics = torch.tensor([local_first_ok, local_full_ok, local_total], dtype=torch.long, device=device)
-    if dist_is_initialized():
-        torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
-
-    global_first = metrics[0].item()
-    global_full = metrics[1].item()
-    global_total = metrics[2].item()
-
-    barrier()
-    rank_print(f"[EVAL-TF] Completed. Global samples: {global_total}")
-
-    return {
-        "first_token_acc": (global_first / global_total) if global_total else 0.0,
-        "full_word_acc": (global_full / global_total) if global_total else 0.0,
-        "first_token_hits": global_first,
-        "full_word_hits": global_full,
-        "total": global_total,
-    }
-
-
-@torch.no_grad()
 def run_eval_greedy_readable(
         model,
         tokenizer,
@@ -2146,8 +1942,6 @@ def run_eval_greedy_readable(
         use_cache=True
     )
 
-    is_fsdp = isinstance(model, FSDP)
-
     # 2. Inference Loop
     for i, (x, ys) in enumerate(zip(my_inputs, my_labels)):
         is_padding = (i >= actual_count)
@@ -2158,24 +1952,14 @@ def run_eval_greedy_readable(
         prompt_len = enc.input_ids.shape[1]
 
         # Generate (Must run for everyone)
-        if is_fsdp:
-            with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    gen_out = model.generate(
-                        **enc,
-                        max_new_tokens=24,
-                        generation_config=greedy_config,
-                        synced_gpus=True
-                    )
-        else:
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                unwrapped = model.module if hasattr(model, "module") else model
-                gen_out = unwrapped.generate(
-                    **enc,
-                    max_new_tokens=24,
-                    generation_config=greedy_config,
-                    synced_gpus=True
-                )
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            unwrapped = model.module if hasattr(model, "module") else model
+            gen_out = unwrapped.generate(
+                **enc,
+                max_new_tokens=24,
+                generation_config=greedy_config,
+                synced_gpus=True
+            )
 
         if is_padding:
             continue
@@ -2228,352 +2012,6 @@ def run_eval_greedy_readable(
         "total": global_total,
     }
 
-
-# ================== Curriculum callback (FULL-word metric only) ==================
-# class FirstTokenCurriculum(TrainerCallback):
-#     def __init__(
-#         self,
-#         dataset: SinglePathARDataset,
-#         n_stages: int,
-#         accuracy_threshold: float,
-#         min_steps_per_stage: int,
-#         check_every: int,
-#         # Stage eval config
-#         do_stage_eval: bool = False,
-#         eval_inputs_hard: List[str] = None,
-#         eval_labels_hard: List[List[str]] = None,
-#         eval_fingerprint_hard: str = None,
-#         tokenizer=None,
-#         task: str = None,
-#         task_kwargs: dict = None,
-#         num_shots: int = 0,
-#         max_input_size: int = 256,
-#         seed: int = None,
-#     ):
-#         self.dataset = dataset
-#         self.n_stages = n_stages
-#         self.acc_thr = accuracy_threshold
-#         self.min_steps = min_steps_per_stage
-#         self.check_every = check_every
-#         self.trainer: Optional[SinglePathARTrainer] = None
-#         self.stage_start_step = 0
-#         self._last_log = -1
-#         self.finished = False
-
-#         # Speed tracking
-#         # self.samples_processed = 0
-#         # self.last_time = None
-#         # self.speed_history = deque(maxlen=100)  # Moving average
-#         self.stage_start_time = None
-
-#         # Resume cooldown
-#         self.resume_cooldown_steps = 50
-#         self.last_resume_step = -1
-
-#         # Capture grad_norm and lr from Trainer logs
-#         self.last_grad_norm = 0.0
-#         self.last_lr = 0.0
-
-#         # Stage eval config
-#         self.do_stage_eval = do_stage_eval
-#         self.eval_inputs_hard = eval_inputs_hard
-#         self.eval_labels_hard = eval_labels_hard
-#         self.eval_fingerprint_hard = eval_fingerprint_hard
-#         self.tokenizer = tokenizer
-#         self.task = task
-#         self.task_kwargs = task_kwargs or {}
-#         self.num_shots = num_shots
-#         self.max_input_size = max_input_size
-#         self.seed = seed
-#         self.stage_eval_history = []
-
-#     def on_log(self, args, state, control, logs=None, **kwargs):
-#         """Capture grad_norm and lr from Transformers' logs"""
-#         if logs:
-#             self.last_grad_norm = logs.get('grad_norm', self.last_grad_norm)
-#             self.last_lr = logs.get('learning_rate', self.last_lr)
-#         return control
-
-#     def on_train_begin(self, args, state, control, **kwargs):
-#         """Initialize stage timing at training start"""
-#         if self.stage_start_time is None:
-#             self.stage_start_time = datetime.datetime.now()
-#         return control
-
-#     # def on_step_begin(self, args, state, control, **kwargs):
-#     #     """Track time at step start"""
-#     #     if self.last_time is None:
-#     #         self.last_time = datetime.datetime.now()
-#     #         self.stage_start_time = self.last_time
-#     #     return control
-
-#     def _current_metric(self) -> float:
-#         """Get synchronized full-word accuracy across all GPUs"""
-#         local_acc = self.trainer.get_full_word_acc()
-
-#         if torch.distributed.is_available() and torch.distributed.is_initialized():
-#             device = self.trainer.args.device
-#             metric_tensor = torch.tensor([local_acc], dtype=torch.float32, device=device)
-#             torch.distributed.all_reduce(metric_tensor, op=torch.distributed.ReduceOp.SUM)
-#             global_acc = metric_tensor.item() / torch.distributed.get_world_size()
-#             return global_acc
-
-#         return local_acc
-
-#     def on_save(self, args, state, control, **kwargs):
-#         """Save curriculum state alongside checkpoint"""
-#         if is_main_process():
-#             checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
-#             _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step)
-#         return control
-
-#     def _run_stage_eval(self, stage: int, global_step: int):
-#         """Run TF + greedy eval at alpha=1.0 after stage advancement."""
-#         if not self.do_stage_eval:
-#             return
-#         if self.eval_inputs_hard is None or self.tokenizer is None:
-#             rank_print("[STAGE-EVAL] Skipped (missing eval data or tokenizer)")
-#             return
-
-#         # Verify fingerprint
-#         fp = _eval_data_fingerprint(self.eval_inputs_hard, self.eval_labels_hard)
-#         if fp != self.eval_fingerprint_hard:
-#             rank_print(f"[STAGE-EVAL] WARNING: Fingerprint mismatch! {fp} != {self.eval_fingerprint_hard}")
-
-#         rank_print(f"\n[STAGE-EVAL] Stage {stage} complete (step {global_step}), evaluating at alpha=1.0...")
-
-#         # Switch to eval mode
-#         model = self.trainer.model
-#         was_training = model.training
-#         model.eval()
-
-#         with torch.no_grad():
-#             # Teacher-forced eval
-#             # tf_result = run_eval_teacher_forced_parity(
-#             #     model, self.tokenizer, self.task,
-#             #     self.eval_inputs_hard, self.eval_labels_hard,
-#             #     num_shots=self.num_shots, max_input_size=self.max_input_size,
-#             #     seed=self.seed, print_mistakes=0, gc_every=50,
-#             #     **self.task_kwargs
-#             # )
-
-#             # Greedy eval
-#             greedy_result = run_eval_greedy_readable(
-#                 model, self.tokenizer, self.task,
-#                 self.eval_inputs_hard, self.eval_labels_hard,
-#                 num_shots=self.num_shots, max_input_size=self.max_input_size,
-#                 seed=self.seed, print_examples=0,
-#                 **self.task_kwargs
-#             )
-
-#         # Restore training mode
-#         if was_training:
-#             model.train()
-
-#         # Log results
-#         rank_print(
-#             f"[STAGE-EVAL] Stage {stage} | Step {global_step} | "
-#             # f"TF: First={tf_result['first_token_acc']:.2%}, Full={tf_result['full_word_acc']:.2%} | "
-#             f"Greedy: First={greedy_result['first_token_acc']:.2%}, Full={greedy_result['full_word_acc']:.2%}"
-#         )
-
-#         # Store history
-#         self.stage_eval_history.append({
-#             "stage": stage,
-#             "step": global_step,
-#             "alpha_training": self.dataset._stage_alpha(),
-#             # "tf_first": tf_result['first_token_acc'],
-#             # "tf_full": tf_result['full_word_acc'],
-#             "greedy_first": greedy_result['first_token_acc'],
-#             "greedy_full": greedy_result['full_word_acc'],
-#         })
-
-#         # Save to file
-#         if is_main_process():
-#             try:
-#                 out_path = os.path.join(self.trainer.args.output_dir, "stage_eval_history.json")
-#                 with open(out_path, "w") as f:
-#                     json.dump(self.stage_eval_history, f, indent=2)
-#             except Exception as e:
-#                 rank_print(f"[STAGE-EVAL] Warning: Could not save history: {e}")
-
-#     def on_step_end(self, args, state, control, **kwargs):
-#         # Early exit conditions
-#         if self.trainer is None or self.finished or state.global_step == 0:
-#             return control
-
-#         current_time = datetime.datetime.now()
-
-#         # # ==================== Speed Tracking ====================
-#         # if self.last_time is not None:
-#         #     time_delta = (current_time - self.last_time).total_seconds()
-#         #     if time_delta > 0:
-#         #         samples_per_step = (
-#         #             self.trainer.args.per_device_train_batch_size *
-#         #             self.trainer.args.gradient_accumulation_steps *
-#         #             get_world_size()
-#         #         )
-#         #         samples_per_sec = samples_per_step / time_delta
-#         #         self.speed_history.append(samples_per_sec)
-#         #         self.samples_processed += samples_per_step
-
-#         # self.last_time = current_time
-
-#         # ==================== Logging (every 10 steps) ====================
-#         if state.global_step % 10 == 0 and state.global_step != self._last_log and is_main_process():
-#             loss = np.mean(self.trainer.recent_losses) if self.trainer.recent_losses else 0.0
-#             f1 = self.trainer.get_first_token_acc()
-#             fw = self.trainer.get_full_word_acc()
-
-#             # Speed metrics
-#             # instant_speed = self.speed_history[-1] if self.speed_history else 0
-#             # avg_speed = np.mean(self.speed_history) if self.speed_history else 0
-
-#             # Time in current stage
-#             stage_time_str = "0m"
-#             if self.stage_start_time:
-#                 stage_time = (current_time - self.stage_start_time).total_seconds()
-#                 stage_time_str = f"{stage_time/60:.1f}m"
-
-#                 # Calculate samples/sec from trainer timing
-#                 steps_in_stage = state.global_step - self.stage_start_step
-#                 if steps_in_stage > 0 and stage_time > 0:
-#                     batch_size = self.trainer.args.per_device_train_batch_size
-#                     world_size = get_world_size()
-#                     samples_per_sec = (steps_in_stage * batch_size * world_size) / stage_time
-
-#             # Warmup indicator
-#             warmup_msg = ""
-#             if self.last_resume_step >= 0 and (state.global_step - self.last_resume_step) < self.resume_cooldown_steps:
-#                 remaining = self.resume_cooldown_steps - (state.global_step - self.last_resume_step)
-#                 warmup_msg = f" | Warmup={remaining}"
-
-#             # print(f"[Stage {self.dataset.stage}/{self.n_stages}] step {state.global_step} | "
-#             #       f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
-#             #       f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
-#             #       f"Speed={instant_speed:.1f} samples/s (avg={avg_speed:.1f}) | "
-#             #       f"Stage time={stage_time_str}{warmup_msg}")
-#             print(f"[Stage {self.dataset.stage}/{self.n_stages}] step {state.global_step} | "
-#                 f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
-#                 f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
-#                 f"Speed={samples_per_sec:.1f} samples/s | "
-#                 f"Stage time={stage_time_str}{warmup_msg}")
-#             self._last_log = state.global_step
-
-#         # ==================== Resume Warmup ====================
-#         if self.last_resume_step >= 0 and (state.global_step - self.last_resume_step) < self.resume_cooldown_steps:
-#             if is_main_process() and state.global_step % 10 == 0:
-#                 remaining = self.resume_cooldown_steps - (state.global_step - self.last_resume_step)
-#                 print(f"[CURRICULUM] Skipping checks during warmup ({remaining} steps remaining)")
-#             return control
-
-#         # ==================== Stage Advancement Check ====================
-#         if state.global_step % self.check_every == 0 and (state.global_step - self.stage_start_step) >= self.min_steps:
-
-#             m = self._current_metric()
-
-#             if is_main_process():
-#                 print(f"[CHECK] Stage {self.dataset.stage} full={m:.2%} target>={self.acc_thr:.2%}")
-
-#             if m >= self.acc_thr:
-#                 old_stage = self.dataset.stage
-
-#                 if is_main_process():
-#                     # Summary for completed stage
-#                     if self.stage_start_time:
-#                         total_stage_time = (current_time - self.stage_start_time).total_seconds()
-#                         steps_in_stage = state.global_step - self.stage_start_step
-#                         print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
-#                               f"{total_stage_time/60:.1f} minutes")
-
-#                         # Print detailed timing for this stage
-#                         if hasattr(self.trainer, '_train_timing'):
-#                             tt = self.trainer._train_timing
-#                             n = tt["steps"]
-#                             if n > 0:
-#                                 data_ms = (tt["data_wait"] / n) * 1000
-#                                 fwd_ms = (tt["forward"] / n) * 1000
-#                                 total_ms = (tt["total_step"] / n) * 1000
-#                                 data_pct = (tt["data_wait"] / (tt["data_wait"] + tt["total_step"])) * 100 if tt["total_step"] > 0 else 0
-
-#                                 # Calculate samples/sec for this stage
-#                                 batch_size = self.trainer.args.per_device_train_batch_size
-#                                 world_size = get_world_size()
-#                                 samples_per_sec = (n * batch_size * world_size) / total_stage_time if total_stage_time > 0 else 0
-
-#                                 print(f"[STAGE {old_stage} TIMING] "
-#                                       f"Steps={n} | "
-#                                       f"DataWait={data_ms:.1f}ms ({data_pct:.1f}%) | "
-#                                       f"Forward={fwd_ms:.1f}ms | "
-#                                       f"StepAvg={total_ms:.1f}ms | "
-#                                       f"Speed={samples_per_sec:.1f} samples/s")
-
-#                     else:
-#                         print(f"[COMPLETE] Stage {old_stage} complete")
-
-#                 # Run stage eval BEFORE advancing (captures model state at end of stage)
-#                 self._run_stage_eval(old_stage, state.global_step)
-
-#                 if self.dataset.stage < self.n_stages:
-#                     # Advance to next stage
-#                     self.dataset.stage += 1
-#                     self.stage_start_step = state.global_step
-#                     # self.stage_start_time = current_time
-#                     self.stage_start_time = datetime.datetime.now()
-
-#                     # Clear accuracy tracking for fresh measurement
-#                     self.trainer.first_token_correct.clear()
-#                     self.trainer.full_word_correct.clear()
-
-#                     # Reset timing for new stage
-#                     self.trainer.reset_timing()
-#                     for cb in self.trainer.callback_handler.callbacks:
-#                         if isinstance(cb, TimingSummaryCallback):
-#                             cb.reset()
-
-#                     new_alpha = self.dataset._stage_alpha()
-#                     if is_main_process():
-#                         # Show if alpha is capped
-#                         uncapped_alpha = self.dataset.base_alpha + (1.0 - self.dataset.base_alpha) * (self.dataset.stage - 1) / max(self.dataset.n_stages - 1, 1)
-#                         cap_msg = f" (capped from {uncapped_alpha:.3f})" if new_alpha < uncapped_alpha else ""
-#                         msg = f" -> Advanced to stage {self.dataset.stage} | alpha={new_alpha:.3f}{cap_msg}"
-
-#                         # Show effective lookahead for search task
-#                         if getattr(self.dataset, "task", None) == "search":
-#                             n = getattr(self.dataset, "max_input_size", 256)
-#                             cap = None
-#                             try:
-#                                 cap = int(self.dataset.task_kwargs.get("max_lookahead", 0)) or None
-#                             except Exception:
-#                                 cap = None
-#                             L_eff = effective_search_L(new_alpha, n, max_lookahead_cap=cap)
-#                             msg += f" | effective max_lookahead={L_eff} (n={n}, cap={cap})"
-#                         print(msg)
-
-#                     # Save curriculum state
-#                     _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
-#                 else:
-#                     # Curriculum complete
-#                     if is_main_process():
-#                         print("[FINISHED] Curriculum complete")
-#                         # print(f"[SUMMARY] Total samples: {self.samples_processed:,} | "
-#                         #       f"Avg speed: {np.mean(self.speed_history):.1f} samples/s")
-#                     control.should_training_stop = True
-#                     self.finished = True
-
-#         # ==================== Memory Cleanup (every 100 steps) ====================
-#         if state.global_step > 0 and state.global_step % 100 == 0:
-#             if torch.cuda.is_available():
-#                 peak_mem = torch.cuda.max_memory_allocated() / 1e9
-#                 torch.cuda.empty_cache()
-#                 if is_main_process() and state.global_step % 1000 == 0:
-#                     curr_mem = torch.cuda.memory_allocated() / 1e9
-#                     print(f"[MEM] Step {state.global_step} | "
-#                           f"Current: {curr_mem:.2f}GB (Resting) | "
-#                           f"Peak: {peak_mem:.2f}GB (Active)")
-#                 torch.cuda.reset_peak_memory_stats()
-
-#         return control
 
 class FirstTokenCurriculum(TrainerCallback):
     def __init__(
@@ -3125,11 +2563,6 @@ def main():
     p.add_argument("--cache_dir", type=str, default=None)
     p.add_argument("--output_dir", type=str, default="./nl_output")
 
-    # FSDP
-    p.add_argument("--fsdp_enable", action="store_true")
-    p.add_argument("--fsdp_min_num_params", type=int,
-                   default=int(os.environ.get("ACCELERATE_FSDP_MIN_NUM_PARAMS", "100000000")))
-
     # LoRA
     p.add_argument("--use_lora", action="store_true", default=False)
     p.add_argument("--lora_rank", type=int, default=16)
@@ -3345,10 +2778,6 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
 
-    # Disable tie word embeddings for FSDP/LoRA compatibility
-    if args.fsdp_enable and args.use_lora:
-        model.config.tie_word_embeddings = False
-
     if is_main_process():
         attn_impl = getattr(model.config, "_attn_implementation", "unknown")
         print(f"[ATTENTION] Using: {attn_impl}")
@@ -3376,10 +2805,6 @@ def main():
             bias="none",
         )
         model = get_peft_model(model, lora_config)
-
-        if args.fsdp_enable:
-            model = model.to(torch.bfloat16)
-            rank_print("[FSDP] Cast model to bfloat16 for LoRA compatibility")
 
         if args.gradient_checkpointing:
             if hasattr(model, "enable_input_require_grads"):
@@ -3533,9 +2958,6 @@ def main():
             if match:
                 curriculum.last_resume_step = int(match.group(1))
 
-    # FSDP must use original parameters when LoRA is applied
-    fsdp_use_orig = True if args.use_lora else False
-
     # Disable Accelerate batch dispatching for token-budget training
     if args.use_packing:
         os.environ["ACCELERATE_DISPATCH_BATCHES"] = "false"
@@ -3568,20 +2990,6 @@ def main():
         dataloader_pin_memory=True,
 
         seed=args.seed if args.seed is not None else 42,
-        fsdp=(['full_shard', 'auto_wrap'] if args.fsdp_enable else []),
-        fsdp_config=(
-            {
-                "min_num_params": int(args.fsdp_min_num_params),
-                "use_orig_params": fsdp_use_orig,
-                "limit_all_gathers": True,
-                "sync_module_states": True,
-                "offload_to_cpu": False,
-                "state_dict_type": "SHARDED_STATE_DICT",
-                "auto_wrap_policy": "transformer_based_wrap",
-                "backward_prefetch": "backward_pre",
-                "forward_prefetch": True,
-            } if args.fsdp_enable else None
-        ),
         torch_compile=False,
         ddp_find_unused_parameters=False,
         gradient_checkpointing=args.gradient_checkpointing,
@@ -3778,14 +3186,6 @@ def main():
         assert fp_easy == eval_fingerprint_easy, f"Easy eval fingerprint mismatch! {fp_easy} != {eval_fingerprint_easy}"
         rank_print(f"[FINAL-EVAL] Fingerprints verified ✓")
 
-        # Hard eval: alpha=1.0
-        # final_tf_hard = run_eval_teacher_forced_parity(
-        #     trainer.model, tokenizer, args.task, eval_inputs_hard, eval_labels_hard,
-        #     num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-        #     print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
-        # )
-        # rank_print(f"[FINAL-TF-alpha1.0] First={final_tf_hard['first_token_acc']:.2%} | Full={final_tf_hard['full_word_acc']:.2%} | N={final_tf_hard['total']}")
-
         greedy_hard = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
             eval_inputs_hard, eval_labels_hard,
@@ -3794,14 +3194,6 @@ def main():
         )
         rank_print(
             f"[FINAL-GREEDY-alpha1.0] First={greedy_hard['first_token_acc']:.2%} | Full={greedy_hard['full_word_acc']:.2%} | N={greedy_hard['total']}")
-
-        # Easy eval: alpha=base_alpha
-        # final_tf_easy = run_eval_teacher_forced_parity(
-        #     trainer.model, tokenizer, args.task, eval_inputs_easy, eval_labels_easy,
-        #     num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-        #     print_mistakes=0, gc_every=50, **task_kwargs
-        # )
-        # rank_print(f"[FINAL-TF-alpha{args.base_alpha}] First={final_tf_easy['first_token_acc']:.2%} | Full={final_tf_easy['full_word_acc']:.2%} | N={final_tf_easy['total']}")
 
         greedy_easy = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
