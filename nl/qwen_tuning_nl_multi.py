@@ -10,7 +10,6 @@ import math
 import time
 from collections import deque
 from typing import List, Tuple, Dict, Any, Optional, Set
-from contextlib import nullcontext
 import multiprocessing
 
 import numpy as np
@@ -120,25 +119,6 @@ def set_all_seeds(seed: int):
         hf_set_seed(true_seed)
     except Exception:
         pass
-
-
-def apply_rotary_pos_emb(q, k, cos, sin):
-    """Apply rotary position embeddings to q and k."""
-    # q, k: [seq_len, num_heads, head_dim]
-    # cos, sin: [seq_len, head_dim]
-
-    cos = cos.unsqueeze(1)  # [seq_len, 1, head_dim]
-    sin = sin.unsqueeze(1)  # [seq_len, 1, head_dim]
-
-    # Rotate half
-    def rotate_half(x):
-        x1 = x[..., : x.shape[-1] // 2]
-        x2 = x[..., x.shape[-1] // 2:]
-        return torch.cat((-x2, x1), dim=-1)
-
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
 
 
 # ================== Curriculum state persistence ==================
@@ -380,17 +360,6 @@ class SinglePathARDataset(Dataset):
         self._worker_rng: Optional[random.Random] = None
         self._worker_id: Optional[int] = None
 
-        # More precise timing stats
-        self._timing_enabled = True
-        self._timing = {
-            "gen_time": 0.0,
-            "tok_time": 0.0,
-            "total_time": 0.0,
-            "gen_attempts": 0,
-            "samples": 0,
-        }
-        self._last_timing_report = 0
-
         rank_print(
             f"[DATASET] Map-style dataset | epoch_size={self.epoch_size} | store_seen={self._store} cap={self._store_cap}")
 
@@ -458,68 +427,13 @@ class SinglePathARDataset(Dataset):
             self._worker_rng = random.Random(worker_seed)
             self._worker_id = current_worker_id
 
-            # Reset timing for this worker
-            if self._timing_enabled:
-                self._timing = {
-                    "gen_time": 0.0,
-                    "tok_time": 0.0,
-                    "total_time": 0.0,
-                    "gen_attempts": 0,
-                    "samples": 0,
-                }
-
         return self._worker_generator, self._worker_rng
-
-    def _report_timing(self, force: bool = False):
-        """Print timing stats every 500 samples"""
-        if not self._timing_enabled:
-            return
-
-        n = self._timing["samples"]
-        if n == 0:
-            return
-
-        if force or (n - self._last_timing_report >= 500):
-            self._last_timing_report = n
-
-            gen_ms = (self._timing["gen_time"] / n) * 1000
-            tok_ms = (self._timing["tok_time"] / n) * 1000
-            total_ms = (self._timing["total_time"] / n) * 1000
-            overhead_ms = total_ms - gen_ms - tok_ms
-            attempts_per_sample = self._timing["gen_attempts"] / n
-
-            worker_info = torch.utils.data.get_worker_info()
-            worker_id = worker_info.id if worker_info else 0
-
-            print(
-                f"[DATASET-TIMING] Worker {worker_id} | "
-                f"n={n} | "
-                f"gen={gen_ms:.2f}ms | "
-                f"tok={tok_ms:.2f}ms | "
-                f"overhead={overhead_ms:.2f}ms | "
-                f"total={total_ms:.2f}ms/sample | "
-                f"attempts={attempts_per_sample:.1f}/sample"
-            )
 
     def __getitem__(self, idx):
         """
         Generate sample on-demand for given index.
         Index is used to vary the seed for diversity across samples.
         """
-
-        t_start = time.perf_counter()
-
-        # # Build unique seed for this sample
-        # rank = get_rank()
-        # worker = torch.utils.data.get_worker_info()
-        # worker_id = worker.id if worker is not None else 0
-
-        # # Unique seed per sample: base_seed + rank_offset + worker_offset + index
-        # sample_seed = (self.seed or 0) + rank * 9973 + worker_id * 997 + idx
-        # rng = random.Random(sample_seed)
-
-        # # Create generator for this sample
-        # gen = NaturalLanguageGraphGenerator(self.max_input_size, seed=sample_seed)
 
         gen, rng = self._get_worker_state()
 
@@ -529,8 +443,6 @@ class SinglePathARDataset(Dataset):
         # base_seed = (self.seed or 0) + rank * 9973 + worker_id * 997 + idx
 
         # Try to generate a valid sample (up to 500 attempts)
-        t_gen_start = time.perf_counter()
-
         max_attempts = 500
         attempts = 0
         ex = None
@@ -550,14 +462,11 @@ class SinglePathARDataset(Dataset):
                 if candidate.input_text not in self.reserved_inputs:
                     ex = candidate
 
-        t_gen_end = time.perf_counter()
         if ex is None:
             raise RuntimeError(
                 f"[DATASET] Failed to generate valid sample after {max_attempts} attempts. "
                 f"Stage {self.stage}, alpha={alpha:.2f}, idx={idx}."
             )
-
-        t_tok_start = time.perf_counter()
 
         # Build prompt with few-shot examples
         shots = self._shots_prefix()
@@ -590,16 +499,6 @@ class SinglePathARDataset(Dataset):
             if _tokenize_leading_space(self.tokenizer, a)
         })
 
-        t_tok_end = time.perf_counter()
-
-        if self._timing_enabled:
-            self._timing["gen_time"] += (t_gen_end - t_gen_start)
-            self._timing["tok_time"] += (t_tok_end - t_tok_start)
-            self._timing["total_time"] += (t_tok_end - t_start)
-            self._timing["gen_attempts"] += attempts
-            self._timing["samples"] += 1
-            self._report_timing()
-
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -620,7 +519,7 @@ class PackedSequenceDataset(IterableDataset):
             task: str,
             tokenizer,
             pack_length: int = 4096,
-            batch_size: int = 8,
+            target_samples_per_batch: int = 64,
             stage: int = 1,
             n_stages: int = 10,
             base_alpha: float = 0.1,
@@ -643,7 +542,7 @@ class PackedSequenceDataset(IterableDataset):
         self.task = task
         self.tokenizer = tokenizer
         self.pack_length = pack_length
-        self.batch_size = batch_size
+        self.target_samples_per_batch = target_samples_per_batch
         self._stage = multiprocessing.Value('i', stage)
         self.n_stages = n_stages
         self.base_alpha = base_alpha
@@ -671,21 +570,7 @@ class PackedSequenceDataset(IterableDataset):
 
         self.few_shot_examples = self._build_few_shots(num_shots, seed)
 
-        # Timing stats
-        self._timing_enabled = True
-        self._timing = {
-            "gen_time": 0.0,
-            "tok_time": 0.0,
-            "pack_time": 0.0,
-            "total_time": 0.0,
-            "samples": 0,
-            "batches": 0,
-            "tokens_actual": 0,
-            "tokens_total": 0,
-        }
-        self._last_timing_report = 0
-
-        rank_print(f"[DATASET] Packed mode | pack_length={pack_length} | batch_size={batch_size}")
+        rank_print(f"[DATASET] Packed mode | pack_length={pack_length} | target_samples={target_samples_per_batch}")
 
     @property
     def stage(self):
@@ -741,58 +626,10 @@ class PackedSequenceDataset(IterableDataset):
             self._worker_rng = random.Random(worker_seed)
             self._worker_id = current_worker_id
 
-            if self._timing_enabled:
-                self._timing = {
-                    "gen_time": 0.0,
-                    "tok_time": 0.0,
-                    "pack_time": 0.0,
-                    "total_time": 0.0,
-                    "samples": 0,
-                    "batches": 0,
-                    "tokens_actual": 0,
-                    "tokens_total": 0,
-                }
-
         return self._worker_generator, self._worker_rng
-
-    def _report_timing(self, force: bool = False):
-        if not self._timing_enabled:
-            return
-
-        n_samples = self._timing["samples"]
-        n_batches = self._timing["batches"]
-        if n_samples == 0 or n_batches == 0:
-            return
-
-        if force or (n_batches - self._last_timing_report >= 50):
-            self._last_timing_report = n_batches
-
-            gen_ms = (self._timing["gen_time"] / n_samples) * 1000
-            tok_ms = (self._timing["tok_time"] / n_samples) * 1000
-            pack_ms = (self._timing["pack_time"] / n_batches) * 1000
-            total_ms = (self._timing["total_time"] / n_batches) * 1000
-            avg_samples_per_batch = n_samples / n_batches
-
-            tokens_actual = self._timing["tokens_actual"]
-            tokens_total = self._timing["tokens_total"]
-            efficiency = (tokens_actual / tokens_total * 100) if tokens_total > 0 else 100
-
-            worker_info = torch.utils.data.get_worker_info()
-            worker_id = worker_info.id if worker_info else 0
-
-            print(
-                f"[PACKED-TIMING] Worker {worker_id} | "
-                f"batches={n_batches} | "
-                f"samples/batch={avg_samples_per_batch:.1f} | "
-                f"gen={gen_ms:.2f}ms | tok={tok_ms:.2f}ms | "
-                f"pack={pack_ms:.2f}ms | total={total_ms:.2f}ms/batch | "
-                f"packing_eff={efficiency:.1f}%"
-            )
 
     def _generate_one_sample(self) -> Optional[Dict[str, Any]]:
         """Generate a single tokenized sample."""
-        t_gen_start = time.perf_counter()
-
         gen, rng = self._get_worker_state()
         alpha = self._stage_alpha()
 
@@ -809,12 +646,8 @@ class PackedSequenceDataset(IterableDataset):
                     ex = candidate
                     break
 
-        t_gen_end = time.perf_counter()
-
         if ex is None:
             return None
-
-        t_tok_start = time.perf_counter()
 
         shots = self._shots_prefix()
         prompt_text = (shots + ex.input_text) if shots else ex.input_text
@@ -834,17 +667,10 @@ class PackedSequenceDataset(IterableDataset):
             if _tokenize_leading_space(self.tokenizer, a)
         })
 
-        t_tok_end = time.perf_counter()
-
         # Store for seen eval
         if self._store and len(self._seen_inputs) < self._store_cap:
             self._seen_inputs.append(ex.input_text)
             self._seen_labels.append(list(ex.output_texts))
-
-        if self._timing_enabled:
-            self._timing["gen_time"] += (t_gen_end - t_gen_start)
-            self._timing["tok_time"] += (t_tok_end - t_tok_start)
-            self._timing["samples"] += 1
 
         return {
             "input_ids": input_ids,
@@ -864,8 +690,6 @@ class PackedSequenceDataset(IterableDataset):
         Returns:
             Batch dict with concatenated tokens and cu_seqlens
         """
-        t_pack_start = time.perf_counter()
-
         batch_input_ids = []
         batch_labels = []
         batch_position_ids = []
@@ -925,23 +749,6 @@ class PackedSequenceDataset(IterableDataset):
             batch_cu_seqlens.append(cu_seqlens)
             batch_max_seqlen.append(max(s["seq_len"] for s in row_samples) if row_samples else 0)
 
-        t_pack_end = time.perf_counter()
-
-        if self._timing_enabled:
-            self._timing["pack_time"] += (t_pack_end - t_pack_start)
-            self._timing["tokens_actual"] += total_actual_tokens
-            self._timing["tokens_total"] += total_tokens
-            self._timing["batches"] += 1
-
-        # Convert cu_seqlens to padded tensor
-        max_num_seqs = max(len(cu) for cu in batch_cu_seqlens)
-        padded_cu_seqlens = []
-        cu_seqlens_mask = []
-        for cu in batch_cu_seqlens:
-            pad_len = max_num_seqs - len(cu)
-            padded_cu_seqlens.append(cu + [cu[-1]] * pad_len)  # Repeat last value
-            cu_seqlens_mask.append([1] * len(cu) + [0] * pad_len)
-
         return {
             "input_ids": torch.tensor(batch_input_ids, dtype=torch.long),
             "labels": torch.tensor(batch_labels, dtype=torch.long),
@@ -954,48 +761,44 @@ class PackedSequenceDataset(IterableDataset):
         }
 
     def __iter__(self):
-        """Yield packed batches."""
+        """Yield batches with exactly target_samples_per_batch samples."""
+        target_samples = self.target_samples_per_batch
 
         while True:
-            t_batch_start = time.perf_counter()
-
             all_rows = []
+            total_samples = 0
+            row_samples = []
+            row_len = 0
 
-            for _ in range(self.batch_size):
-                row_samples = []
-                row_len = 0
+            # Keep generating until we hit target sample count
+            while total_samples < target_samples:
+                sample = self._generate_one_sample()
+                if sample is None:
+                    continue
 
-                # Fill one row up to pack_length
-                while row_len < self.pack_length - 50:  # Leave small buffer
-                    sample = self._generate_one_sample()
-                    if sample is None:
-                        continue
+                if sample["seq_len"] > self.pack_length:
+                    print(f"[WARN] Skipping sequence of length {sample['seq_len']} > pack_length {self.pack_length}")
+                    continue
 
-                    # Skip sequences that are too long
-                    if sample["seq_len"] > self.pack_length:
-                        print(f"[WARN] Skipping sequence of length {len(input_ids)} > pack_length {self.pack_length}")
-                        continue
+                # Check if sample fits in current row
+                if row_len + sample["seq_len"] > self.pack_length:
+                    # Finalize current row if it has samples
+                    if row_samples:
+                        all_rows.append(row_samples)
+                        row_samples = []
+                        row_len = 0
 
-                    # Check if it fits
-                    if row_len + sample["seq_len"] > self.pack_length:
-                        if row_samples:
-                            break  # Row full
-                        continue  # Empty row, skip this sample
+                # Add sample to current row
+                row_samples.append(sample)
+                row_len += sample["seq_len"]
+                total_samples += 1
 
-                    row_samples.append(sample)
-                    row_len += sample["seq_len"]
-
-                if row_samples:
-                    all_rows.append(row_samples)
+            # Finalize last row
+            if row_samples:
+                all_rows.append(row_samples)
 
             if all_rows:
                 batch = self._pack_batch(all_rows)
-
-                t_batch_end = time.perf_counter()
-                if self._timing_enabled:
-                    self._timing["total_time"] += (t_batch_end - t_batch_start)
-                    self._report_timing()
-
                 yield batch
 
 
@@ -1099,7 +902,6 @@ class PackedSequenceTrainer(Trainer):
 
         seq_len, hidden_dim = hidden_states.shape
         device = hidden_states.device
-        dtype = hidden_states.dtype
 
         residual = hidden_states
         hidden_states = layer.input_layernorm(hidden_states)
@@ -1178,25 +980,6 @@ class PackedSequenceTrainer(Trainer):
         return torch.cat((-x2, x1), dim=-1)
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        # === DEBUG: Compare native vs manual forward ===
-        if self._train_timing["steps"] == 0 and is_main_process():
-            with torch.no_grad():
-                # Native forward on first row
-                test_ids = inputs["input_ids"][:1, :100]
-                test_pos = inputs["position_ids"][:1, :100]
-                test_mask = torch.ones_like(test_ids)
-
-                native_out = model(
-                    input_ids=test_ids,
-                    attention_mask=test_mask,
-                    position_ids=test_pos,
-                    use_cache=False,
-                )
-                native_logits = native_out.logits[0, -1, :10]
-                print(f"[DEBUG] Native logits sample: {native_logits}")
-                print(
-                    f"[DEBUG] Native logits range: min={native_out.logits.min():.2f}, max={native_out.logits.max():.2f}")
-
         # Extract metadata
         sequence_info = inputs.pop("sequence_info")
         num_sequences = inputs.pop("num_sequences")
@@ -1214,24 +997,6 @@ class PackedSequenceTrainer(Trainer):
 
         B, T = input_ids.shape
         device = input_ids.device
-
-        # === DEBUG: Compare native vs manual forward ===
-        if self._train_timing["steps"] == 0 and is_main_process():
-            with torch.no_grad():
-                # Take first 200 tokens from first row
-                test_len = min(200, cu_seqlens_list[0][-1] if cu_seqlens_list[0] else 200)
-                test_ids = input_ids[:1, :test_len]
-                test_pos = position_ids[:1, :test_len]
-
-                # Native forward
-                native_out = model(
-                    input_ids=test_ids,
-                    attention_mask=torch.ones_like(test_ids),
-                    position_ids=test_pos,
-                    use_cache=False,
-                )
-                print(f"[DEBUG] Native logits[-1, :5]: {native_out.logits[0, -1, :5].tolist()}")
-                print(f"[DEBUG] Native logits range: {native_out.logits.min():.2f} to {native_out.logits.max():.2f}")
 
         use_checkpoint = getattr(self.args, 'gradient_checkpointing', False)
 
@@ -1298,37 +1063,6 @@ class PackedSequenceTrainer(Trainer):
 
             h = norm(h)  # [actual_len, H]
             logits = lm_head(h)  # [actual_len, V]
-
-            # === DEBUG: Check manual forward output ===
-            if row_idx == 0 and self._train_timing["steps"] == 0 and is_main_process():
-                print(f"[DEBUG] Manual logits[-1, :5]: {logits[-1, :5].tolist()}")
-                print(f"[DEBUG] Manual logits range: {logits.min():.2f} to {logits.max():.2f}")
-
-                # Compare with native at same position
-                test_len = min(200, logits.size(0))
-                print(f"[DEBUG] Comparing first {test_len} positions...")
-
-                # The difference should be small if forward is correct
-                with torch.no_grad():
-                    test_ids = input_ids[:1, :test_len]
-                    test_pos = position_ids[:1, :test_len]
-                    native_out = model(
-                        input_ids=test_ids,
-                        attention_mask=torch.ones_like(test_ids),
-                        position_ids=test_pos,
-                        use_cache=False,
-                    )
-                    native_logits = native_out.logits[0]  # [test_len, V]
-                    manual_logits = logits[:test_len]  # [test_len, V]
-
-                    diff = (native_logits - manual_logits).abs()
-                    print(f"[DEBUG] Logits diff: mean={diff.mean():.4f}, max={diff.max():.4f}")
-
-                    if diff.max() > 1.0:
-                        print("[DEBUG] ⚠️ LARGE DIFFERENCE - Manual forward is broken!")
-                    else:
-                        print("[DEBUG] ✓ Manual forward matches native")
-            # === END DEBUG ===
 
             # Compute loss for this row
             shift_logits = logits[:-1, :]  # [actual_len-1, V]
@@ -1422,10 +1156,6 @@ def make_collate(tokenizer, pad_to_multiple_of=64):
         pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         raw_max_len = max(len(f["input_ids"]) for f in features)
 
-        # if random.random() < 0.1:  # Log 1% of batches
-        #     lengths = [len(f["input_ids"]) for f in features]
-        #     print(f"[COLLATE] Batch lengths: min={min(lengths)}, max={max(lengths)}, mean={sum(lengths)/len(lengths):.0f}")
-
         # Round up to the nearest multiple of 64 to stabilize shapes for torch.compile
         # e.g., 100 -> 128, 129 -> 192
         if pad_to_multiple_of is not None and pad_to_multiple_of > 0:
@@ -1494,8 +1224,6 @@ class SinglePathARTrainer(Trainer):
         self._train_timing = {
             "data_wait": 0.0,  # Time waiting for DataLoader
             "forward": 0.0,  # Forward pass
-            "backward": 0.0,  # Backward pass
-            "optimizer": 0.0,  # Optimizer step
             "total_step": 0.0,  # Total step time
             "steps": 0,
         }
@@ -1564,8 +1292,6 @@ class SinglePathARTrainer(Trainer):
         self._train_timing = {
             "data_wait": 0.0,
             "forward": 0.0,
-            "backward": 0.0,
-            "optimizer": 0.0,
             "total_step": 0.0,
             "steps": 0,
         }
@@ -1836,55 +1562,6 @@ class SinglePathARTrainer(Trainer):
             return dataloader
         else:
             return super().get_train_dataloader()
-
-
-class TimingSummaryCallback(TrainerCallback):
-    """Periodic summary of where time is being spent"""
-
-    def __init__(self, dataset: SinglePathARDataset, report_every: int = 500):
-        self.dataset = dataset
-        self.report_every = report_every
-        self.trainer: Optional[SinglePathARTrainer] = None
-        self._last_step = 0
-        self._wall_start = None
-
-    def reset(self):
-        """Reset for new stage"""
-        self._wall_start = time.perf_counter()
-        self._last_step = 0
-
-    def on_train_begin(self, args, state, control, **kwargs):
-        self._wall_start = time.perf_counter()
-        return control
-
-    def on_step_end(self, args, state, control, **kwargs):
-        if state.global_step - self._last_step < self.report_every:
-            return control
-
-        self._last_step = state.global_step
-
-        if not is_main_process():
-            return control
-
-        # Wall clock time
-        wall_elapsed = time.perf_counter() - self._wall_start if self._wall_start else 0
-
-        # Get trainer timing
-        trainer = self.trainer
-        if trainer and hasattr(trainer, '_train_timing'):
-            tt = trainer._train_timing
-            n = tt["steps"]
-            if n > 0:
-                data_pct = (tt["data_wait"] / (tt["data_wait"] + tt["total_step"])) * 100 if tt["total_step"] > 0 else 0
-
-                print("\n" + "=" * 70)
-                print(f"[TIMING SUMMARY] Step {state.global_step} | Wall time: {wall_elapsed / 60:.1f}min")
-                print(f"  DataLoader wait: {tt['data_wait']:.1f}s total ({data_pct:.1f}% of time)")
-                print(f"  Training steps:  {tt['total_step']:.1f}s total ({100 - data_pct:.1f}% of time)")
-                print(f"  Avg step time:   {tt['total_step'] / n * 1000:.1f}ms (excl. data wait)")
-                print("=" * 70 + "\n")
-
-        return control
 
 
 # ================== Eval helpers ==================
@@ -2188,6 +1865,7 @@ class FirstTokenCurriculum(TrainerCallback):
             # Time in current stage
             stage_time_str = "0m"
             samples_per_sec = 0.0
+            tokens_per_sec = 0.0
 
             if self.stage_start_time:
                 stage_time = (current_time - self.stage_start_time).total_seconds()
@@ -2197,6 +1875,8 @@ class FirstTokenCurriculum(TrainerCallback):
                     # Use actual tracked samples
                     if stage_time > 0 and self.samples_this_stage > 0:
                         samples_per_sec = self.samples_this_stage / stage_time
+                    if stage_time > 0 and self.tokens_this_stage > 0:
+                        tokens_per_sec = self.tokens_this_stage / stage_time
                 else:
                     # Fixed batch size mode
                     steps_in_stage = state.global_step - self.stage_start_step
@@ -2225,10 +1905,13 @@ class FirstTokenCurriculum(TrainerCallback):
                 if eff is not None:
                     extra_info += f" | eff={eff:.1f}%"
 
+            # Format tokens/s with K suffix for readability
+            tokens_per_sec_str = f"{tokens_per_sec / 1000:.1f}K" if tokens_per_sec >= 1000 else f"{tokens_per_sec:.0f}"
+
             print(f"[Stage {self.dataset.stage}/{self.n_stages}] step {state.global_step} | "
                   f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
                   f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
-                  f"Speed={samples_per_sec:.1f} samples/s | "
+                  f"Speed={samples_per_sec:.1f} samples/s ({tokens_per_sec_str} toks/s) | "
                   f"Stage time={stage_time_str}{extra_info}{warmup_msg}")
             self._last_log = state.global_step
 
@@ -2623,7 +2306,8 @@ def main():
     p.add_argument("--resume_from_job", type=str, default=None)
 
     # Liger kernels
-    p.add_argument("--use_liger", action="store_true", help="Use Liger kernel for memory-efficient training")
+    p.add_argument("--use_liger", default=True, action="store_true",
+                   help="Use Liger kernel for memory-efficient training")
 
     # Chunked cross-entropy
     p.add_argument("--use_chunked_ce", action="store_true", help="Use chunked cross-entropy for memory efficiency")
@@ -2634,31 +2318,11 @@ def main():
                    help="Use sequence packing for efficiency")
     p.add_argument("--pack_length", type=int, default=4096,
                    help="Fixed length for packed rows")
-    p.add_argument("--pack_batch_size", type=int, default=8,
-                   help="Number of packed rows per batch")
+    p.add_argument("--target_samples_per_batch", type=int, default=64,
+                   help="Fixed number of samples per training step")
 
     global args
     args = p.parse_args()
-
-    # Check local config first to override args
-    if not args.use_packing:
-        cfg_candidate = None
-        if os.path.isfile(os.path.join(args.output_dir, "run_config.json")):
-            cfg_candidate = os.path.join(args.output_dir, "run_config.json")
-        elif args.resume_from_job:
-            prev = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}",
-                                "run_config.json")
-            if os.path.isfile(prev): cfg_candidate = prev
-
-        if cfg_candidate:
-            try:
-                with open(cfg_candidate) as f:
-                    rc = json.load(f)
-                    args.batch_size = int(rc["batch_size"])
-                    args.gradient_accumulation_steps = int(rc["grad_acc"])
-                    if is_main_process(): print(f"[CONFIG] Loaded override from {cfg_candidate}: BS={args.batch_size}")
-            except:
-                pass
 
     # Initialize distributed if needed
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -2887,12 +2551,12 @@ def main():
     # ---------------- Training dataset ----------------
     if args.use_packing:
         rank_print(
-            f"[DATASET] Using PackedSequenceDataset (pack_length={args.pack_length}, batch_size={args.pack_batch_size})")
+            f"[DATASET] Using PackedSequenceDataset (pack_length={args.pack_length}, target_samples={args.target_samples_per_batch})")
         dataset = PackedSequenceDataset(
             task=args.task,
             tokenizer=tokenizer,
             pack_length=args.pack_length,
-            batch_size=args.pack_batch_size,
+            target_samples_per_batch=args.target_samples_per_batch,
             stage=1,
             n_stages=args.n_stages,
             base_alpha=args.base_alpha,
@@ -2990,7 +2654,11 @@ def main():
         dataloader_pin_memory=True,
 
         seed=args.seed if args.seed is not None else 42,
+
         torch_compile=False,
+        torch_compile_backend="inductor",  # default
+        torch_compile_mode="reduce-overhead",  # optional
+
         ddp_find_unused_parameters=False,
         gradient_checkpointing=args.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False} if args.gradient_checkpointing else None,
@@ -3038,8 +2706,6 @@ def main():
         skip_baseline=(not args.do_baseline) or (resume_ckpt is not None)
     )
 
-    timing_cb = TimingSummaryCallback(dataset, report_every=100)
-
     if args.use_packing:
         trainer = PackedSequenceTrainer(
             model=model,
@@ -3047,7 +2713,7 @@ def main():
             train_dataset=dataset,
             tokenizer=tokenizer,
             data_collator=data_collator,
-            callbacks=[curriculum, baseline_cb, timing_cb],
+            callbacks=[curriculum, baseline_cb],
             first_token_soft_weight=args.first_token_soft_weight,
         )
     else:
@@ -3057,7 +2723,7 @@ def main():
             train_dataset=dataset,
             tokenizer=tokenizer,
             data_collator=data_collator,
-            callbacks=[curriculum, baseline_cb, timing_cb],
+            callbacks=[curriculum, baseline_cb],
             first_token_soft_weight=args.first_token_soft_weight,
             use_chunked_ce=args.use_chunked_ce,
             ce_chunk_size=args.ce_chunk_size,
@@ -3065,7 +2731,6 @@ def main():
         )
     curriculum.trainer = trainer
     baseline_cb.trainer = trainer
-    timing_cb.trainer = trainer
 
     if not resume_ckpt:
         if is_main_process():

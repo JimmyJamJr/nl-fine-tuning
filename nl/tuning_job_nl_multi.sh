@@ -181,7 +181,7 @@ ARGS=(
 
     --use_packing
     --pack_length 16384
-    --pack_batch_size 16
+    --target_samples_per_batch 48
 )
 
 # Conditional flags
