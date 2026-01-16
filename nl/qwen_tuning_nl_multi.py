@@ -541,12 +541,6 @@ class SinglePathARDataset(Dataset):
                     break
         return out[:k]
 
-    def _stage_alpha(self) -> float:
-        """Calculate alpha for current curriculum stage"""
-        if self.stage >= self.n_stages:
-            return self.max_alpha
-        return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
-
     def _stage_target_lookahead(self) -> Optional[int]:
         """Get target lookahead for current stage (search task with linear_lookahead only)."""
         if not (self.linear_lookahead and self.task == "search"):
@@ -684,10 +678,11 @@ class SinglePathARDataset(Dataset):
         }
 
 
-class PackedSequenceDataset(IterableDataset):
+class PackedSequenceDataset(Dataset):
     """
-    Packs multiple sequences into fixed-length rows for ~95% efficiency.
-    Uses Flash Attention's cu_seqlens for efficient variable-length attention.
+    Map-style dataset for packed sequences.
+    Each __getitem__ returns one fully packed batch.
+    Enables multi-worker prefetching for better performance.
     """
 
     def __init__(
@@ -710,6 +705,7 @@ class PackedSequenceDataset(IterableDataset):
             resume_step: int = 0,
             store_examples: bool = False,
             store_cap: int = 1000,
+            epoch_size: int = 10_000_000,  # Large enough to never cycle
             **task_kwargs,
     ):
         if not FLASH_ATTN_AVAILABLE:
@@ -735,24 +731,27 @@ class PackedSequenceDataset(IterableDataset):
         self.seed = seed
         self.resume_step = resume_step
         self.task_kwargs = task_kwargs
+        self.epoch_size = epoch_size
 
         self.eos_token_id = tokenizer.eos_token_id
         self.pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
 
-        # Storage for seen samples
+        # Storage for seen samples (thread-safe for multi-worker)
         self._store = bool(store_examples)
         self._store_cap = int(store_cap)
         self._seen_inputs: deque = deque(maxlen=self._store_cap)
         self._seen_labels: deque = deque(maxlen=self._store_cap)
+        self._seen_lock = multiprocessing.Lock() if store_examples else None
 
-        # Per-worker state
+        # Per-worker state (lazily initialized)
         self._worker_generator = None
         self._worker_rng = None
         self._worker_id = None
 
         self.few_shot_examples = self._build_few_shots(num_shots, seed)
 
-        rank_print(f"[DATASET] Packed mode | pack_length={pack_length} | target_samples={target_samples_per_batch}")
+        rank_print(f"[DATASET] Packed Map-style | pack_length={pack_length} | "
+                   f"target_samples={target_samples_per_batch} | epoch_size={epoch_size}")
 
     @property
     def stage(self):
@@ -762,19 +761,20 @@ class PackedSequenceDataset(IterableDataset):
     def stage(self, value):
         self._stage.value = value
 
-    def get_seen_samples(self) -> Tuple[List[str], List[List[str]]]:
-        return list(self._seen_inputs), list(self._seen_labels)
+    def __len__(self):
+        return self.epoch_size
 
-    def _stage_alpha(self) -> float:
-        if self.stage >= self.n_stages:
-            return self.max_alpha
-        return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+    def get_seen_samples(self) -> Tuple[List[str], List[List[str]]]:
+        """Return stored training samples (thread-safe)."""
+        if self._seen_lock:
+            with self._seen_lock:
+                return list(self._seen_inputs), list(self._seen_labels)
+        return list(self._seen_inputs), list(self._seen_labels)
 
     def _stage_target_lookahead(self) -> Optional[int]:
         """Get target lookahead for current stage (search task with linear_lookahead only)."""
         if not (self.linear_lookahead and self.task == "search"):
             return None
-
         max_L = self.task_kwargs.get("max_lookahead", 12)
         target_L = self.base_lookahead + (self.stage - 1) * self.lookahead_step
         return min(target_L, max_L)
@@ -785,7 +785,6 @@ class PackedSequenceDataset(IterableDataset):
             target_L = self._stage_target_lookahead()
             return alpha_for_lookahead(target_L, self.max_input_size)
         else:
-            # Original alpha-based curriculum
             if self.stage >= self.n_stages:
                 return self.max_alpha
             return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
@@ -800,6 +799,7 @@ class PackedSequenceDataset(IterableDataset):
             return self.stage >= self.n_stages
 
     def _build_few_shots(self, k: int, seed: Optional[int]):
+        """Build few-shot examples for prompting."""
         if k <= 0:
             return []
         fs_seed = (seed or 0) + 12345
@@ -814,6 +814,7 @@ class PackedSequenceDataset(IterableDataset):
         return out[:k]
 
     def _shots_prefix(self) -> str:
+        """Build few-shot prefix for prompts."""
         if not self.few_shot_examples:
             return ""
         parts = []
@@ -822,10 +823,15 @@ class PackedSequenceDataset(IterableDataset):
             parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
         return "\n\n".join(parts) + ("\n\n" if parts else "")
 
-    def _get_worker_state(self):
+    def _get_worker_state(self, idx: int):
+        """
+        Lazily initialize per-worker generator and RNG.
+        Seeds are unique per (worker, idx, resume_step) to avoid duplicates.
+        """
         worker_info = torch.utils.data.get_worker_info()
         current_worker_id = worker_info.id if worker_info else 0
 
+        # Initialize generator once per worker
         if self._worker_generator is None or self._worker_id != current_worker_id:
             rank = get_rank()
             worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919 + self.resume_step * 13
@@ -837,11 +843,20 @@ class PackedSequenceDataset(IterableDataset):
             self._worker_rng = random.Random(worker_seed)
             self._worker_id = current_worker_id
 
+        # Reseed RNG for this specific batch
+        # Includes resume_step to avoid repeating samples after checkpoint resume
+        batch_seed = ((self.seed or 0) +
+                      idx * 104729 +
+                      self._worker_id * 7919 +
+                      self.resume_step * 31337 +
+                      get_rank() * 999983)
+        self._worker_rng.seed(batch_seed)
+
         return self._worker_generator, self._worker_rng
 
-    def _generate_one_sample(self) -> Optional[Dict[str, Any]]:
+    def _generate_one_sample(self, rng: random.Random) -> Optional[Dict[str, Any]]:
         """Generate a single tokenized sample."""
-        gen, rng = self._get_worker_state()
+        gen = self._worker_generator
         alpha = self._stage_alpha()
 
         ex = None
@@ -878,10 +893,16 @@ class PackedSequenceDataset(IterableDataset):
             if _tokenize_leading_space(self.tokenizer, a)
         })
 
-        # Store for seen eval
+        # Store for seen eval (thread-safe)
         if self._store and len(self._seen_inputs) < self._store_cap:
-            self._seen_inputs.append(ex.input_text)
-            self._seen_labels.append(list(ex.output_texts))
+            if self._seen_lock:
+                with self._seen_lock:
+                    if len(self._seen_inputs) < self._store_cap:
+                        self._seen_inputs.append(ex.input_text)
+                        self._seen_labels.append(list(ex.output_texts))
+            else:
+                self._seen_inputs.append(ex.input_text)
+                self._seen_labels.append(list(ex.output_texts))
 
         return {
             "input_ids": input_ids,
@@ -904,19 +925,18 @@ class PackedSequenceDataset(IterableDataset):
         batch_input_ids = []
         batch_labels = []
         batch_position_ids = []
-        batch_cu_seqlens = []  # One per row
-        batch_max_seqlen = []  # One per row
+        batch_cu_seqlens = []
+        batch_max_seqlen = []
         all_sequence_info = []
 
         total_actual_tokens = 0
         total_tokens = 0
 
         for row_idx, row_samples in enumerate(all_samples):
-            # Concatenate all sequences in this row (no padding between sequences!)
             row_input_ids = []
             row_labels = []
             row_position_ids = []
-            cu_seqlens = [0]  # Cumulative sequence lengths
+            cu_seqlens = [0]
 
             current_pos = 0
             for sample in row_samples:
@@ -924,14 +944,14 @@ class PackedSequenceDataset(IterableDataset):
 
                 row_input_ids.extend(sample["input_ids"])
                 row_labels.extend(sample["labels"])
-                row_position_ids.extend(range(seq_len))  # Reset positions per sequence
+                row_position_ids.extend(range(seq_len))
 
                 current_pos += seq_len
                 cu_seqlens.append(current_pos)
 
                 all_sequence_info.append({
                     "row_idx": row_idx,
-                    "start_idx": cu_seqlens[-2],  # Start in concatenated row
+                    "start_idx": cu_seqlens[-2],
                     "end_idx": cu_seqlens[-1],
                     "prompt_len": sample["prompt_len"],
                     "valid_first_targets": sample["valid_first_targets"],
@@ -940,14 +960,14 @@ class PackedSequenceDataset(IterableDataset):
             actual_len = len(row_input_ids)
             total_actual_tokens += actual_len
 
-            # Pad row to pack_length for consistent batch tensor shape
+            # Pad row to pack_length
             pad_len = self.pack_length - actual_len
             if pad_len > 0:
                 row_input_ids.extend([self.pad_token_id] * pad_len)
                 row_labels.extend([-100] * pad_len)
                 row_position_ids.extend([0] * pad_len)
             elif pad_len < 0:
-                # Truncate if somehow too long (shouldn't happen with proper packing)
+                # Truncate if somehow too long
                 row_input_ids = row_input_ids[:self.pack_length]
                 row_labels = row_labels[:self.pack_length]
                 row_position_ids = row_position_ids[:self.pack_length]
@@ -964,53 +984,69 @@ class PackedSequenceDataset(IterableDataset):
             "input_ids": torch.tensor(batch_input_ids, dtype=torch.long),
             "labels": torch.tensor(batch_labels, dtype=torch.long),
             "position_ids": torch.tensor(batch_position_ids, dtype=torch.long),
-            "cu_seqlens_list": batch_cu_seqlens,  # Keep as list for per-row processing
+            "cu_seqlens_list": batch_cu_seqlens,
             "max_seqlen_list": batch_max_seqlen,
             "sequence_info": all_sequence_info,
             "num_sequences": sum(len(row) for row in all_samples),
             "_efficiency": (total_actual_tokens / total_tokens * 100) if total_tokens > 0 else 100,
         }
 
-    def __iter__(self):
-        """Yield batches with exactly target_samples_per_batch samples."""
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """
+        Generate one fully packed batch.
+
+        Each call generates target_samples_per_batch samples and packs them
+        into rows of pack_length tokens.
+        """
+        gen, rng = self._get_worker_state(idx)
+
         target_samples = self.target_samples_per_batch
 
-        while True:
-            all_rows = []
-            total_samples = 0
-            row_samples = []
-            row_len = 0
+        all_rows = []
+        total_samples = 0
+        row_samples = []
+        row_len = 0
 
-            # Keep generating until we hit target sample count
-            while total_samples < target_samples:
-                sample = self._generate_one_sample()
-                if sample is None:
-                    continue
+        # Generate samples until we hit target count
+        max_attempts = target_samples * 10
+        attempts = 0
 
-                if sample["seq_len"] > self.pack_length:
-                    print(f"[WARN] Skipping sequence of length {sample['seq_len']} > pack_length {self.pack_length}")
-                    continue
+        while total_samples < target_samples and attempts < max_attempts:
+            attempts += 1
+            sample = self._generate_one_sample(rng)
 
-                # Check if sample fits in current row
-                if row_len + sample["seq_len"] > self.pack_length:
-                    # Finalize current row if it has samples
-                    if row_samples:
-                        all_rows.append(row_samples)
-                        row_samples = []
-                        row_len = 0
+            if sample is None:
+                continue
 
-                # Add sample to current row
-                row_samples.append(sample)
-                row_len += sample["seq_len"]
-                total_samples += 1
+            # Skip sequences too long for pack_length
+            if sample["seq_len"] > self.pack_length:
+                continue
 
-            # Finalize last row
-            if row_samples:
-                all_rows.append(row_samples)
+            # Check if sample fits in current row
+            if row_len + sample["seq_len"] > self.pack_length:
+                # Finalize current row
+                if row_samples:
+                    all_rows.append(row_samples)
+                    row_samples = []
+                    row_len = 0
 
-            if all_rows:
-                batch = self._pack_batch(all_rows)
-                yield batch
+            # Add sample to current row
+            row_samples.append(sample)
+            row_len += sample["seq_len"]
+            total_samples += 1
+
+        # Finalize last row
+        if row_samples:
+            all_rows.append(row_samples)
+
+        # Handle edge case: no samples generated
+        if not all_rows:
+            raise RuntimeError(
+                f"[DATASET] Failed to generate any samples for idx={idx}. "
+                f"Stage={self.stage}, alpha={self._stage_alpha():.3f}"
+            )
+
+        return self._pack_batch(all_rows)
 
 
 class PackedSequenceTrainer(Trainer):
@@ -1053,9 +1089,12 @@ class PackedSequenceTrainer(Trainer):
         return DataLoader(
             self.train_dataset,
             batch_size=1,
-            collate_fn=lambda x: x[0],
-            num_workers=0,
+            shuffle=False,  # idx provides randomness via seeding
+            collate_fn=lambda x: x[0],  # Unwrap single-item batch
+            num_workers=4,
+            prefetch_factor=2,
             pin_memory=True,
+            persistent_workers=True,
         )
 
     def training_step(self, model, inputs, num_items_in_batch=None):
@@ -1074,8 +1113,8 @@ class PackedSequenceTrainer(Trainer):
         self._step_start_time = time.perf_counter()
         self._train_timing["total_step"] += (self._step_start_time - t_data_ready)
 
-        if self._train_timing["steps"] % 100 == 0:
-            self._report_train_timing()
+        # if self._train_timing["steps"] % 100 == 0:
+        #     self._report_train_timing()
 
         return loss
 
@@ -1468,8 +1507,8 @@ class SinglePathARTrainer(Trainer):
         self._train_timing["total_step"] += (self._step_start_time - t_data_ready)
 
         # Report every 100 steps
-        if self._train_timing["steps"] % 100 == 0:
-            self._report_train_timing()
+        # if self._train_timing["steps"] % 100 == 0:
+        #     self._report_train_timing()
 
         return loss
 
@@ -2153,7 +2192,16 @@ class FirstTokenCurriculum(TrainerCallback):
             # Format tokens/s with K suffix for readability
             tokens_per_sec_str = f"{tokens_per_sec / 1000:.1f}K" if tokens_per_sec >= 1000 else f"{tokens_per_sec:.0f}"
 
-            print(f"[Stage {self.dataset.stage}/{self.n_stages}] step {state.global_step} | "
+            # Calculate proper stage denominator
+            if getattr(self.dataset, 'linear_lookahead', False) and self.dataset.task == "search":
+                max_L = self.dataset.task_kwargs.get("max_lookahead", 12)
+                expected_stages = math.ceil((max_L - self.dataset.base_lookahead) / self.dataset.lookahead_step) + 1
+                current_L = self.dataset._stage_target_lookahead()
+                stage_str = f"[Stage {self.dataset.stage}/{expected_stages} L={current_L}]"
+            else:
+                stage_str = f"[Stage {self.dataset.stage}/{self.n_stages}]"
+
+            print(f"{stage_str} step {state.global_step} | "
                   f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
                   f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
                   f"Speed={samples_per_sec:.1f} samples/s ({tokens_per_sec_str} toks/s) | "
@@ -2588,7 +2636,7 @@ def main():
             args.linear_lookahead = False
         else:
             # Calculate expected number of stages
-            expected_stages = (args.max_lookahead - args.base_lookahead) // args.lookahead_step + 1
+            expected_stages = math.ceil((args.max_lookahead - args.base_lookahead) / args.lookahead_step) + 1
             rank_print(
                 f"[CURRICULUM] Linear lookahead mode: L={args.base_lookahead} to {args.max_lookahead}, step={args.lookahead_step}")
             rank_print(f"[CURRICULUM] Expected stages: {expected_stages}")
@@ -2821,6 +2869,10 @@ def main():
     if args.use_packing:
         rank_print(
             f"[DATASET] Using PackedSequenceDataset (pack_length={args.pack_length}, target_samples={args.target_samples_per_batch})")
+        if args.do_seen_eval:
+            rank_print("[WARN] --do_seen_eval disabled for packed dataset (incompatible with multi-worker)")
+            args.do_seen_eval = False
+
         dataset = PackedSequenceDataset(
             task=args.task,
             tokenizer=tokenizer,
@@ -2840,11 +2892,12 @@ def main():
             linear_lookahead=args.linear_lookahead,
             base_lookahead=args.base_lookahead,
             lookahead_step=args.lookahead_step,
+            epoch_size=100_000_000,
             **task_kwargs,
         )
         data_collator = lambda x: x[0]  # Identity
         effective_batch_size = 1
-        num_workers = 0
+        num_workers = 4
     else:
         rank_print(f"[DATASET] Using SinglePathARDataset (batch_size={args.batch_size})")
         dataset = SinglePathARDataset(
@@ -3031,7 +3084,8 @@ def main():
             print(f"[META][WARN] Could not write run_meta.json: {e}")
 
     # Save initial curriculum state
-    _save_curriculum_state(args.output_dir, dataset.stage, curriculum.stage_start_step)
+    if is_main_process():
+        _save_curriculum_state(args.output_dir, dataset.stage, curriculum.stage_start_step)
 
     # ----- TRAINING STARTS HERE -----
     rank_print("\n[TRAIN] Starting training...\n")

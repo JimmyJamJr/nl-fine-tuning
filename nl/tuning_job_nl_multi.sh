@@ -69,7 +69,7 @@ MODEL_NAME="Qwen/Qwen3-0.6B"
 BATCH_SIZE=16
 GRADIENT_ACCUMULATION_STEPS=1
 LEARNING_RATE=3e-5
-WARMUP_STEPS=500
+WARMUP_STEPS=100
 SEED=1234
 NUM_SHOTS=0                      # 0, 1, or 2
 
@@ -83,7 +83,7 @@ N_STAGES=10
 BASE_ALPHA=0.1
 MAX_ALPHA=1.0                    # Cap training alpha (eval always uses 1.0)
 ACCURACY_THRESHOLD=0.98
-MIN_STEPS_PER_STAGE=500
+MIN_STEPS_PER_STAGE=200
 CHECK_EVERY=50
 FIRST_TOKEN_SOFT_WEIGHT=1.0
 
@@ -179,7 +179,7 @@ ARGS=(
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
 
-    # --use_packing
+    --use_packing
     --pack_length 16384
     --target_samples_per_batch 48
 
