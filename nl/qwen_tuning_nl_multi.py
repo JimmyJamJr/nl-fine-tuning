@@ -225,6 +225,30 @@ def effective_search_L(alpha: float,
     return L_eff
 
 
+def alpha_for_lookahead(L_target: int,
+                        n: int,
+                        tokens_per_edge: int = 3,
+                        fixed_tokens: int = 4,
+                        reserve_edges: int = 1) -> float:
+    """
+    Calculate the minimum alpha needed to achieve target effective lookahead L.
+    Inverse of effective_search_L().
+    """
+    if L_target <= 0:
+        return 0.0
+
+    edges_unscaled = max(1, (n - fixed_tokens) // tokens_per_edge)
+
+    # From effective_search_L:
+    # L_edges = (alpha * edges_unscaled - reserve_edges) // 2
+    # To get L_target, we need: (alpha * edges_unscaled - reserve_edges) >= 2 * L_target
+    # alpha >= (2 * L_target + reserve_edges) / edges_unscaled
+
+    needed_alpha = (2 * L_target + reserve_edges) / edges_unscaled
+
+    return min(max(needed_alpha, 0.0), 1.0)
+
+
 # ================== Redaction helpers ==================
 _name_given_re = re.compile(
     r"(Given that\s+([A-Z][a-z]+)\s+is\s+)([a-z]+)(\s*,?\s+and we want to prove\s+\2\s+is\s+[a-z]+\.?)"
@@ -312,6 +336,123 @@ def build_redacted_eval_set(
     return red_inputs, red_labels
 
 
+def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str):
+    """Plot loss curve for a single completed stage."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        rank_print("[PLOT] matplotlib not installed, skipping plot")
+        return
+
+    stage_data = [h for h in loss_history if h["stage"] == stage]
+    if not stage_data:
+        return
+
+    steps = [h["step"] for h in stage_data]
+    losses = [h["loss"] for h in stage_data]
+
+    # Get alpha and effective_L for this stage
+    alpha = stage_data[0].get("alpha", None)
+    effective_L = stage_data[0].get("effective_L", None)
+
+    # Relative steps (starting from 0)
+    start_step = steps[0]
+    rel_steps = [s - start_step for s in steps]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue')
+
+    # Smoothed line
+    window = min(50, len(losses) // 5) or 1
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        ax.plot(range(window - 1, len(losses)), smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    ax.set_xlabel('Steps in Stage')
+    ax.set_ylabel('Loss')
+
+    # Build title with available info
+    title = f'Stage {stage} Loss ({len(stage_data)} steps, final={losses[-1]:.4f})'
+    if effective_L is not None:
+        title += f' | L={effective_L}'
+    if alpha is not None:
+        title += f' | α={alpha:.3f}'
+    ax.set_title(title)
+
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f"loss_stage_{stage}.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved loss_stage_{stage}.png")
+
+
+def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int):
+    """Plot full training loss with stage markers."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not loss_history:
+        return
+
+    steps = [h["step"] for h in loss_history]
+    losses = [h["loss"] for h in loss_history]
+    stages = [h["stage"] for h in loss_history]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(steps, losses, alpha=0.3, linewidth=0.5, color='blue')
+
+    # Smoothed
+    window = min(100, len(losses) // 10) or 1
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        ax.plot(steps[window - 1:], smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    # Find stage transitions and their effective_L values
+    stage_info = {}  # stage -> (first_step, effective_L, alpha)
+    for h in loss_history:
+        s = h["stage"]
+        if s not in stage_info:
+            stage_info[s] = (h["step"], h.get("effective_L"), h.get("alpha"))
+
+    # Stage transitions with lookahead labels
+    max_stage = max(stages)
+    colors = plt.cm.tab10(np.linspace(0, 1, max(max_stage, n_stages)))
+
+    prev_stage = stages[0]
+    for i, (step, stage) in enumerate(zip(steps, stages)):
+        if stage != prev_stage:
+            ax.axvline(x=step, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
+
+            # Get effective_L for this stage
+            effective_L = stage_info.get(stage, (None, None, None))[1]
+            if effective_L is not None:
+                label = f'S{stage}\nL={effective_L}'
+            else:
+                label = f'S{stage}'
+
+            ax.text(step, ax.get_ylim()[1] * 0.95, label, fontsize=8, ha='left', va='top')
+            prev_stage = stage
+
+    ax.set_xlabel('Step')
+    ax.set_ylabel('Loss')
+    ax.set_title('Training Loss (Overall)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "loss_overall.png"), dpi=150)
+    plt.close()
+
+
 class SinglePathARDataset(Dataset):
     def __init__(
             self,
@@ -322,6 +463,9 @@ class SinglePathARDataset(Dataset):
             base_alpha: float = 0.1,
             max_alpha: float = 1.0,
             max_input_size: int = 256,
+            linear_lookahead: bool = False,
+            base_lookahead: int = 1,
+            lookahead_step: int = 1,
             reserved_inputs: Optional[Set[str]] = None,
             num_shots: int = 0,
             seed: Optional[int] = None,
@@ -337,6 +481,9 @@ class SinglePathARDataset(Dataset):
         self.n_stages = n_stages
         self.base_alpha = base_alpha
         self.max_alpha = max_alpha
+        self.linear_lookahead = linear_lookahead
+        self.base_lookahead = base_lookahead
+        self.lookahead_step = lookahead_step
         self.max_input_size = max_input_size
         self.reserved_inputs = reserved_inputs or set()
         self.num_shots = num_shots
@@ -399,6 +546,35 @@ class SinglePathARDataset(Dataset):
         if self.stage >= self.n_stages:
             return self.max_alpha
         return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+
+    def _stage_target_lookahead(self) -> Optional[int]:
+        """Get target lookahead for current stage (search task with linear_lookahead only)."""
+        if not (self.linear_lookahead and self.task == "search"):
+            return None
+
+        max_L = self.task_kwargs.get("max_lookahead", 12)
+        target_L = self.base_lookahead + (self.stage - 1) * self.lookahead_step
+        return min(target_L, max_L)
+
+    def _stage_alpha(self) -> float:
+        """Calculate alpha for current curriculum stage."""
+        if self.linear_lookahead and self.task == "search":
+            target_L = self._stage_target_lookahead()
+            return alpha_for_lookahead(target_L, self.max_input_size)
+        else:
+            # Original alpha-based curriculum
+            if self.stage >= self.n_stages:
+                return self.max_alpha
+            return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+
+    def _is_final_stage(self) -> bool:
+        """Check if current stage is the final stage."""
+        if self.linear_lookahead and self.task == "search":
+            max_L = self.task_kwargs.get("max_lookahead", 12)
+            current_L = self._stage_target_lookahead()
+            return current_L >= max_L
+        else:
+            return self.stage >= self.n_stages
 
     def _shots_prefix(self) -> str:
         """Build few-shot prefix for prompts"""
@@ -525,6 +701,9 @@ class PackedSequenceDataset(IterableDataset):
             base_alpha: float = 0.1,
             max_alpha: float = 1.0,
             max_input_size: int = 256,
+            linear_lookahead: bool = False,
+            base_lookahead: int = 1,
+            lookahead_step: int = 1,
             reserved_inputs: Optional[Set[str]] = None,
             num_shots: int = 0,
             seed: Optional[int] = None,
@@ -547,6 +726,9 @@ class PackedSequenceDataset(IterableDataset):
         self.n_stages = n_stages
         self.base_alpha = base_alpha
         self.max_alpha = max_alpha
+        self.linear_lookahead = linear_lookahead
+        self.base_lookahead = base_lookahead
+        self.lookahead_step = lookahead_step
         self.max_input_size = max_input_size
         self.reserved_inputs = reserved_inputs or set()
         self.num_shots = num_shots
@@ -587,6 +769,35 @@ class PackedSequenceDataset(IterableDataset):
         if self.stage >= self.n_stages:
             return self.max_alpha
         return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+
+    def _stage_target_lookahead(self) -> Optional[int]:
+        """Get target lookahead for current stage (search task with linear_lookahead only)."""
+        if not (self.linear_lookahead and self.task == "search"):
+            return None
+
+        max_L = self.task_kwargs.get("max_lookahead", 12)
+        target_L = self.base_lookahead + (self.stage - 1) * self.lookahead_step
+        return min(target_L, max_L)
+
+    def _stage_alpha(self) -> float:
+        """Calculate alpha for current curriculum stage."""
+        if self.linear_lookahead and self.task == "search":
+            target_L = self._stage_target_lookahead()
+            return alpha_for_lookahead(target_L, self.max_input_size)
+        else:
+            # Original alpha-based curriculum
+            if self.stage >= self.n_stages:
+                return self.max_alpha
+            return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+
+    def _is_final_stage(self) -> bool:
+        """Check if current stage is the final stage."""
+        if self.linear_lookahead and self.task == "search":
+            max_L = self.task_kwargs.get("max_lookahead", 12)
+            current_L = self._stage_target_lookahead()
+            return current_L >= max_L
+        else:
+            return self.stage >= self.n_stages
 
     def _build_few_shots(self, k: int, seed: Optional[int]):
         if k <= 0:
@@ -960,7 +1171,7 @@ class PackedSequenceTrainer(Trainer):
         )
 
         # Output projection
-        attn_output = attn_output.reshape(seq_len, hidden_dim)
+        attn_output = attn_output.reshape(seq_len, num_heads * head_dim)
         attn_output = layer.self_attn.o_proj(attn_output)
 
         hidden_states = residual + attn_output
@@ -1020,7 +1231,7 @@ class PackedSequenceTrainer(Trainer):
         config = unwrapped.config
         num_heads = config.num_attention_heads
         num_kv_heads = getattr(config, "num_key_value_heads", num_heads)
-        head_dim = config.hidden_size // num_heads
+        head_dim = getattr(config, "head_dim", config.hidden_size // num_heads)
 
         # Embed all tokens
         hidden_states = embed_tokens(input_ids)  # [B, T, H]
@@ -1433,7 +1644,6 @@ class SinglePathARTrainer(Trainer):
         shift_labels = labels[:, 1:].contiguous()
 
         B, Tm1, H = shift_hidden.shape
-        V = lm_head_weight.shape[0]
         valid_mask = (shift_labels != -100)
 
         # === CHUNKED MAIN LOSS ===
@@ -1748,6 +1958,9 @@ class FirstTokenCurriculum(TrainerCallback):
         self.seed = seed
         self.stage_eval_history = []
 
+        # Loss tracking
+        self.loss_history = []
+
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
         if logs:
@@ -1782,6 +1995,14 @@ class FirstTokenCurriculum(TrainerCallback):
         if is_main_process():
             checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
             _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step)
+
+        if is_main_process():
+            try:
+                loss_path = os.path.join(args.output_dir, "loss_history.json")
+                with open(loss_path, "w") as f:
+                    json.dump(self.loss_history, f)
+            except Exception as e:
+                rank_print(f"[LOSS] Warning: Could not save loss history: {e}")
         barrier()
         return control
 
@@ -1846,6 +2067,30 @@ class FirstTokenCurriculum(TrainerCallback):
         # Early exit conditions
         if self.trainer is None or self.finished or state.global_step == 0:
             return control
+
+        # Track loss history
+        if self.trainer.recent_losses:
+            current_loss = self.trainer.recent_losses[-1]
+
+            # Get effective lookahead for search task
+            effective_L = None
+            if getattr(self.dataset, "task", None) == "search":
+                target_L = self.dataset._stage_target_lookahead()
+                if target_L is not None:
+                    effective_L = target_L
+                else:
+                    alpha = self.dataset._stage_alpha()
+                    n = getattr(self.dataset, "max_input_size", 256)
+                    cap = self.dataset.task_kwargs.get("max_lookahead")
+                    effective_L = effective_search_L(alpha, n, max_lookahead_cap=cap)
+
+            self.loss_history.append({
+                "step": state.global_step,
+                "loss": current_loss,
+                "stage": self.dataset.stage,
+                "alpha": self.dataset._stage_alpha(),
+                "effective_L": effective_L,
+            })
 
         current_time = datetime.datetime.now()
 
@@ -1956,7 +2201,20 @@ class FirstTokenCurriculum(TrainerCallback):
                 # Run stage eval BEFORE advancing
                 self._run_stage_eval(old_stage, state.global_step)
 
-                if self.dataset.stage < self.n_stages:
+                if is_main_process():
+                    plot_stage_loss(self.loss_history, old_stage, self.trainer.args.output_dir)
+                    plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages)
+
+                # Check if this was the final stage
+                if self.dataset._is_final_stage():
+                    if is_main_process():
+                        print("[FINISHED] Curriculum complete (reached max_lookahead)" if getattr(self.dataset,
+                                                                                                  'linear_lookahead',
+                                                                                                  False)
+                              else "[FINISHED] Curriculum complete")
+                    control.should_training_stop = True
+                    self.finished = True
+                else:
                     # Advance to next stage
                     self.dataset.stage += 1
                     self.stage_start_step = state.global_step
@@ -1974,28 +2232,21 @@ class FirstTokenCurriculum(TrainerCallback):
 
                     new_alpha = self.dataset._stage_alpha()
                     if is_main_process():
-                        uncapped_alpha = self.dataset.base_alpha + (1.0 - self.dataset.base_alpha) * (
-                                    self.dataset.stage - 1) / max(self.dataset.n_stages - 1, 1)
-                        cap_msg = f" (capped from {uncapped_alpha:.3f})" if new_alpha < uncapped_alpha else ""
-                        msg = f" -> Advanced to stage {self.dataset.stage} | alpha={new_alpha:.3f}{cap_msg}"
+                        msg = f" -> Advanced to stage {self.dataset.stage} | alpha={new_alpha:.3f}"
 
                         if getattr(self.dataset, "task", None) == "search":
-                            n = getattr(self.dataset, "max_input_size", 256)
-                            cap = None
-                            try:
-                                cap = int(self.dataset.task_kwargs.get("max_lookahead", 0)) or None
-                            except Exception:
-                                cap = None
-                            L_eff = effective_search_L(new_alpha, n, max_lookahead_cap=cap)
-                            msg += f" | effective max_lookahead={L_eff} (n={n}, cap={cap})"
+                            target_L = self.dataset._stage_target_lookahead()
+                            if target_L is not None:
+                                max_L = self.dataset.task_kwargs.get("max_lookahead", 12)
+                                msg += f" | L={target_L}/{max_L}"
+                            else:
+                                n = getattr(self.dataset, "max_input_size", 256)
+                                cap = self.dataset.task_kwargs.get("max_lookahead")
+                                L_eff = effective_search_L(new_alpha, n, max_lookahead_cap=cap)
+                                msg += f" | effective_L={L_eff} (n={n}, cap={cap})"
                         print(msg)
 
-                    _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
-                else:
-                    if is_main_process():
-                        print("[FINISHED] Curriculum complete")
-                    control.should_training_stop = True
-                    self.finished = True
+                        _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
 
         # ==================== Memory Cleanup (every 100 steps) ====================
         if state.global_step > 0 and state.global_step % 100 == 0:
@@ -2268,6 +2519,12 @@ def main():
     p.add_argument("--n_stages", type=int, default=10)
     p.add_argument("--base_alpha", type=float, default=0.1)
     p.add_argument("--max_alpha", type=float, default=1.0, help="Maximum alpha during training (eval always uses 1.0)")
+    p.add_argument("--linear_lookahead", action="store_true",
+                   help="Use linear lookahead curriculum (search task only)")
+    p.add_argument("--base_lookahead", type=int, default=1,
+                   help="Starting lookahead at stage 1 (linear_lookahead mode)")
+    p.add_argument("--lookahead_step", type=int, default=1,
+                   help="Lookahead increase per stage (linear_lookahead mode)")
     p.add_argument("--accuracy_threshold", type=float, default=0.98)
     p.add_argument("--min_steps_per_stage", type=int, default=500)
     p.add_argument("--check_every", type=int, default=50)
@@ -2323,6 +2580,18 @@ def main():
 
     global args
     args = p.parse_args()
+
+    # Validate linear_lookahead
+    if args.linear_lookahead:
+        if args.task != "search":
+            rank_print("[WARN] --linear_lookahead only applies to search task, ignoring")
+            args.linear_lookahead = False
+        else:
+            # Calculate expected number of stages
+            expected_stages = (args.max_lookahead - args.base_lookahead) // args.lookahead_step + 1
+            rank_print(
+                f"[CURRICULUM] Linear lookahead mode: L={args.base_lookahead} to {args.max_lookahead}, step={args.lookahead_step}")
+            rank_print(f"[CURRICULUM] Expected stages: {expected_stages}")
 
     # Initialize distributed if needed
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -2568,6 +2837,9 @@ def main():
             resume_step=resume_step,
             store_examples=args.do_seen_eval,
             store_cap=1000,
+            linear_lookahead=args.linear_lookahead,
+            base_lookahead=args.base_lookahead,
+            lookahead_step=args.lookahead_step,
             **task_kwargs,
         )
         data_collator = lambda x: x[0]  # Identity
@@ -2589,6 +2861,9 @@ def main():
             store_examples=args.do_seen_eval,
             store_cap=1000,
             resume_step=resume_step,
+            linear_lookahead=args.linear_lookahead,
+            base_lookahead=args.base_lookahead,
+            lookahead_step=args.lookahead_step,
             **task_kwargs,
         )
         data_collator = make_collate(tokenizer, pad_to_multiple_of=None)
@@ -2914,6 +3189,18 @@ def main():
                 f"[REDACTED] First={red_result['first_token_acc']:.2%} | Full={red_result['full_word_acc']:.2%} | N={red_result['total']}")
         else:
             rank_print("[REDACTED-EVAL] Skipped (could not redact any eval items cleanly)")
+
+    if is_main_process():
+        # Save final loss history
+        try:
+            with open(os.path.join(args.output_dir, "loss_history.json"), "w") as f:
+                json.dump(curriculum.loss_history, f)
+            rank_print(f"[LOSS] Saved {len(curriculum.loss_history)} records")
+        except Exception as e:
+            rank_print(f"[LOSS] Warning: {e}")
+
+        # Final overall plot
+        plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages)
 
     # Final cleanup
     gc.collect()

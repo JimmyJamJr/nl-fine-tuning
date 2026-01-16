@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH -J nl_search_1536_1.7B_la256_a1.0_timing_test
+#SBATCH -J nl_search_1536_0.6B_la256_linear8
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=112
 #SBATCH --mem=128G
-#SBATCH --time=4:00:00
+#SBATCH --time=24:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
-#SBATCH -q normal
+#SBATCH -q preemptible
 #SBATCH --mail-user=huan2073@purdue.edu
 #SBATCH --mail-type=END,FAIL
 #SBATCH -o ./slurm/%j_%x.out
@@ -63,7 +63,7 @@ nvidia-smi || true
 
 # Task / Model
 TASK="search"                    # si | dfs | search
-MODEL_NAME="Qwen/Qwen3-1.7B"
+MODEL_NAME="Qwen/Qwen3-0.6B"
 
 # Training
 BATCH_SIZE=16
@@ -79,8 +79,8 @@ LORA_RANK=16
 LORA_DROPOUT=0.10
 
 # Curriculum
-N_STAGES=1
-BASE_ALPHA=1.0
+N_STAGES=10
+BASE_ALPHA=0.1
 MAX_ALPHA=1.0                    # Cap training alpha (eval always uses 1.0)
 ACCURACY_THRESHOLD=0.98
 MIN_STEPS_PER_STAGE=500
@@ -106,11 +106,11 @@ OOM_AUTOSCALE=true
 # Evaluation
 EVAL_SAMPLES=500
 PRINT_EVAL_EXAMPLES=0
-DO_BASELINE=false                 # Pre-training baseline accuracy
-DO_FINAL_EVAL=false               # Post-training TF + greedy eval
-DO_REDACTED_EVAL=false            # Redacted sanity check (should be low)
-DO_SEEN_EVAL=false                # Seen-samples sanity check (should be ~100%)
-DO_STAGE_EVAL=false              # Eval at α=1.0 after each stage advancement
+DO_BASELINE=true                 # Pre-training baseline accuracy
+DO_FINAL_EVAL=true               # Post-training TF + greedy eval
+DO_REDACTED_EVAL=true            # Redacted sanity check (should be low)
+DO_SEEN_EVAL=true                # Seen-samples sanity check (should be ~100%)
+DO_STAGE_EVAL=true              # Eval at α=1.0 after each stage advancement
 
 # Resume from previous job (leave empty for fresh start)
 PREV_JOB_ID=""
@@ -179,9 +179,13 @@ ARGS=(
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
 
-    --use_packing
+    # --use_packing
     --pack_length 16384
     --target_samples_per_batch 48
+
+    --linear_lookahead
+    --base_lookahead 16
+    --lookahead_step 8
 )
 
 # Conditional flags
