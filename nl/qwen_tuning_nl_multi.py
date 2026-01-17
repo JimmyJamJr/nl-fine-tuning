@@ -10,7 +10,6 @@ import math
 import time
 from collections import deque
 from typing import List, Tuple, Dict, Any, Optional, Set
-from contextlib import nullcontext
 import multiprocessing
 
 import numpy as np
@@ -19,8 +18,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 
 import torch.nn.functional as F
-from torch.utils.data import Dataset
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.utils.data import Dataset, IterableDataset
 
 from transformers import (
     AutoModelForCausalLM,
@@ -32,21 +30,30 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import logging as hf_logging
 from transformers import GenerationConfig
+import torch.utils.checkpoint as checkpoint
 
 from peft import LoraConfig, get_peft_model, TaskType
 
 from nl_generator import NaturalLanguageGraphGenerator
 
+# Check for flash-attn availability
+try:
+    from flash_attn import flash_attn_varlen_func
+
+    FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    FLASH_ATTN_AVAILABLE = False
+    flash_attn_varlen_func = None
+
 warnings.filterwarnings("ignore")
 hf_logging.set_verbosity_error()
 
-# --- Runtime env sanity for Accelerate / FSDP / NCCL (must be set before Trainer builds Accelerator) ---
+# --- Runtime env sanity for Accelerate / NCCL (must be set before Trainer builds Accelerator) ---
 os.environ.setdefault("ACCELERATE_DISPATCH_BATCHES", "false")
 os.environ.setdefault("ACCELERATE_SPLIT_BATCHES", "true")
 os.environ.setdefault("ACCELERATE_USE_DATA_LOADER_SHARDING", "false")
 os.environ.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
-if os.environ.get("ACCELERATE_FSDP_MIN_NUM_PARAMS", "").endswith(".0"):
-    os.environ["ACCELERATE_FSDP_MIN_NUM_PARAMS"] = os.environ["ACCELERATE_FSDP_MIN_NUM_PARAMS"].split(".")[0]
+
 if "MASTER_PORT" not in os.environ:
     try:
         _jid = int(os.environ.get("SLURM_JOB_ID", "0") or 0)
@@ -218,6 +225,30 @@ def effective_search_L(alpha: float,
     return L_eff
 
 
+def alpha_for_lookahead(L_target: int,
+                        n: int,
+                        tokens_per_edge: int = 3,
+                        fixed_tokens: int = 4,
+                        reserve_edges: int = 1) -> float:
+    """
+    Calculate the minimum alpha needed to achieve target effective lookahead L.
+    Inverse of effective_search_L().
+    """
+    if L_target <= 0:
+        return 0.0
+
+    edges_unscaled = max(1, (n - fixed_tokens) // tokens_per_edge)
+
+    # From effective_search_L:
+    # L_edges = (alpha * edges_unscaled - reserve_edges) // 2
+    # To get L_target, we need: (alpha * edges_unscaled - reserve_edges) >= 2 * L_target
+    # alpha >= (2 * L_target + reserve_edges) / edges_unscaled
+
+    needed_alpha = (2 * L_target + reserve_edges) / edges_unscaled
+
+    return min(max(needed_alpha, 0.0), 1.0)
+
+
 # ================== Redaction helpers ==================
 _name_given_re = re.compile(
     r"(Given that\s+([A-Z][a-z]+)\s+is\s+)([a-z]+)(\s*,?\s+and we want to prove\s+\2\s+is\s+[a-z]+\.?)"
@@ -305,6 +336,123 @@ def build_redacted_eval_set(
     return red_inputs, red_labels
 
 
+def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str):
+    """Plot loss curve for a single completed stage."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        rank_print("[PLOT] matplotlib not installed, skipping plot")
+        return
+
+    stage_data = [h for h in loss_history if h["stage"] == stage]
+    if not stage_data:
+        return
+
+    steps = [h["step"] for h in stage_data]
+    losses = [h["loss"] for h in stage_data]
+
+    # Get alpha and effective_L for this stage
+    alpha = stage_data[0].get("alpha", None)
+    effective_L = stage_data[0].get("effective_L", None)
+
+    # Relative steps (starting from 0)
+    start_step = steps[0]
+    rel_steps = [s - start_step for s in steps]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue')
+
+    # Smoothed line
+    window = min(50, len(losses) // 5) or 1
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        ax.plot(range(window - 1, len(losses)), smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    ax.set_xlabel('Steps in Stage')
+    ax.set_ylabel('Loss')
+
+    # Build title with available info
+    title = f'Stage {stage} Loss ({len(stage_data)} steps, final={losses[-1]:.4f})'
+    if effective_L is not None:
+        title += f' | L={effective_L}'
+    if alpha is not None:
+        title += f' | α={alpha:.3f}'
+    ax.set_title(title)
+
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f"loss_stage_{stage}.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved loss_stage_{stage}.png")
+
+
+def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int):
+    """Plot full training loss with stage markers."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not loss_history:
+        return
+
+    steps = [h["step"] for h in loss_history]
+    losses = [h["loss"] for h in loss_history]
+    stages = [h["stage"] for h in loss_history]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(steps, losses, alpha=0.3, linewidth=0.5, color='blue')
+
+    # Smoothed
+    window = min(100, len(losses) // 10) or 1
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        ax.plot(steps[window - 1:], smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    # Find stage transitions and their effective_L values
+    stage_info = {}  # stage -> (first_step, effective_L, alpha)
+    for h in loss_history:
+        s = h["stage"]
+        if s not in stage_info:
+            stage_info[s] = (h["step"], h.get("effective_L"), h.get("alpha"))
+
+    # Stage transitions with lookahead labels
+    max_stage = max(stages)
+    colors = plt.cm.tab10(np.linspace(0, 1, max(max_stage, n_stages)))
+
+    prev_stage = stages[0]
+    for i, (step, stage) in enumerate(zip(steps, stages)):
+        if stage != prev_stage:
+            ax.axvline(x=step, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
+
+            # Get effective_L for this stage
+            effective_L = stage_info.get(stage, (None, None, None))[1]
+            if effective_L is not None:
+                label = f'S{stage}\nL={effective_L}'
+            else:
+                label = f'S{stage}'
+
+            ax.text(step, ax.get_ylim()[1] * 0.95, label, fontsize=8, ha='left', va='top')
+            prev_stage = stage
+
+    ax.set_xlabel('Step')
+    ax.set_ylabel('Loss')
+    ax.set_title('Training Loss (Overall)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "loss_overall.png"), dpi=150)
+    plt.close()
+
+
 class SinglePathARDataset(Dataset):
     def __init__(
             self,
@@ -315,11 +463,15 @@ class SinglePathARDataset(Dataset):
             base_alpha: float = 0.1,
             max_alpha: float = 1.0,
             max_input_size: int = 256,
+            linear_lookahead: bool = False,
+            base_lookahead: int = 1,
+            lookahead_step: int = 1,
             reserved_inputs: Optional[Set[str]] = None,
             num_shots: int = 0,
             seed: Optional[int] = None,
             store_examples: bool = False,
             store_cap: int = 1000,
+            resume_step: int = 0,
             **task_kwargs,
     ):
         self.task = task
@@ -329,11 +481,16 @@ class SinglePathARDataset(Dataset):
         self.n_stages = n_stages
         self.base_alpha = base_alpha
         self.max_alpha = max_alpha
+        self.linear_lookahead = linear_lookahead
+        self.base_lookahead = base_lookahead
+        self.lookahead_step = lookahead_step
         self.max_input_size = max_input_size
         self.reserved_inputs = reserved_inputs or set()
         self.num_shots = num_shots
         self.seed = seed
         self.task_kwargs = task_kwargs
+
+        self.resume_step = resume_step
 
         self._store = bool(store_examples)
         self._store_cap = int(store_cap)
@@ -344,6 +501,11 @@ class SinglePathARDataset(Dataset):
 
         # Epoch size - number of samples per "epoch"
         self.epoch_size = 50000
+
+        # Per-worker state (initialized lazily)
+        self._worker_generator: Optional[NaturalLanguageGraphGenerator] = None
+        self._worker_rng: Optional[random.Random] = None
+        self._worker_id: Optional[int] = None
 
         rank_print(
             f"[DATASET] Map-style dataset | epoch_size={self.epoch_size} | store_seen={self._store} cap={self._store_cap}")
@@ -379,11 +541,34 @@ class SinglePathARDataset(Dataset):
                     break
         return out[:k]
 
+    def _stage_target_lookahead(self) -> Optional[int]:
+        """Get target lookahead for current stage (search task with linear_lookahead only)."""
+        if not (self.linear_lookahead and self.task == "search"):
+            return None
+
+        max_L = self.task_kwargs.get("max_lookahead", 12)
+        target_L = self.base_lookahead + (self.stage - 1) * self.lookahead_step
+        return min(target_L, max_L)
+
     def _stage_alpha(self) -> float:
-        """Calculate alpha for current curriculum stage"""
-        if self.stage >= self.n_stages:
-            return self.max_alpha
-        return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+        """Calculate alpha for current curriculum stage."""
+        if self.linear_lookahead and self.task == "search":
+            target_L = self._stage_target_lookahead()
+            return alpha_for_lookahead(target_L, self.max_input_size)
+        else:
+            # Original alpha-based curriculum
+            if self.stage >= self.n_stages:
+                return self.max_alpha
+            return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+
+    def _is_final_stage(self) -> bool:
+        """Check if current stage is the final stage."""
+        if self.linear_lookahead and self.task == "search":
+            max_L = self.task_kwargs.get("max_lookahead", 12)
+            current_L = self._stage_target_lookahead()
+            return current_L >= max_L
+        else:
+            return self.stage >= self.n_stages
 
     def _shots_prefix(self) -> str:
         """Build few-shot prefix for prompts"""
@@ -395,98 +580,827 @@ class SinglePathARDataset(Dataset):
             parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
         return "\n\n".join(parts) + ("\n\n" if parts else "")
 
+    def _get_worker_state(self) -> Tuple[NaturalLanguageGraphGenerator, random.Random]:
+        """Lazily initialize per-worker generator and RNG (called once per worker)"""
+        worker_info = torch.utils.data.get_worker_info()
+        current_worker_id = worker_info.id if worker_info else 0
+
+        # Reinitialize if worker changed (shouldn't happen, but safety check)
+        if self._worker_generator is None or self._worker_id != current_worker_id:
+            rank = get_rank()
+            worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919 + self.resume_step * 13
+
+            self._worker_generator = NaturalLanguageGraphGenerator(
+                self.max_input_size,
+                seed=worker_seed
+            )
+            self._worker_rng = random.Random(worker_seed)
+            self._worker_id = current_worker_id
+
+        return self._worker_generator, self._worker_rng
+
     def __getitem__(self, idx):
         """
         Generate sample on-demand for given index.
         Index is used to vary the seed for diversity across samples.
         """
-        # Build unique seed for this sample
-        rank = get_rank()
-        worker = torch.utils.data.get_worker_info()
-        worker_id = worker.id if worker is not None else 0
 
-        # Unique seed per sample: base_seed + rank_offset + worker_offset + index
-        sample_seed = (self.seed or 0) + rank * 9973 + worker_id * 997 + idx
-        rng = random.Random(sample_seed)
+        gen, rng = self._get_worker_state()
 
-        # Create generator for this sample
-        gen = NaturalLanguageGraphGenerator(self.max_input_size, seed=sample_seed)
-        max_len = getattr(self.tokenizer, "model_max_length", 512)
+        # max_len = getattr(self.tokenizer, "model_max_length", 512)
+        alpha = self._stage_alpha()
 
-        base_seed = (self.seed or 0) + rank * 9973 + worker_id * 997 + idx
+        # base_seed = (self.seed or 0) + rank * 9973 + worker_id * 997 + idx
 
-        # Try to generate a valid sample (up to 100 attempts)
+        # Try to generate a valid sample (up to 500 attempts)
         max_attempts = 500
-        for attempt in range(max_attempts):
-            # Different seed each attempt
-            sample_seed = base_seed + attempt * 104729  # Large prime
-            rng = random.Random(sample_seed)
-            gen = NaturalLanguageGraphGenerator(self.max_input_size, seed=sample_seed)
+        attempts = 0
+        ex = None
+        while ex is None and attempts < max_attempts:
+            attempts += 1
 
             batch = gen.generate_batch(
                 self.task,
                 batch_size=1,
                 reserved_inputs=self.reserved_inputs,
-                alpha=self._stage_alpha(),
+                alpha=alpha,
                 **self.task_kwargs
             )
 
-            if not (batch and batch[0] and batch[0].output_texts):
-                continue
+            if batch and batch[0] and batch[0].output_texts:
+                candidate = batch[0]
+                if candidate.input_text not in self.reserved_inputs:
+                    ex = candidate
 
-            ex = batch[0]
-            if ex.input_text in self.reserved_inputs or not ex.output_texts:
-                continue
+        if ex is None:
+            raise RuntimeError(
+                f"[DATASET] Failed to generate valid sample after {max_attempts} attempts. "
+                f"Stage {self.stage}, alpha={alpha:.2f}, idx={idx}."
+            )
 
-            # Build prompt with few-shot examples
-            shots = self._shots_prefix()
-            prompt_text = (shots + ex.input_text) if shots else ex.input_text
+        # Build prompt with few-shot examples
+        shots = self._shots_prefix()
+        prompt_text = (shots + ex.input_text) if shots else ex.input_text
 
-            # Choose random answer from valid outputs
-            chosen = rng.choice(ex.output_texts)
-            task_type = _determine_task_type(self.task, ex.input_text)
+        # Choose random answer from valid outputs
+        chosen = rng.choice(ex.output_texts)
+        task_type = _determine_task_type(self.task, ex.input_text)
 
-            # Tokenize
-            prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
-            ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
-            end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
-            full_len = len(prompt_ids) + len(ans_ids) + len(end_ids)
+        # Tokenize
+        prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
+        ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
+        end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+        # full_len = len(prompt_ids) + len(ans_ids) + len(end_ids)
 
-            # Build final sequences
-            input_ids = prompt_ids + ans_ids + end_ids
-            labels = [-100] * len(prompt_ids) + ans_ids + end_ids
-            attention_mask = [1] * len(input_ids)
+        # Build final sequences
+        input_ids = prompt_ids + ans_ids + end_ids
+        labels = [-100] * len(prompt_ids) + ans_ids + end_ids
+        attention_mask = [1] * len(input_ids)
 
-            # Store if tracking seen samples
-            if self._store and len(self._seen_inputs) < self._store_cap:
+        # Store if tracking seen samples
+        if self._store and len(self._seen_inputs) < self._store_cap:
+            self._seen_inputs.append(ex.input_text)
+            self._seen_labels.append(list(ex.output_texts))
+
+        # Build valid first token targets
+        first_union = sorted({
+            _tokenize_leading_space(self.tokenizer, a)[0]
+            for a in ex.output_texts
+            if _tokenize_leading_space(self.tokenizer, a)
+        })
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+            "prompt_len": len(prompt_ids),
+            "valid_first_targets": first_union,
+        }
+
+
+class PackedSequenceDataset(Dataset):
+    """
+    Map-style dataset for packed sequences.
+    Each __getitem__ returns one fully packed batch.
+    Enables multi-worker prefetching for better performance.
+    """
+
+    def __init__(
+            self,
+            task: str,
+            tokenizer,
+            pack_length: int = 4096,
+            target_samples_per_batch: int = 64,
+            stage: int = 1,
+            n_stages: int = 10,
+            base_alpha: float = 0.1,
+            max_alpha: float = 1.0,
+            max_input_size: int = 256,
+            linear_lookahead: bool = False,
+            base_lookahead: int = 1,
+            lookahead_step: int = 1,
+            reserved_inputs: Optional[Set[str]] = None,
+            num_shots: int = 0,
+            seed: Optional[int] = None,
+            resume_step: int = 0,
+            store_examples: bool = False,
+            store_cap: int = 1000,
+            epoch_size: int = 10_000_000,  # Large enough to never cycle
+            **task_kwargs,
+    ):
+        if not FLASH_ATTN_AVAILABLE:
+            raise ImportError(
+                "flash-attn required for PackedSequenceDataset. "
+                "Install with: pip install flash-attn --no-build-isolation"
+            )
+
+        self.task = task
+        self.tokenizer = tokenizer
+        self.pack_length = pack_length
+        self.target_samples_per_batch = target_samples_per_batch
+        self._stage = multiprocessing.Value('i', stage)
+        self.n_stages = n_stages
+        self.base_alpha = base_alpha
+        self.max_alpha = max_alpha
+        self.linear_lookahead = linear_lookahead
+        self.base_lookahead = base_lookahead
+        self.lookahead_step = lookahead_step
+        self.max_input_size = max_input_size
+        self.reserved_inputs = reserved_inputs or set()
+        self.num_shots = num_shots
+        self.seed = seed
+        self.resume_step = resume_step
+        self.task_kwargs = task_kwargs
+        self.epoch_size = epoch_size
+
+        self.eos_token_id = tokenizer.eos_token_id
+        self.pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+
+        # Storage for seen samples (thread-safe for multi-worker)
+        self._store = bool(store_examples)
+        self._store_cap = int(store_cap)
+        self._seen_inputs: deque = deque(maxlen=self._store_cap)
+        self._seen_labels: deque = deque(maxlen=self._store_cap)
+        self._seen_lock = multiprocessing.Lock() if store_examples else None
+
+        # Per-worker state (lazily initialized)
+        self._worker_generator = None
+        self._worker_rng = None
+        self._worker_id = None
+
+        self.few_shot_examples = self._build_few_shots(num_shots, seed)
+
+        rank_print(f"[DATASET] Packed Map-style | pack_length={pack_length} | "
+                   f"target_samples={target_samples_per_batch} | epoch_size={epoch_size}")
+
+    @property
+    def stage(self):
+        return self._stage.value
+
+    @stage.setter
+    def stage(self, value):
+        self._stage.value = value
+
+    def __len__(self):
+        return self.epoch_size
+
+    def get_seen_samples(self) -> Tuple[List[str], List[List[str]]]:
+        """Return stored training samples (thread-safe)."""
+        if self._seen_lock:
+            with self._seen_lock:
+                return list(self._seen_inputs), list(self._seen_labels)
+        return list(self._seen_inputs), list(self._seen_labels)
+
+    def _stage_target_lookahead(self) -> Optional[int]:
+        """Get target lookahead for current stage (search task with linear_lookahead only)."""
+        if not (self.linear_lookahead and self.task == "search"):
+            return None
+        max_L = self.task_kwargs.get("max_lookahead", 12)
+        target_L = self.base_lookahead + (self.stage - 1) * self.lookahead_step
+        return min(target_L, max_L)
+
+    def _stage_alpha(self) -> float:
+        """Calculate alpha for current curriculum stage."""
+        if self.linear_lookahead and self.task == "search":
+            target_L = self._stage_target_lookahead()
+            return alpha_for_lookahead(target_L, self.max_input_size)
+        else:
+            if self.stage >= self.n_stages:
+                return self.max_alpha
+            return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
+
+    def _is_final_stage(self) -> bool:
+        """Check if current stage is the final stage."""
+        if self.linear_lookahead and self.task == "search":
+            max_L = self.task_kwargs.get("max_lookahead", 12)
+            current_L = self._stage_target_lookahead()
+            return current_L >= max_L
+        else:
+            return self.stage >= self.n_stages
+
+    def _build_few_shots(self, k: int, seed: Optional[int]):
+        """Build few-shot examples for prompting."""
+        if k <= 0:
+            return []
+        fs_seed = (seed or 0) + 12345
+        g = NaturalLanguageGraphGenerator(self.max_input_size, seed=fs_seed)
+        batch = g.generate_batch(self.task, batch_size=max(k, 3), alpha=0.5, **self.task_kwargs)
+        out = []
+        for ex in batch:
+            if ex and ex.output_texts:
+                out.append({"input": ex.input_text, "output": ex.output_texts[0]})
+                if len(out) >= k:
+                    break
+        return out[:k]
+
+    def _shots_prefix(self) -> str:
+        """Build few-shot prefix for prompts."""
+        if not self.few_shot_examples:
+            return ""
+        parts = []
+        for ex in self.few_shot_examples:
+            tt = _determine_task_type(self.task, ex["input"])
+            parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
+        return "\n\n".join(parts) + ("\n\n" if parts else "")
+
+    def _get_worker_state(self, idx: int):
+        """
+        Lazily initialize per-worker generator and RNG.
+        Seeds are unique per (worker, idx, resume_step) to avoid duplicates.
+        """
+        worker_info = torch.utils.data.get_worker_info()
+        current_worker_id = worker_info.id if worker_info else 0
+
+        # Initialize generator once per worker
+        if self._worker_generator is None or self._worker_id != current_worker_id:
+            rank = get_rank()
+            worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919 + self.resume_step * 13
+
+            self._worker_generator = NaturalLanguageGraphGenerator(
+                self.max_input_size,
+                seed=worker_seed
+            )
+            self._worker_rng = random.Random(worker_seed)
+            self._worker_id = current_worker_id
+
+        # Reseed RNG for this specific batch
+        # Includes resume_step to avoid repeating samples after checkpoint resume
+        batch_seed = ((self.seed or 0) +
+                      idx * 104729 +
+                      self._worker_id * 7919 +
+                      self.resume_step * 31337 +
+                      get_rank() * 999983)
+        self._worker_rng.seed(batch_seed)
+
+        return self._worker_generator, self._worker_rng
+
+    def _generate_one_sample(self, rng: random.Random) -> Optional[Dict[str, Any]]:
+        """Generate a single tokenized sample."""
+        gen = self._worker_generator
+        alpha = self._stage_alpha()
+
+        ex = None
+        for _ in range(100):
+            batch = gen.generate_batch(
+                self.task, batch_size=1,
+                reserved_inputs=self.reserved_inputs,
+                alpha=alpha, **self.task_kwargs
+            )
+            if batch and batch[0] and batch[0].output_texts:
+                candidate = batch[0]
+                if candidate.input_text not in self.reserved_inputs:
+                    ex = candidate
+                    break
+
+        if ex is None:
+            return None
+
+        shots = self._shots_prefix()
+        prompt_text = (shots + ex.input_text) if shots else ex.input_text
+        chosen = rng.choice(ex.output_texts)
+        task_type = _determine_task_type(self.task, ex.input_text)
+
+        prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
+        ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
+        end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+
+        input_ids = prompt_ids + ans_ids + end_ids
+        labels = [-100] * len(prompt_ids) + ans_ids + end_ids
+
+        first_union = sorted({
+            _tokenize_leading_space(self.tokenizer, a)[0]
+            for a in ex.output_texts
+            if _tokenize_leading_space(self.tokenizer, a)
+        })
+
+        # Store for seen eval (thread-safe)
+        if self._store and len(self._seen_inputs) < self._store_cap:
+            if self._seen_lock:
+                with self._seen_lock:
+                    if len(self._seen_inputs) < self._store_cap:
+                        self._seen_inputs.append(ex.input_text)
+                        self._seen_labels.append(list(ex.output_texts))
+            else:
                 self._seen_inputs.append(ex.input_text)
                 self._seen_labels.append(list(ex.output_texts))
 
-            # Build valid first token targets
-            first_union = sorted({
-                _tokenize_leading_space(self.tokenizer, a)[0]
-                for a in ex.output_texts
-                if _tokenize_leading_space(self.tokenizer, a)
-            })
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+            "prompt_len": len(prompt_ids),
+            "valid_first_targets": first_union,
+            "seq_len": len(input_ids),
+        }
 
-            return {
-                "input_ids": input_ids,
-                "attention_mask": attention_mask,
-                "labels": labels,
-                "prompt_len": len(prompt_ids),
-                "valid_first_targets": first_union,
-            }
+    def _pack_batch(self, all_samples: List[List[Dict]]) -> Dict[str, Any]:
+        """
+        Pack samples into batch format for flash_attn_varlen_func.
 
-        # Failed to generate valid sample after max_attempts
-        raise RuntimeError(
-            f"[DATASET] Failed to generate valid sample after {max_attempts} attempts. "
-            f"Stage {self.stage}, alpha={self._stage_alpha():.2f}, idx={idx}. "
-            f"This may indicate curriculum is too aggressive or max_input_size is too small."
+        Args:
+            all_samples: List of rows, each row is a list of samples to pack
+
+        Returns:
+            Batch dict with concatenated tokens and cu_seqlens
+        """
+        batch_input_ids = []
+        batch_labels = []
+        batch_position_ids = []
+        batch_cu_seqlens = []
+        batch_max_seqlen = []
+        all_sequence_info = []
+
+        total_actual_tokens = 0
+        total_tokens = 0
+
+        for row_idx, row_samples in enumerate(all_samples):
+            row_input_ids = []
+            row_labels = []
+            row_position_ids = []
+            cu_seqlens = [0]
+
+            current_pos = 0
+            for sample in row_samples:
+                seq_len = sample["seq_len"]
+
+                row_input_ids.extend(sample["input_ids"])
+                row_labels.extend(sample["labels"])
+                row_position_ids.extend(range(seq_len))
+
+                current_pos += seq_len
+                cu_seqlens.append(current_pos)
+
+                all_sequence_info.append({
+                    "row_idx": row_idx,
+                    "start_idx": cu_seqlens[-2],
+                    "end_idx": cu_seqlens[-1],
+                    "prompt_len": sample["prompt_len"],
+                    "valid_first_targets": sample["valid_first_targets"],
+                })
+
+            actual_len = len(row_input_ids)
+            total_actual_tokens += actual_len
+
+            # Pad row to pack_length
+            pad_len = self.pack_length - actual_len
+            if pad_len > 0:
+                row_input_ids.extend([self.pad_token_id] * pad_len)
+                row_labels.extend([-100] * pad_len)
+                row_position_ids.extend([0] * pad_len)
+            elif pad_len < 0:
+                # Truncate if somehow too long
+                row_input_ids = row_input_ids[:self.pack_length]
+                row_labels = row_labels[:self.pack_length]
+                row_position_ids = row_position_ids[:self.pack_length]
+
+            total_tokens += self.pack_length
+
+            batch_input_ids.append(row_input_ids)
+            batch_labels.append(row_labels)
+            batch_position_ids.append(row_position_ids)
+            batch_cu_seqlens.append(cu_seqlens)
+            batch_max_seqlen.append(max(s["seq_len"] for s in row_samples) if row_samples else 0)
+
+        return {
+            "input_ids": torch.tensor(batch_input_ids, dtype=torch.long),
+            "labels": torch.tensor(batch_labels, dtype=torch.long),
+            "position_ids": torch.tensor(batch_position_ids, dtype=torch.long),
+            "cu_seqlens_list": batch_cu_seqlens,
+            "max_seqlen_list": batch_max_seqlen,
+            "sequence_info": all_sequence_info,
+            "num_sequences": sum(len(row) for row in all_samples),
+            "_efficiency": (total_actual_tokens / total_tokens * 100) if total_tokens > 0 else 100,
+        }
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        """
+        Generate one fully packed batch.
+
+        Each call generates target_samples_per_batch samples and packs them
+        into rows of pack_length tokens.
+        """
+        gen, rng = self._get_worker_state(idx)
+
+        target_samples = self.target_samples_per_batch
+
+        all_rows = []
+        total_samples = 0
+        row_samples = []
+        row_len = 0
+
+        # Generate samples until we hit target count
+        max_attempts = target_samples * 10
+        attempts = 0
+
+        while total_samples < target_samples and attempts < max_attempts:
+            attempts += 1
+            sample = self._generate_one_sample(rng)
+
+            if sample is None:
+                continue
+
+            # Skip sequences too long for pack_length
+            if sample["seq_len"] > self.pack_length:
+                continue
+
+            # Check if sample fits in current row
+            if row_len + sample["seq_len"] > self.pack_length:
+                # Finalize current row
+                if row_samples:
+                    all_rows.append(row_samples)
+                    row_samples = []
+                    row_len = 0
+
+            # Add sample to current row
+            row_samples.append(sample)
+            row_len += sample["seq_len"]
+            total_samples += 1
+
+        # Finalize last row
+        if row_samples:
+            all_rows.append(row_samples)
+
+        # Handle edge case: no samples generated
+        if not all_rows:
+            raise RuntimeError(
+                f"[DATASET] Failed to generate any samples for idx={idx}. "
+                f"Stage={self.stage}, alpha={self._stage_alpha():.3f}"
+            )
+
+        return self._pack_batch(all_rows)
+
+
+class PackedSequenceTrainer(Trainer):
+    """
+    Trainer for packed sequences using Flash Attention varlen.
+    Properly handles Qwen3's RoPE implementation.
+    """
+
+    def __init__(self, *args, first_token_soft_weight=0.3, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.first_token_soft_weight = first_token_soft_weight
+        self.recent_losses = deque(maxlen=100)
+        self.first_token_correct = deque(maxlen=200)
+        self.full_word_correct = deque(maxlen=200)
+
+        self._last_batch_samples = 0
+        self._last_batch_tokens = 0
+        self._last_efficiency = None
+
+        # Training timing
+        self._train_timing = {
+            "data_wait": 0.0,
+            "forward": 0.0,
+            "total_step": 0.0,
+            "steps": 0,
+        }
+        self._step_start_time: Optional[float] = None
+
+        # Import Qwen3's RoPE implementation
+        try:
+            from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb as qwen_apply_rope
+            self._qwen_apply_rope = qwen_apply_rope
+        except ImportError:
+            # Fallback for older transformers versions
+            self._qwen_apply_rope = None
+
+    def get_train_dataloader(self):
+        """Bypass Accelerate's dataloader wrapping."""
+        from torch.utils.data import DataLoader
+        return DataLoader(
+            self.train_dataset,
+            batch_size=1,
+            shuffle=False,  # idx provides randomness via seeding
+            collate_fn=lambda x: x[0],  # Unwrap single-item batch
+            num_workers=4,
+            prefetch_factor=2,
+            pin_memory=True,
+            persistent_workers=True,
         )
+
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        t_data_ready = time.perf_counter()
+
+        if self._step_start_time is not None:
+            self._train_timing["data_wait"] += (t_data_ready - self._step_start_time)
+
+        t_forward_start = time.perf_counter()
+        loss = super().training_step(model, inputs, num_items_in_batch)
+        t_forward_end = time.perf_counter()
+
+        self._train_timing["forward"] += (t_forward_end - t_forward_start)
+        self._train_timing["steps"] += 1
+
+        self._step_start_time = time.perf_counter()
+        self._train_timing["total_step"] += (self._step_start_time - t_data_ready)
+
+        # if self._train_timing["steps"] % 100 == 0:
+        #     self._report_train_timing()
+
+        return loss
+
+    def _report_train_timing(self):
+        n = self._train_timing["steps"]
+        if n == 0 or not is_main_process():
+            return
+
+        data_ms = (self._train_timing["data_wait"] / n) * 1000
+        fwd_ms = (self._train_timing["forward"] / n) * 1000
+        total_ms = (self._train_timing["total_step"] / n) * 1000
+
+        data_pct = (data_ms / (data_ms + total_ms)) * 100 if (data_ms + total_ms) > 0 else 0
+
+        print(
+            f"\n[TRAIN-TIMING] Steps={n} | "
+            f"DataWait={data_ms:.1f}ms ({data_pct:.1f}%) | "
+            f"Forward+Loss={fwd_ms:.1f}ms | "
+            f"StepTotal={total_ms:.1f}ms | "
+            f"Throughput={1000 / total_ms:.1f} steps/s\n"
+        )
+
+    def reset_timing(self):
+        self._train_timing = {
+            "data_wait": 0.0,
+            "forward": 0.0,
+            "total_step": 0.0,
+            "steps": 0,
+        }
+        self._step_start_time = None
+
+    def _forward_layer_varlen(self, layer, hidden_states, cu_seqlens, max_seqlen,
+                              num_heads, num_kv_heads, head_dim, position_ids, rotary_emb):
+        """Forward one layer using flash_attn_varlen_func with Qwen3 compatibility."""
+
+        seq_len, hidden_dim = hidden_states.shape
+        device = hidden_states.device
+
+        residual = hidden_states
+        hidden_states = layer.input_layernorm(hidden_states)
+
+        # QKV projection - hidden_states is [seq_len, H]
+        q = layer.self_attn.q_proj(hidden_states)  # [seq_len, num_heads * head_dim]
+        k = layer.self_attn.k_proj(hidden_states)  # [seq_len, num_kv_heads * head_dim]
+        v = layer.self_attn.v_proj(hidden_states)  # [seq_len, num_kv_heads * head_dim]
+
+        # Reshape: [seq_len, num_heads, head_dim]
+        q = q.view(seq_len, num_heads, head_dim)
+        k = k.view(seq_len, num_kv_heads, head_dim)
+        v = v.view(seq_len, num_kv_heads, head_dim)
+
+        # === QK Normalization (Qwen3 specific) ===
+        if hasattr(layer.self_attn, 'q_norm') and layer.self_attn.q_norm is not None:
+            q = layer.self_attn.q_norm(q)
+            k = layer.self_attn.k_norm(k)
+
+        # Add batch dim and transpose for RoPE: [1, num_heads, seq_len, head_dim]
+        q = q.unsqueeze(0).transpose(1, 2)
+        k = k.unsqueeze(0).transpose(1, 2)
+        v = v.unsqueeze(0).transpose(1, 2)
+
+        # Get cos/sin from rotary_emb
+        cos, sin = rotary_emb(v, position_ids)
+
+        # Apply RoPE
+        if self._qwen_apply_rope is not None:
+            q, k = self._qwen_apply_rope(q, k, cos, sin)
+        else:
+            cos = cos.unsqueeze(1)  # [1, 1, seq_len, head_dim]
+            sin = sin.unsqueeze(1)
+            q = (q * cos) + (self._rotate_half(q) * sin)
+            k = (k * cos) + (self._rotate_half(k) * sin)
+
+        # Reshape for flash_attn_varlen: [seq_len, num_heads, head_dim]
+        q = q.squeeze(0).transpose(0, 1).contiguous()
+        k = k.squeeze(0).transpose(0, 1).contiguous()
+        v = v.squeeze(0).transpose(0, 1).contiguous()
+
+        # GQA: expand KV heads
+        if num_kv_heads != num_heads:
+            repeat_factor = num_heads // num_kv_heads
+            k = k.repeat_interleave(repeat_factor, dim=1)
+            v = v.repeat_interleave(repeat_factor, dim=1)
+
+        # Flash attention
+        attn_output = flash_attn_varlen_func(
+            q, k, v,
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_k=cu_seqlens,
+            max_seqlen_q=max_seqlen,
+            max_seqlen_k=max_seqlen,
+            causal=True,
+        )
+
+        # Output projection
+        attn_output = attn_output.reshape(seq_len, num_heads * head_dim)
+        attn_output = layer.self_attn.o_proj(attn_output)
+
+        hidden_states = residual + attn_output
+
+        # MLP
+        residual = hidden_states
+        hidden_states = layer.post_attention_layernorm(hidden_states)
+        hidden_states = layer.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
+        return hidden_states
+
+    def _rotate_half(self, x):
+        """Rotates half the hidden dims of the input."""
+        x1 = x[..., : x.shape[-1] // 2]
+        x2 = x[..., x.shape[-1] // 2:]
+        return torch.cat((-x2, x1), dim=-1)
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        # Extract metadata
+        sequence_info = inputs.pop("sequence_info")
+        num_sequences = inputs.pop("num_sequences")
+        cu_seqlens_list = inputs.pop("cu_seqlens_list")
+        max_seqlen_list = inputs.pop("max_seqlen_list")
+        efficiency = inputs.pop("_efficiency", None)
+
+        self._last_efficiency = efficiency
+        self._last_batch_samples = num_sequences
+        self._last_batch_tokens = sum(cu[-1] for cu in cu_seqlens_list)
+
+        input_ids = inputs["input_ids"]  # [B, pack_length]
+        labels = inputs["labels"]  # [B, pack_length]
+        position_ids = inputs["position_ids"]  # [B, pack_length]
+
+        B, T = input_ids.shape
+        device = input_ids.device
+
+        use_checkpoint = getattr(self.args, 'gradient_checkpointing', False)
+
+        # Unwrap model to get components
+        unwrapped = model
+        while hasattr(unwrapped, "module"):
+            unwrapped = unwrapped.module
+        if hasattr(unwrapped, "base_model"):
+            unwrapped = unwrapped.base_model
+        if hasattr(unwrapped, "model"):
+            unwrapped = unwrapped.model
+
+        # Get model components
+        embed_tokens = unwrapped.model.embed_tokens
+        layers = unwrapped.model.layers
+        norm = unwrapped.model.norm
+        lm_head = unwrapped.lm_head
+        rotary_emb = unwrapped.model.rotary_emb  # Model-level RoPE
+
+        # Get config
+        config = unwrapped.config
+        num_heads = config.num_attention_heads
+        num_kv_heads = getattr(config, "num_key_value_heads", num_heads)
+        head_dim = getattr(config, "head_dim", config.hidden_size // num_heads)
+
+        # Embed all tokens
+        hidden_states = embed_tokens(input_ids)  # [B, T, H]
+
+        # Process each row with its own cu_seqlens
+        all_row_losses = []
+        all_row_valid = []
+
+        for row_idx in range(B):
+            cu_seqlens = torch.tensor(cu_seqlens_list[row_idx], dtype=torch.int32, device=device)
+            max_seqlen = max_seqlen_list[row_idx]
+            actual_len = cu_seqlens[-1].item()
+
+            if actual_len == 0:
+                continue
+
+            # Trim to actual length
+            row_hidden = hidden_states[row_idx, :actual_len, :]  # [actual_len, H]
+            row_labels = labels[row_idx, :actual_len]  # [actual_len]
+            row_pos = position_ids[row_idx:row_idx + 1, :actual_len]  # [1, actual_len]
+
+            h = row_hidden  # [actual_len, H]
+
+            # Forward through layers
+            for layer in layers:
+                if use_checkpoint and model.training:
+                    h = checkpoint.checkpoint(
+                        self._forward_layer_varlen,
+                        layer, h, cu_seqlens, max_seqlen,
+                        num_heads, num_kv_heads, head_dim,
+                        row_pos, rotary_emb,
+                        use_reentrant=False,
+                    )
+                else:
+                    h = self._forward_layer_varlen(
+                        layer, h, cu_seqlens, max_seqlen,
+                        num_heads, num_kv_heads, head_dim,
+                        row_pos, rotary_emb,
+                    )
+
+            h = norm(h)  # [actual_len, H]
+            logits = lm_head(h)  # [actual_len, V]
+
+            # Compute loss for this row
+            shift_logits = logits[:-1, :]  # [actual_len-1, V]
+            shift_labels = row_labels[1:]  # [actual_len-1]
+
+            valid_mask = (shift_labels != -100)
+            n_valid = valid_mask.sum().item()
+
+            if n_valid > 0:
+                ce = F.cross_entropy(
+                    shift_logits[valid_mask],
+                    shift_labels[valid_mask],
+                    reduction='none'
+                )
+
+                # Apply soft first-token CE for sequences in this row
+                row_seqs = [s for s in sequence_info if s["row_idx"] == row_idx]
+                for seq in row_seqs:
+                    first_idx = seq["start_idx"] + seq["prompt_len"] - 1
+                    if first_idx < 0 or first_idx >= shift_logits.size(0):
+                        continue
+                    if not valid_mask[first_idx]:
+                        continue
+                    valid_first = seq["valid_first_targets"]
+                    if not valid_first:
+                        continue
+
+                    # Find position in ce tensor
+                    valid_positions = torch.nonzero(valid_mask, as_tuple=True)[0]
+                    ce_idx_matches = (valid_positions == first_idx).nonzero(as_tuple=True)[0]
+                    if len(ce_idx_matches) == 0:
+                        continue
+                    ce_idx = ce_idx_matches[0].item()
+
+                    # Soft CE
+                    logp = F.log_softmax(shift_logits[first_idx], dim=-1)
+                    ids = torch.tensor(valid_first, device=device, dtype=torch.long)
+                    ids = torch.unique(ids)
+                    soft_ce = -logp[ids].mean()
+
+                    # Blend
+                    ce[ce_idx] = (
+                            self.first_token_soft_weight * soft_ce +
+                            (1.0 - self.first_token_soft_weight) * ce[ce_idx]
+                    )
+
+                all_row_losses.append(ce.sum())
+                all_row_valid.append(n_valid)
+
+                # Track accuracy
+                with torch.no_grad():
+                    for seq in row_seqs:
+                        first_idx = seq["start_idx"] + seq["prompt_len"] - 1
+                        if 0 <= first_idx < shift_logits.size(0) and valid_mask[first_idx]:
+                            pred = torch.argmax(shift_logits[first_idx]).item()
+                            self.first_token_correct.append(pred in seq["valid_first_targets"])
+
+                        # Full word accuracy
+                        seq_start = seq["start_idx"] + seq["prompt_len"] - 1
+                        seq_end = min(seq["end_idx"] - 1, shift_logits.size(0))
+                        ok = True
+                        for j in range(seq_start, seq_end):
+                            if valid_mask[j]:
+                                if torch.argmax(shift_logits[j]).item() != shift_labels[j].item():
+                                    ok = False
+                                    break
+                        self.full_word_correct.append(ok)
+
+        # Aggregate loss
+        if all_row_losses:
+            total_loss = sum(all_row_losses)
+            total_valid = sum(all_row_valid)
+            loss = total_loss / max(total_valid, 1)
+        else:
+            loss = torch.tensor(0.0, device=device, requires_grad=True)
+
+        self.recent_losses.append(loss.item())
+
+        return loss
+
+    def get_first_token_acc(self):
+        return (sum(self.first_token_correct) / len(self.first_token_correct)) if self.first_token_correct else 0.0
+
+    def get_full_word_acc(self):
+        return (sum(self.full_word_correct) / len(self.full_word_correct)) if self.full_word_correct else 0.0
 
 
 # ================== Collator ==================
-
 def make_collate(tokenizer, pad_to_multiple_of=64):
     def collate(features):
         pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
@@ -541,7 +1455,9 @@ def make_collate(tokenizer, pad_to_multiple_of=64):
 
 # ================== Trainer (soft first-token CE) ==================
 class SinglePathARTrainer(Trainer):
-    def __init__(self, *args, first_token_soft_weight=0.3, use_chunked_ce=False, ce_chunk_size=1024, **kwargs):
+    def __init__(self, *args, first_token_soft_weight=0.3, use_chunked_ce=False, ce_chunk_size=1024, use_packing=False,
+                 **kwargs):
+        self.use_packing = use_packing
         super().__init__(*args, **kwargs)
         self.first_token_soft_weight = first_token_soft_weight
         self.recent_losses = deque(maxlen=100)
@@ -554,7 +1470,100 @@ class SinglePathARTrainer(Trainer):
         if self.use_chunked_ce:
             print(f"[TRAINER] Using chunked cross-entropy (chunk_size={ce_chunk_size})")
 
+        # Training timing
+        self._train_timing = {
+            "data_wait": 0.0,  # Time waiting for DataLoader
+            "forward": 0.0,  # Forward pass
+            "total_step": 0.0,  # Total step time
+            "steps": 0,
+        }
+        self._step_start_time: Optional[float] = None
+        self._data_ready_time: Optional[float] = None
+
+        # Track actual batch sizes for token budget mode
+        self._last_batch_samples = 0
+        self._last_batch_tokens = 0
+
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        """Override to add timing instrumentation"""
+        t_data_ready = time.perf_counter()
+
+        # Track data loading time (time since last step ended)
+        if self._step_start_time is not None:
+            self._train_timing["data_wait"] += (t_data_ready - self._step_start_time)
+
+        self._data_ready_time = t_data_ready
+
+        # Call parent's training_step (handles forward + loss computation)
+        t_forward_start = time.perf_counter()
+        loss = super().training_step(model, inputs, num_items_in_batch)
+        t_forward_end = time.perf_counter()
+
+        self._train_timing["forward"] += (t_forward_end - t_forward_start)
+        self._train_timing["steps"] += 1
+
+        # Mark step start for next iteration's data_wait calculation
+        self._step_start_time = time.perf_counter()
+        self._train_timing["total_step"] += (self._step_start_time - t_data_ready)
+
+        # Report every 100 steps
+        # if self._train_timing["steps"] % 100 == 0:
+        #     self._report_train_timing()
+
+        return loss
+
+    def _report_train_timing(self):
+        """Print training timing breakdown"""
+        n = self._train_timing["steps"]
+        if n == 0 or not is_main_process():
+            return
+
+        data_ms = (self._train_timing["data_wait"] / n) * 1000
+        fwd_ms = (self._train_timing["forward"] / n) * 1000
+        total_ms = (self._train_timing["total_step"] / n) * 1000
+
+        # Calculate percentages
+        if total_ms > 0:
+            data_pct = (data_ms / (data_ms + total_ms)) * 100
+            fwd_pct = (fwd_ms / total_ms) * 100
+        else:
+            data_pct = fwd_pct = 0
+
+        print(
+            f"\n[TRAIN-TIMING] Steps={n} | "
+            f"DataWait={data_ms:.1f}ms ({data_pct:.1f}%) | "
+            f"Forward+Loss={fwd_ms:.1f}ms ({fwd_pct:.1f}%) | "
+            f"StepTotal={total_ms:.1f}ms | "
+            f"Throughput={1000 / total_ms:.1f} steps/s (excl. data)\n"
+        )
+
+    def reset_timing(self):
+        """Reset timing stats (call on stage change)"""
+        self._train_timing = {
+            "data_wait": 0.0,
+            "forward": 0.0,
+            "total_step": 0.0,
+            "steps": 0,
+        }
+        self._step_start_time = None
+        self._data_ready_time = None
+
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        # Track batch size from inputs (for token budget mode)
+        if "_batch_size" in inputs:
+            self._last_batch_samples = inputs.pop("_batch_size")
+        else:
+            self._last_batch_samples = inputs["input_ids"].shape[0]
+
+        if "_tokens_actual" in inputs:
+            self._last_batch_tokens = inputs.pop("_tokens_actual")
+        else:
+            self._last_batch_tokens = inputs["input_ids"].numel()
+
+        # Remove other metadata fields
+        if "_tokens_padded" in inputs:
+            inputs.pop("_tokens_padded")
+
         prompt_len = inputs.pop("prompt_len")
         valid_first = inputs.pop("valid_first_targets")
         valid_first_mask = inputs.pop("valid_first_mask")
@@ -674,7 +1683,6 @@ class SinglePathARTrainer(Trainer):
         shift_labels = labels[:, 1:].contiguous()
 
         B, Tm1, H = shift_hidden.shape
-        V = lm_head_weight.shape[0]
         valid_mask = (shift_labels != -100)
 
         # === CHUNKED MAIN LOSS ===
@@ -785,210 +1793,27 @@ class SinglePathARTrainer(Trainer):
     def get_full_word_acc(self):
         return (sum(self.full_word_correct) / len(self.full_word_correct)) if self.full_word_correct else 0.0
 
+    def get_train_dataloader(self):
+        """Override to bypass Accelerate's dataloader wrapping for token budget mode."""
+        if self.use_packing:
+            from torch.utils.data import DataLoader
+
+            # Return a simple DataLoader that Accelerate won't mess with
+            dataloader = DataLoader(
+                self.train_dataset,
+                batch_size=1,  # Dataset yields pre-batched data
+                collate_fn=self.data_collator,
+                num_workers=0,
+                pin_memory=True,
+            )
+
+            # Skip Accelerate's prepare() - just move batches to device manually
+            return dataloader
+        else:
+            return super().get_train_dataloader()
+
 
 # ================== Eval helpers ==================
-@torch.no_grad()
-def run_eval_teacher_forced_parity(
-        model,
-        tokenizer,
-        task: str,
-        eval_inputs: List[str],
-        eval_labels: List[List[str]],
-        num_shots: int,
-        max_input_size: int,
-        seed: Optional[int],
-        print_mistakes: int = 0,
-        gc_every: int = 0,
-        **task_kwargs,
-) -> Dict[str, Any]:
-    barrier()
-    rank = get_rank()
-    world_size = get_world_size()
-    device = next(model.parameters()).device
-
-    # --- CONSTANTS ---
-    # CRITICAL for FSDP: Every rank must run exactly the same number of model steps.
-    # We cap the number of candidates we check per sample.
-    # If a sample has fewer candidates, we run dummy passes to fill the quota.
-    MAX_CANDIDATES_PER_SAMPLE = 5
-
-    # 1. Data Sharding & Padding (Sample Level)
-    total_len = len(eval_inputs)
-    chunk_size = math.ceil(total_len / world_size)
-
-    start_idx = rank * chunk_size
-    end_idx = min(start_idx + chunk_size, total_len)
-
-    my_inputs = eval_inputs[start_idx:end_idx]
-    my_labels = eval_labels[start_idx:end_idx]
-
-    actual_count = len(my_inputs)
-
-    # Pad samples to ensure every rank processes the same number of "rows"
-    pad_needed = chunk_size - actual_count
-    if pad_needed > 0:
-        dummy_in = my_inputs[-1] if my_inputs else ""
-        dummy_la = my_labels[-1] if my_labels else []
-        my_inputs.extend([dummy_in] * pad_needed)
-        my_labels.extend([dummy_la] * pad_needed)
-
-    rank_print(f"[EVAL-TF] Starting eval on {total_len} samples (Local: {actual_count}, Pad: {pad_needed})")
-
-    # 2. Setup Few-Shot
-    few_shots = []
-    if num_shots > 0:
-        fs_seed = (seed or 0) + 12345
-        gfs = NaturalLanguageGraphGenerator(max_input_size, seed=fs_seed)
-        batch = gfs.generate_batch(task, batch_size=max(num_shots, 3), alpha=0.5, **task_kwargs)
-        for ex in batch:
-            if ex and ex.output_texts:
-                few_shots.append({"input": ex.input_text, "output": ex.output_texts[0]})
-                if len(few_shots) >= num_shots:
-                    break
-
-    def shots_prefix():
-        if not few_shots:
-            return ""
-        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in
-                 few_shots]
-        return "\n\n".join(parts) + "\n\n"
-
-    # 3. Inference Loop
-    local_first_ok = 0
-    local_full_ok = 0
-    local_total = 0
-    mistakes_printed = 0
-    allow_print = is_main_process() and (print_mistakes > 0)
-
-    for idx, (x, ys) in enumerate(zip(my_inputs, my_labels)):
-        is_padding_sample = (idx >= actual_count)
-
-        ys_list = ys if isinstance(ys, list) else [ys]
-        prompt = (shots_prefix() + x) if few_shots else x
-        enc = tokenizer(prompt, return_tensors="pt", truncation=True).to(device)
-        prompt_len = enc["input_ids"].shape[1]
-        ttype = _determine_task_type(task, x)
-        end_ids = tokenizer(_get_end_tokens(ttype), add_special_tokens=False)["input_ids"]
-
-        # --- First Token Check (1 Forward Pass) ---
-        # This is safe because it runs exactly once per sample on all ranks.
-        out_prompt = model(**enc)  # <--- Forward Pass 1 (Sync Point)
-
-        if is_padding_sample:
-            # We still had to run the forward pass above to keep FSDP sync,
-            # but we stop processing this sample now.
-            # However, we MUST still run the "Candidate Loop" below as dummies
-            # so we stay in sync with ranks that are processing real samples.
-            pass
-        else:
-            # Calculate First Token Acc
-            union = set()
-            candidates = []
-            for gold in ys_list:
-                ids = _tokenize_leading_space(tokenizer, gold)
-                if ids:
-                    union.add(ids[0])
-                    candidates.append(ids + end_ids)
-
-            if not candidates:
-                local_total += 1
-                # We still fall through to the loop to run dummy passes
-            else:
-                fidx = prompt_len - 1
-                pred_first_id = torch.argmax(out_prompt.logits[0, fidx, :]).item()
-                local_first_ok += int(pred_first_id in union)
-
-        # --- Candidate Loop (Variable number of Forward Passes) ---
-        # CRITICAL FIX: Pad this loop so every rank runs exactly MAX_CANDIDATES steps.
-
-        # 1. Get real candidates (if any, and not padding sample)
-        real_candidates = []
-        if not is_padding_sample and 'candidates' in locals():
-            real_candidates = candidates[:MAX_CANDIDATES_PER_SAMPLE]
-
-        matched = False
-        pred_word = None
-
-        # 2. Run fixed number of steps
-        for i in range(MAX_CANDIDATES_PER_SAMPLE):
-            if i < len(real_candidates):
-                # === REAL CANDIDATE CHECK ===
-                cand = real_candidates[i]
-                full = torch.tensor(
-                    enc["input_ids"].tolist()[0] + cand,
-                    dtype=torch.long, device=device
-                ).unsqueeze(0)
-                attn = torch.ones_like(full)
-
-                out = model(input_ids=full, attention_mask=attn)  # <--- Forward Pass (Sync Point)
-
-                # Check match
-                slogits = out.logits[:, :-1, :]
-                slabels = full[:, 1:]
-                start = prompt_len - 1
-                ok = True
-                for j in range(start, slabels.shape[1]):
-                    gold_tok = slabels[0, j].item()
-                    pred_tok = torch.argmax(slogits[0, j, :]).item()
-                    if pred_tok != gold_tok:
-                        ok = False
-                        if pred_word is None and j == start:
-                            pred_word = tokenizer.decode([pred_tok], skip_special_tokens=True).strip()
-                        break
-                if ok:
-                    matched = True
-            else:
-                # === DUMMY PASS (Prevent Deadlock) ===
-                # Run the model on the prompt again just to participate in FSDP comms
-                _ = model(**enc)  # <--- Forward Pass (Sync Point)
-
-        # --- Metrics Update ---
-        if not is_padding_sample:
-            if pred_word is None and 'pred_first_id' in locals():
-                pred_word = tokenizer.decode([pred_first_id], skip_special_tokens=True).strip()
-
-            if not matched and allow_print and mistakes_printed < print_mistakes:
-                print("\n" + "=" * 60)
-                print(f"[TF MISTAKE #{mistakes_printed + 1}] (Rank {rank})")
-                print("Prompt fed to model:\n" + prompt)
-                print("Expected any of:", ys_list)
-                print(f"Predicted first-token id: {locals().get('pred_first_id', '?')} (word guess: '{pred_word}')")
-                mistakes_printed += 1
-
-            local_full_ok += int(matched)
-            if 'candidates' in locals() and candidates:
-                # Only increment total if valid candidates existed
-                # (If candidates was empty, we already incremented total above)
-                pass
-            if not ('candidates' in locals() and not candidates):
-                local_total += 1
-
-        if gc_every > 0 and (idx % gc_every == 0):
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-    # 4. Global Aggregation
-    metrics = torch.tensor([local_first_ok, local_full_ok, local_total], dtype=torch.long, device=device)
-    if dist_is_initialized():
-        torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
-
-    global_first = metrics[0].item()
-    global_full = metrics[1].item()
-    global_total = metrics[2].item()
-
-    barrier()
-    rank_print(f"[EVAL-TF] Completed. Global samples: {global_total}")
-
-    return {
-        "first_token_acc": (global_first / global_total) if global_total else 0.0,
-        "full_word_acc": (global_full / global_total) if global_total else 0.0,
-        "first_token_hits": global_first,
-        "full_word_hits": global_full,
-        "total": global_total,
-    }
-
-
 @torch.no_grad()
 def run_eval_greedy_readable(
         model,
@@ -1043,8 +1868,6 @@ def run_eval_greedy_readable(
         use_cache=True
     )
 
-    is_fsdp = isinstance(model, FSDP)
-
     # 2. Inference Loop
     for i, (x, ys) in enumerate(zip(my_inputs, my_labels)):
         is_padding = (i >= actual_count)
@@ -1055,24 +1878,14 @@ def run_eval_greedy_readable(
         prompt_len = enc.input_ids.shape[1]
 
         # Generate (Must run for everyone)
-        if is_fsdp:
-            with FSDP.summon_full_params(model, writeback=False, rank0_only=False):
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    gen_out = model.generate(
-                        **enc,
-                        max_new_tokens=24,
-                        generation_config=greedy_config,
-                        synced_gpus=True
-                    )
-        else:
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                unwrapped = model.module if hasattr(model, "module") else model
-                gen_out = unwrapped.generate(
-                    **enc,
-                    max_new_tokens=24,
-                    generation_config=greedy_config,
-                    synced_gpus=True
-                )
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            unwrapped = model.module if hasattr(model, "module") else model
+            gen_out = unwrapped.generate(
+                **enc,
+                max_new_tokens=24,
+                generation_config=greedy_config,
+                synced_gpus=True
+            )
 
         if is_padding:
             continue
@@ -1126,15 +1939,15 @@ def run_eval_greedy_readable(
     }
 
 
-# ================== Curriculum callback (FULL-word metric only) ==================
 class FirstTokenCurriculum(TrainerCallback):
     def __init__(
             self,
-            dataset: SinglePathARDataset,
+            dataset,
             n_stages: int,
             accuracy_threshold: float,
             min_steps_per_stage: int,
             check_every: int,
+            use_packing: bool = False,  # NEW
             # Stage eval config
             do_stage_eval: bool = False,
             eval_inputs_hard: List[str] = None,
@@ -1152,16 +1965,16 @@ class FirstTokenCurriculum(TrainerCallback):
         self.acc_thr = accuracy_threshold
         self.min_steps = min_steps_per_stage
         self.check_every = check_every
+        self.use_packing = use_packing
         self.trainer: Optional[SinglePathARTrainer] = None
         self.stage_start_step = 0
         self._last_log = -1
         self.finished = False
 
         # Speed tracking
-        self.samples_processed = 0
-        self.last_time = None
-        self.speed_history = deque(maxlen=100)  # Moving average
         self.stage_start_time = None
+        self.samples_this_stage = 0  # Track actual samples for token budget mode
+        self.tokens_this_stage = 0  # Track actual tokens
 
         # Resume cooldown
         self.resume_cooldown_steps = 50
@@ -1184,6 +1997,9 @@ class FirstTokenCurriculum(TrainerCallback):
         self.seed = seed
         self.stage_eval_history = []
 
+        # Loss tracking
+        self.loss_history = []
+
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
         if logs:
@@ -1191,11 +2007,12 @@ class FirstTokenCurriculum(TrainerCallback):
             self.last_lr = logs.get('learning_rate', self.last_lr)
         return control
 
-    def on_step_begin(self, args, state, control, **kwargs):
-        """Track time at step start"""
-        if self.last_time is None:
-            self.last_time = datetime.datetime.now()
-            self.stage_start_time = self.last_time
+    def on_train_begin(self, args, state, control, **kwargs):
+        """Initialize stage timing at training start"""
+        if self.stage_start_time is None:
+            self.stage_start_time = datetime.datetime.now()
+            self.samples_this_stage = 0
+            self.tokens_this_stage = 0
         return control
 
     def _current_metric(self) -> float:
@@ -1213,13 +2030,23 @@ class FirstTokenCurriculum(TrainerCallback):
 
     def on_save(self, args, state, control, **kwargs):
         """Save curriculum state alongside checkpoint"""
+        barrier()
         if is_main_process():
             checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
             _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step)
+
+        if is_main_process():
+            try:
+                loss_path = os.path.join(args.output_dir, "loss_history.json")
+                with open(loss_path, "w") as f:
+                    json.dump(self.loss_history, f)
+            except Exception as e:
+                rank_print(f"[LOSS] Warning: Could not save loss history: {e}")
+        barrier()
         return control
 
     def _run_stage_eval(self, stage: int, global_step: int):
-        """Run TF + greedy eval at α=1.0 after stage advancement."""
+        """Run greedy eval at alpha=1.0 after stage advancement."""
         if not self.do_stage_eval:
             return
         if self.eval_inputs_hard is None or self.tokenizer is None:
@@ -1231,7 +2058,7 @@ class FirstTokenCurriculum(TrainerCallback):
         if fp != self.eval_fingerprint_hard:
             rank_print(f"[STAGE-EVAL] WARNING: Fingerprint mismatch! {fp} != {self.eval_fingerprint_hard}")
 
-        rank_print(f"\n[STAGE-EVAL] Stage {stage} complete (step {global_step}), evaluating at α=1.0...")
+        rank_print(f"\n[STAGE-EVAL] Stage {stage} complete (step {global_step}), evaluating at alpha=1.0...")
 
         # Switch to eval mode
         model = self.trainer.model
@@ -1239,16 +2066,6 @@ class FirstTokenCurriculum(TrainerCallback):
         model.eval()
 
         with torch.no_grad():
-            # Teacher-forced eval
-            # tf_result = run_eval_teacher_forced_parity(
-            #     model, self.tokenizer, self.task,
-            #     self.eval_inputs_hard, self.eval_labels_hard,
-            #     num_shots=self.num_shots, max_input_size=self.max_input_size,
-            #     seed=self.seed, print_mistakes=0, gc_every=50,
-            #     **self.task_kwargs
-            # )
-
-            # Greedy eval
             greedy_result = run_eval_greedy_readable(
                 model, self.tokenizer, self.task,
                 self.eval_inputs_hard, self.eval_labels_hard,
@@ -1264,7 +2081,6 @@ class FirstTokenCurriculum(TrainerCallback):
         # Log results
         rank_print(
             f"[STAGE-EVAL] Stage {stage} | Step {global_step} | "
-            # f"TF: First={tf_result['first_token_acc']:.2%}, Full={tf_result['full_word_acc']:.2%} | "
             f"Greedy: First={greedy_result['first_token_acc']:.2%}, Full={greedy_result['full_word_acc']:.2%}"
         )
 
@@ -1273,8 +2089,6 @@ class FirstTokenCurriculum(TrainerCallback):
             "stage": stage,
             "step": global_step,
             "alpha_training": self.dataset._stage_alpha(),
-            # "tf_first": tf_result['first_token_acc'],
-            # "tf_full": tf_result['full_word_acc'],
             "greedy_first": greedy_result['first_token_acc'],
             "greedy_full": greedy_result['full_word_acc'],
         })
@@ -1293,22 +2107,38 @@ class FirstTokenCurriculum(TrainerCallback):
         if self.trainer is None or self.finished or state.global_step == 0:
             return control
 
+        # Track loss history
+        if self.trainer.recent_losses:
+            current_loss = self.trainer.recent_losses[-1]
+
+            # Get effective lookahead for search task
+            effective_L = None
+            if getattr(self.dataset, "task", None) == "search":
+                target_L = self.dataset._stage_target_lookahead()
+                if target_L is not None:
+                    effective_L = target_L
+                else:
+                    alpha = self.dataset._stage_alpha()
+                    n = getattr(self.dataset, "max_input_size", 256)
+                    cap = self.dataset.task_kwargs.get("max_lookahead")
+                    effective_L = effective_search_L(alpha, n, max_lookahead_cap=cap)
+
+            self.loss_history.append({
+                "step": state.global_step,
+                "loss": current_loss,
+                "stage": self.dataset.stage,
+                "alpha": self.dataset._stage_alpha(),
+                "effective_L": effective_L,
+            })
+
         current_time = datetime.datetime.now()
 
-        # ==================== Speed Tracking ====================
-        if self.last_time is not None:
-            time_delta = (current_time - self.last_time).total_seconds()
-            if time_delta > 0:
-                samples_per_step = (
-                        self.trainer.args.per_device_train_batch_size *
-                        self.trainer.args.gradient_accumulation_steps *
-                        get_world_size()
-                )
-                samples_per_sec = samples_per_step / time_delta
-                self.speed_history.append(samples_per_sec)
-                self.samples_processed += samples_per_step
-
-        self.last_time = current_time
+        # ==================== Track Samples for Packing mode
+        if self.use_packing:
+            if hasattr(self.trainer, '_last_batch_samples'):
+                self.samples_this_stage += self.trainer._last_batch_samples * get_world_size()
+            if hasattr(self.trainer, '_last_batch_tokens'):
+                self.tokens_this_stage += self.trainer._last_batch_tokens * get_world_size()
 
         # ==================== Logging (every 10 steps) ====================
         if state.global_step % 10 == 0 and state.global_step != self._last_log and is_main_process():
@@ -1316,15 +2146,28 @@ class FirstTokenCurriculum(TrainerCallback):
             f1 = self.trainer.get_first_token_acc()
             fw = self.trainer.get_full_word_acc()
 
-            # Speed metrics
-            instant_speed = self.speed_history[-1] if self.speed_history else 0
-            avg_speed = np.mean(self.speed_history) if self.speed_history else 0
-
             # Time in current stage
             stage_time_str = "0m"
+            samples_per_sec = 0.0
+            tokens_per_sec = 0.0
+
             if self.stage_start_time:
                 stage_time = (current_time - self.stage_start_time).total_seconds()
                 stage_time_str = f"{stage_time / 60:.1f}m"
+
+                if self.use_packing:
+                    # Use actual tracked samples
+                    if stage_time > 0 and self.samples_this_stage > 0:
+                        samples_per_sec = self.samples_this_stage / stage_time
+                    if stage_time > 0 and self.tokens_this_stage > 0:
+                        tokens_per_sec = self.tokens_this_stage / stage_time
+                else:
+                    # Fixed batch size mode
+                    steps_in_stage = state.global_step - self.stage_start_step
+                    if steps_in_stage > 0 and stage_time > 0:
+                        batch_size = self.trainer.args.per_device_train_batch_size
+                        world_size = get_world_size()
+                        samples_per_sec = (steps_in_stage * batch_size * world_size) / stage_time
 
             # Warmup indicator
             warmup_msg = ""
@@ -1332,11 +2175,37 @@ class FirstTokenCurriculum(TrainerCallback):
                 remaining = self.resume_cooldown_steps - (state.global_step - self.last_resume_step)
                 warmup_msg = f" | Warmup={remaining}"
 
-            print(f"[Stage {self.dataset.stage}/{self.n_stages}] step {state.global_step} | "
+            # Extra info for packing mode
+            extra_info = ""
+            if self.use_packing and self.samples_this_stage > 0:
+                steps_in_stage = state.global_step - self.stage_start_step
+                if steps_in_stage > 0:
+                    avg_seqs_per_step = self.samples_this_stage / steps_in_stage / get_world_size()
+                    avg_tokens_per_step = self.tokens_this_stage / steps_in_stage / get_world_size() if self.tokens_this_stage > 0 else 0
+                    extra_info = f" | seqs/step={avg_seqs_per_step:.1f} | toks/step={avg_tokens_per_step:.0f}"
+
+            if self.use_packing:
+                eff = getattr(self.trainer, '_last_efficiency', None)
+                if eff is not None:
+                    extra_info += f" | eff={eff:.1f}%"
+
+            # Format tokens/s with K suffix for readability
+            tokens_per_sec_str = f"{tokens_per_sec / 1000:.1f}K" if tokens_per_sec >= 1000 else f"{tokens_per_sec:.0f}"
+
+            # Calculate proper stage denominator
+            if getattr(self.dataset, 'linear_lookahead', False) and self.dataset.task == "search":
+                max_L = self.dataset.task_kwargs.get("max_lookahead", 12)
+                expected_stages = math.ceil((max_L - self.dataset.base_lookahead) / self.dataset.lookahead_step) + 1
+                current_L = self.dataset._stage_target_lookahead()
+                stage_str = f"[Stage {self.dataset.stage}/{expected_stages} L={current_L}]"
+            else:
+                stage_str = f"[Stage {self.dataset.stage}/{self.n_stages}]"
+
+            print(f"{stage_str} step {state.global_step} | "
                   f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
                   f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
-                  f"Speed={instant_speed:.1f} samples/s (avg={avg_speed:.1f}) | "
-                  f"Stage time={stage_time_str}{warmup_msg}")
+                  f"Speed={samples_per_sec:.1f} samples/s ({tokens_per_sec_str} toks/s) | "
+                  f"Stage time={stage_time_str}{extra_info}{warmup_msg}")
             self._last_log = state.global_step
 
         # ==================== Resume Warmup ====================
@@ -1354,6 +2223,8 @@ class FirstTokenCurriculum(TrainerCallback):
             if is_main_process():
                 print(f"[CHECK] Stage {self.dataset.stage} full={m:.2%} target>={self.acc_thr:.2%}")
 
+            barrier()
+
             if m >= self.acc_thr:
                 old_stage = self.dataset.stage
 
@@ -1362,55 +2233,68 @@ class FirstTokenCurriculum(TrainerCallback):
                     if self.stage_start_time:
                         total_stage_time = (current_time - self.stage_start_time).total_seconds()
                         steps_in_stage = state.global_step - self.stage_start_step
-                        print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
-                              f"{total_stage_time / 60:.1f} minutes")
+
+                        if self.use_packing:
+                            samples_per_sec = self.samples_this_stage / total_stage_time if total_stage_time > 0 else 0
+                            print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
+                                  f"{total_stage_time / 60:.1f} minutes | "
+                                  f"{self.samples_this_stage:,} samples | "
+                                  f"{samples_per_sec:.1f} samples/s")
+                        else:
+                            print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
+                                  f"{total_stage_time / 60:.1f} minutes")
                     else:
                         print(f"[COMPLETE] Stage {old_stage} complete")
 
-                # Run stage eval BEFORE advancing (captures model state at end of stage)
+                # Run stage eval BEFORE advancing
                 self._run_stage_eval(old_stage, state.global_step)
 
-                if self.dataset.stage < self.n_stages:
+                if is_main_process():
+                    plot_stage_loss(self.loss_history, old_stage, self.trainer.args.output_dir)
+                    plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages)
+
+                # Check if this was the final stage
+                if self.dataset._is_final_stage():
+                    if is_main_process():
+                        print("[FINISHED] Curriculum complete (reached max_lookahead)" if getattr(self.dataset,
+                                                                                                  'linear_lookahead',
+                                                                                                  False)
+                              else "[FINISHED] Curriculum complete")
+                    control.should_training_stop = True
+                    self.finished = True
+                else:
                     # Advance to next stage
                     self.dataset.stage += 1
                     self.stage_start_step = state.global_step
-                    # self.stage_start_time = current_time
                     self.stage_start_time = datetime.datetime.now()
+                    self.samples_this_stage = 0
+                    self.tokens_this_stage = 0
 
                     # Clear accuracy tracking for fresh measurement
                     self.trainer.first_token_correct.clear()
                     self.trainer.full_word_correct.clear()
 
+                    # Reset timing for new stage
+                    if hasattr(self.trainer, 'reset_timing'):
+                        self.trainer.reset_timing()
+
                     new_alpha = self.dataset._stage_alpha()
                     if is_main_process():
-                        # Show if alpha is capped
-                        uncapped_alpha = self.dataset.base_alpha + (1.0 - self.dataset.base_alpha) * (
-                                    self.dataset.stage - 1) / max(self.dataset.n_stages - 1, 1)
-                        cap_msg = f" (capped from {uncapped_alpha:.3f})" if new_alpha < uncapped_alpha else ""
-                        msg = f" -> Advanced to stage {self.dataset.stage} | alpha={new_alpha:.3f}{cap_msg}"
+                        msg = f" -> Advanced to stage {self.dataset.stage} | alpha={new_alpha:.3f}"
 
-                        # Show effective lookahead for search task
                         if getattr(self.dataset, "task", None) == "search":
-                            n = getattr(self.dataset, "max_input_size", 256)
-                            cap = None
-                            try:
-                                cap = int(self.dataset.task_kwargs.get("max_lookahead", 0)) or None
-                            except Exception:
-                                cap = None
-                            L_eff = effective_search_L(new_alpha, n, max_lookahead_cap=cap)
-                            msg += f" | effective max_lookahead={L_eff} (n={n}, cap={cap})"
+                            target_L = self.dataset._stage_target_lookahead()
+                            if target_L is not None:
+                                max_L = self.dataset.task_kwargs.get("max_lookahead", 12)
+                                msg += f" | L={target_L}/{max_L}"
+                            else:
+                                n = getattr(self.dataset, "max_input_size", 256)
+                                cap = self.dataset.task_kwargs.get("max_lookahead")
+                                L_eff = effective_search_L(new_alpha, n, max_lookahead_cap=cap)
+                                msg += f" | effective_L={L_eff} (n={n}, cap={cap})"
                         print(msg)
 
-                    # Save curriculum state
-                    _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
-                else:
-                    # Curriculum complete
-                    if is_main_process():
-                        print("[FINISHED] Curriculum complete")
-                        print(f"[SUMMARY] Total samples: {self.samples_processed:,} | "
-                              f"Avg speed: {np.mean(self.speed_history):.1f} samples/s")
-                    control.should_training_stop = True
-                    self.finished = True
+                        _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
 
         # ==================== Memory Cleanup (every 100 steps) ====================
         if state.global_step > 0 and state.global_step % 100 == 0:
@@ -1420,8 +2304,7 @@ class FirstTokenCurriculum(TrainerCallback):
                 if is_main_process() and state.global_step % 1000 == 0:
                     curr_mem = torch.cuda.memory_allocated() / 1e9
                     print(f"[MEM] Step {state.global_step} | "
-                          f"Current: {curr_mem:.2f}GB (Resting) | "
-                          f"Peak: {peak_mem:.2f}GB (Active)")
+                          f"Current: {curr_mem:.2f}GB | Peak: {peak_mem:.2f}GB")
                 torch.cuda.reset_peak_memory_stats()
 
         return control
@@ -1662,11 +2545,6 @@ def main():
     p.add_argument("--cache_dir", type=str, default=None)
     p.add_argument("--output_dir", type=str, default="./nl_output")
 
-    # FSDP
-    p.add_argument("--fsdp_enable", action="store_true")
-    p.add_argument("--fsdp_min_num_params", type=int,
-                   default=int(os.environ.get("ACCELERATE_FSDP_MIN_NUM_PARAMS", "100000000")))
-
     # LoRA
     p.add_argument("--use_lora", action="store_true", default=False)
     p.add_argument("--lora_rank", type=int, default=16)
@@ -1689,6 +2567,12 @@ def main():
     p.add_argument("--n_stages", type=int, default=10)
     p.add_argument("--base_alpha", type=float, default=0.1)
     p.add_argument("--max_alpha", type=float, default=1.0, help="Maximum alpha during training (eval always uses 1.0)")
+    p.add_argument("--linear_lookahead", action="store_true",
+                   help="Use linear lookahead curriculum (search task only)")
+    p.add_argument("--base_lookahead", type=int, default=1,
+                   help="Starting lookahead at stage 1 (linear_lookahead mode)")
+    p.add_argument("--lookahead_step", type=int, default=1,
+                   help="Lookahead increase per stage (linear_lookahead mode)")
     p.add_argument("--accuracy_threshold", type=float, default=0.98)
     p.add_argument("--min_steps_per_stage", type=int, default=500)
     p.add_argument("--check_every", type=int, default=50)
@@ -1710,7 +2594,7 @@ def main():
     p.add_argument("--do_redacted_eval", action="store_true", help="Run redacted sanity check (should be low)")
     p.add_argument("--do_seen_eval", action="store_true", help="Run seen-samples sanity check (should be ~100%)")
     p.add_argument("--do_stage_eval", action="store_true",
-                   help="Run TF+greedy eval at α=1.0 after each stage advancement")
+                   help="Run TF+greedy eval at alpha=1.0 after each stage advancement")
 
     # Redacted eval config
     p.add_argument("--eval_redacted_samples", type=int, default=None)
@@ -1727,32 +2611,35 @@ def main():
     p.add_argument("--resume_from_job", type=str, default=None)
 
     # Liger kernels
-    p.add_argument("--use_liger", action="store_true", help="Use Liger kernel for memory-efficient training")
+    p.add_argument("--use_liger", default=True, action="store_true",
+                   help="Use Liger kernel for memory-efficient training")
 
     # Chunked cross-entropy
     p.add_argument("--use_chunked_ce", action="store_true", help="Use chunked cross-entropy for memory efficiency")
     p.add_argument("--ce_chunk_size", type=int, default=1024, help="Chunk size for chunked cross-entropy")
 
+    # Packing
+    p.add_argument("--use_packing", action="store_true",
+                   help="Use sequence packing for efficiency")
+    p.add_argument("--pack_length", type=int, default=4096,
+                   help="Fixed length for packed rows")
+    p.add_argument("--target_samples_per_batch", type=int, default=64,
+                   help="Fixed number of samples per training step")
+
     global args
     args = p.parse_args()
 
-    # Check local config first to override args
-    cfg_candidate = None
-    if os.path.isfile(os.path.join(args.output_dir, "run_config.json")):
-        cfg_candidate = os.path.join(args.output_dir, "run_config.json")
-    elif args.resume_from_job:
-        prev = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}", "run_config.json")
-        if os.path.isfile(prev): cfg_candidate = prev
-
-    if cfg_candidate:
-        try:
-            with open(cfg_candidate) as f:
-                rc = json.load(f)
-                args.batch_size = int(rc["batch_size"])
-                args.gradient_accumulation_steps = int(rc["grad_acc"])
-                if is_main_process(): print(f"[CONFIG] Loaded override from {cfg_candidate}: BS={args.batch_size}")
-        except:
-            pass
+    # Validate linear_lookahead
+    if args.linear_lookahead:
+        if args.task != "search":
+            rank_print("[WARN] --linear_lookahead only applies to search task, ignoring")
+            args.linear_lookahead = False
+        else:
+            # Calculate expected number of stages
+            expected_stages = math.ceil((args.max_lookahead - args.base_lookahead) / args.lookahead_step) + 1
+            rank_print(
+                f"[CURRICULUM] Linear lookahead mode: L={args.base_lookahead} to {args.max_lookahead}, step={args.lookahead_step}")
+            rank_print(f"[CURRICULUM] Expected stages: {expected_stages}")
 
     # Initialize distributed if needed
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -1791,27 +2678,28 @@ def main():
     rank_print("[CKPT] This run dir      :", args.output_dir, "\n")
 
     # --- CONFIGURATION OVERRIDE LOGIC (OOM / RESUME) ---
-    cfg_candidate = None
-    if os.path.isfile(os.path.join(args.output_dir, "run_config.json")):
-        cfg_candidate = os.path.join(args.output_dir, "run_config.json")
-    elif args.resume_from_job:
-        prev_dir = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}")
-        if os.path.isfile(os.path.join(prev_dir, "run_config.json")):
-            cfg_candidate = os.path.join(prev_dir, "run_config.json")
+    if not args.use_packing:
+        cfg_candidate = None
+        if os.path.isfile(os.path.join(args.output_dir, "run_config.json")):
+            cfg_candidate = os.path.join(args.output_dir, "run_config.json")
+        elif args.resume_from_job:
+            prev_dir = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}")
+            if os.path.isfile(os.path.join(prev_dir, "run_config.json")):
+                cfg_candidate = os.path.join(prev_dir, "run_config.json")
 
-    if cfg_candidate:
-        try:
-            with open(cfg_candidate, "r") as f:
-                rc = json.load(f)
+        if cfg_candidate:
+            try:
+                with open(cfg_candidate, "r") as f:
+                    rc = json.load(f)
+                    if is_main_process():
+                        print(f"[RESUME-CFG] Found config at {cfg_candidate}")
+                        print(
+                            f"[RESUME-CFG] Overriding CLI args: BS {args.batch_size}->{rc['batch_size']}, GAS {args.gradient_accumulation_steps}->{rc['grad_acc']}")
+                    args.batch_size = int(rc["batch_size"])
+                    args.gradient_accumulation_steps = int(rc["grad_acc"])
+            except Exception as e:
                 if is_main_process():
-                    print(f"[RESUME-CFG] Found config at {cfg_candidate}")
-                    print(
-                        f"[RESUME-CFG] Overriding CLI args: BS {args.batch_size}->{rc['batch_size']}, GAS {args.gradient_accumulation_steps}->{rc['grad_acc']}")
-                args.batch_size = int(rc["batch_size"])
-                args.gradient_accumulation_steps = int(rc["grad_acc"])
-        except Exception as e:
-            if is_main_process():
-                print(f"[RESUME-CFG][WARN] Failed to load config from {cfg_candidate}: {e}")
+                    print(f"[RESUME-CFG][WARN] Failed to load config from {cfg_candidate}: {e}")
 
     # Resume from checkpoint logic
     resume_ckpt = None
@@ -1835,6 +2723,12 @@ def main():
     if resume_ckpt is None:
         rank_print(f"[CKPT] Fresh start")
 
+    resume_step = 0
+    if resume_ckpt:
+        match = re.search(r'checkpoint-(\d+)', resume_ckpt)
+        if match:
+            resume_step = int(match.group(1))
+
     # Tokenizer/model
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir=args.cache_dir, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -1845,7 +2739,7 @@ def main():
         "cache_dir": args.cache_dir,
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        "attn_implementation": "sdpa",
+        "attn_implementation": "flash_attention_2",
     }
 
     # Apply Liger fused ops (NOT cross entropy)
@@ -1865,13 +2759,12 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
 
-    # Disable tie word embeddings for FSDP/LoRA compatibility
-    if args.fsdp_enable and args.use_lora:
-        model.config.tie_word_embeddings = False
-
     if is_main_process():
         attn_impl = getattr(model.config, "_attn_implementation", "unknown")
         print(f"[ATTENTION] Using: {attn_impl}")
+        print(f"[FLASH] flash_sdp_enabled: {torch.backends.cuda.flash_sdp_enabled()}")
+        print(f"[FLASH] mem_efficient_sdp_enabled: {torch.backends.cuda.mem_efficient_sdp_enabled()}")
+        print(f"[FLASH] math_sdp_enabled: {torch.backends.cuda.math_sdp_enabled()}")
 
     # Gradient checkpointing
     if args.gradient_checkpointing:
@@ -1893,10 +2786,6 @@ def main():
             bias="none",
         )
         model = get_peft_model(model, lora_config)
-
-        if args.fsdp_enable:
-            model = model.to(torch.bfloat16)
-            rank_print("[FSDP] Cast model to bfloat16 for LoRA compatibility")
 
         if args.gradient_checkpointing:
             if hasattr(model, "enable_input_require_grads"):
@@ -1922,8 +2811,8 @@ def main():
         task_kwargs = {"max_frontier_size": args.max_frontier_size, "max_branch_size": args.max_branch_size}
 
     # ==================== GENERATE EVAL DATA ONCE ====================
-    eval_inputs_hard, eval_labels_hard = None, None  # α=1.0 (hardest)
-    eval_inputs_easy, eval_labels_easy = None, None  # α=base_alpha (easiest)
+    eval_inputs_hard, eval_labels_hard = None, None  # alpha=1.0 (hardest)
+    eval_inputs_easy, eval_labels_easy = None, None  # alpha=base_alpha (easiest)
     eval_fingerprint_hard, eval_fingerprint_easy = None, None
 
     need_eval_data = args.do_baseline or args.do_final_eval or args.do_redacted_eval or args.do_stage_eval
@@ -1932,7 +2821,7 @@ def main():
         rank_print("[EVAL-DATA] Generating eval sets (once for all evals)...")
 
         if is_main_process():
-            # Hard eval set: α=1.0
+            # Hard eval set: alpha=1.0
             eval_inputs_hard, eval_labels_hard, _ = generate_eval_like_training(
                 n_samples=args.eval_samples,
                 task=args.task,
@@ -1945,7 +2834,7 @@ def main():
                 **task_kwargs,
             )
 
-            # Easy eval set: α=base_alpha
+            # Easy eval set: alpha=base_alpha
             eval_inputs_easy, eval_labels_easy, _ = generate_eval_like_training(
                 n_samples=args.eval_samples,
                 task=args.task,
@@ -1968,30 +2857,71 @@ def main():
         eval_fingerprint_hard = _eval_data_fingerprint(eval_inputs_hard, eval_labels_hard)
         eval_fingerprint_easy = _eval_data_fingerprint(eval_inputs_easy, eval_labels_easy)
 
-        rank_print(f"[EVAL-DATA] Hard (α=1.0): n={len(eval_inputs_hard)}, fingerprint={eval_fingerprint_hard}")
+        rank_print(f"[EVAL-DATA] Hard (alpha=1.0): n={len(eval_inputs_hard)}, fingerprint={eval_fingerprint_hard}")
         rank_print(
-            f"[EVAL-DATA] Easy (α={args.base_alpha}): n={len(eval_inputs_easy)}, fingerprint={eval_fingerprint_easy}")
+            f"[EVAL-DATA] Easy (alpha={args.base_alpha}): n={len(eval_inputs_easy)}, fingerprint={eval_fingerprint_easy}")
 
         # Reserve these inputs so training doesn't generate duplicates
         if eval_inputs_hard: reserved_inputs.update(eval_inputs_hard)
         if eval_inputs_easy: reserved_inputs.update(eval_inputs_easy)
 
     # ---------------- Training dataset ----------------
-    dataset = SinglePathARDataset(
-        task=args.task,
-        tokenizer=tokenizer,
-        stage=1,
-        n_stages=args.n_stages,
-        base_alpha=args.base_alpha,
-        max_alpha=args.max_alpha,
-        max_input_size=args.max_input_size,
-        reserved_inputs=reserved_inputs,
-        num_shots=args.num_shots,
-        seed=args.seed,
-        store_examples=args.do_seen_eval,
-        store_cap=1000,
-        **task_kwargs,
-    )
+    if args.use_packing:
+        rank_print(
+            f"[DATASET] Using PackedSequenceDataset (pack_length={args.pack_length}, target_samples={args.target_samples_per_batch})")
+        if args.do_seen_eval:
+            rank_print("[WARN] --do_seen_eval disabled for packed dataset (incompatible with multi-worker)")
+            args.do_seen_eval = False
+
+        dataset = PackedSequenceDataset(
+            task=args.task,
+            tokenizer=tokenizer,
+            pack_length=args.pack_length,
+            target_samples_per_batch=args.target_samples_per_batch,
+            stage=1,
+            n_stages=args.n_stages,
+            base_alpha=args.base_alpha,
+            max_alpha=args.max_alpha,
+            max_input_size=args.max_input_size,
+            reserved_inputs=reserved_inputs,
+            num_shots=args.num_shots,
+            seed=args.seed,
+            resume_step=resume_step,
+            store_examples=args.do_seen_eval,
+            store_cap=1000,
+            linear_lookahead=args.linear_lookahead,
+            base_lookahead=args.base_lookahead,
+            lookahead_step=args.lookahead_step,
+            epoch_size=100_000_000,
+            **task_kwargs,
+        )
+        data_collator = lambda x: x[0]  # Identity
+        effective_batch_size = 1
+        num_workers = 4
+    else:
+        rank_print(f"[DATASET] Using SinglePathARDataset (batch_size={args.batch_size})")
+        dataset = SinglePathARDataset(
+            task=args.task,
+            tokenizer=tokenizer,
+            stage=1,
+            n_stages=args.n_stages,
+            base_alpha=args.base_alpha,
+            max_alpha=args.max_alpha,
+            max_input_size=args.max_input_size,
+            reserved_inputs=reserved_inputs,
+            num_shots=args.num_shots,
+            seed=args.seed,
+            store_examples=args.do_seen_eval,
+            store_cap=1000,
+            resume_step=resume_step,
+            linear_lookahead=args.linear_lookahead,
+            base_lookahead=args.base_lookahead,
+            lookahead_step=args.lookahead_step,
+            **task_kwargs,
+        )
+        data_collator = make_collate(tokenizer, pad_to_multiple_of=None)
+        effective_batch_size = args.batch_size
+        num_workers = 8
 
     curriculum = FirstTokenCurriculum(
         dataset=dataset,
@@ -1999,6 +2929,7 @@ def main():
         accuracy_threshold=args.accuracy_threshold,
         min_steps_per_stage=args.min_steps_per_stage,
         check_every=args.check_every,
+        use_packing=args.use_packing,
         # Stage eval config
         do_stage_eval=args.do_stage_eval,
         eval_inputs_hard=eval_inputs_hard,
@@ -2019,14 +2950,19 @@ def main():
             if match:
                 curriculum.last_resume_step = int(match.group(1))
 
-    # FSDP must use original parameters when LoRA is applied
-    fsdp_use_orig = True if args.use_lora else False
+    # Disable Accelerate batch dispatching for token-budget training
+    if args.use_packing:
+        os.environ["ACCELERATE_DISPATCH_BATCHES"] = "false"
+        os.environ["ACCELERATE_SPLIT_BATCHES"] = "false"
+        os.environ["ACCELERATE_EVEN_BATCHES"] = "false"
+
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        per_device_train_batch_size=args.batch_size,
+        per_device_train_batch_size=effective_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
         warmup_steps=args.warmup_steps,
+        max_steps=100000000 if args.use_packing else -1,
         num_train_epochs=1000,
         logging_steps=10,
         logging_first_step=False,
@@ -2040,26 +2976,17 @@ def main():
         optim="adamw_torch_fused",
         # dataloader_num_workers=0,
 
-        dataloader_num_workers=4,  # or 8
-        prefetch_factor=4,
-
+        dataloader_num_workers=num_workers,
+        dataloader_prefetch_factor=4 if num_workers > 0 else None,
+        dataloader_persistent_workers=num_workers > 0,
         dataloader_pin_memory=True,
+
         seed=args.seed if args.seed is not None else 42,
-        fsdp=(['full_shard', 'auto_wrap'] if args.fsdp_enable else []),
-        fsdp_config=(
-            {
-                "min_num_params": int(args.fsdp_min_num_params),
-                "use_orig_params": fsdp_use_orig,
-                "limit_all_gathers": True,
-                "sync_module_states": True,
-                "offload_to_cpu": False,
-                "state_dict_type": "SHARDED_STATE_DICT",
-                "auto_wrap_policy": "transformer_based_wrap",
-                "backward_prefetch": "backward_pre",
-                "forward_prefetch": True,
-            } if args.fsdp_enable else None
-        ),
+
         torch_compile=False,
+        torch_compile_backend="inductor",  # default
+        torch_compile_mode="reduce-overhead",  # optional
+
         ddp_find_unused_parameters=False,
         gradient_checkpointing=args.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False} if args.gradient_checkpointing else None,
@@ -2076,7 +3003,7 @@ def main():
         assert fp_hard == eval_fingerprint_hard, f"Hard eval fingerprint mismatch!"
         assert fp_easy == eval_fingerprint_easy, f"Easy eval fingerprint mismatch!"
 
-        # Hard eval: α=1.0
+        # Hard eval: alpha=1.0
         base_hard = run_eval_greedy_readable(
             eval_model, tokenizer, args.task,
             eval_inputs_hard, eval_labels_hard,
@@ -2084,7 +3011,7 @@ def main():
             print_examples=args.print_eval_examples, **task_kwargs
         )
 
-        # Easy eval: α=base_alpha
+        # Easy eval: alpha=base_alpha
         base_easy = run_eval_greedy_readable(
             eval_model, tokenizer, args.task,
             eval_inputs_easy, eval_labels_easy,
@@ -2093,11 +3020,11 @@ def main():
         )
 
         rank_print(
-            f"\n[BASELINE-α1.0] First={base_hard['first_token_acc']:.2%} "
+            f"\n[BASELINE-alpha1.0] First={base_hard['first_token_acc']:.2%} "
             f"| Full={base_hard['full_word_acc']:.2%} | N={base_hard['total']}"
         )
         rank_print(
-            f"[BASELINE-α{args.base_alpha}] First={base_easy['first_token_acc']:.2%} "
+            f"[BASELINE-alpha{args.base_alpha}] First={base_easy['first_token_acc']:.2%} "
             f"| Full={base_easy['full_word_acc']:.2%} | N={base_easy['total']}\n"
         )
 
@@ -2107,17 +3034,29 @@ def main():
         skip_baseline=(not args.do_baseline) or (resume_ckpt is not None)
     )
 
-    trainer = SinglePathARTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset,
-        tokenizer=tokenizer,
-        data_collator=make_collate(tokenizer, pad_to_multiple_of=None),
-        callbacks=[curriculum, baseline_cb],
-        first_token_soft_weight=args.first_token_soft_weight,
-        use_chunked_ce=args.use_chunked_ce,
-        ce_chunk_size=args.ce_chunk_size,
-    )
+    if args.use_packing:
+        trainer = PackedSequenceTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset,
+            tokenizer=tokenizer,
+            data_collator=data_collator,
+            callbacks=[curriculum, baseline_cb],
+            first_token_soft_weight=args.first_token_soft_weight,
+        )
+    else:
+        trainer = SinglePathARTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset,
+            tokenizer=tokenizer,
+            data_collator=data_collator,
+            callbacks=[curriculum, baseline_cb],
+            first_token_soft_weight=args.first_token_soft_weight,
+            use_chunked_ce=args.use_chunked_ce,
+            ce_chunk_size=args.ce_chunk_size,
+            use_packing=False,
+        )
     curriculum.trainer = trainer
     baseline_cb.trainer = trainer
 
@@ -2145,7 +3084,8 @@ def main():
             print(f"[META][WARN] Could not write run_meta.json: {e}")
 
     # Save initial curriculum state
-    _save_curriculum_state(args.output_dir, dataset.stage, curriculum.stage_start_step)
+    if is_main_process():
+        _save_curriculum_state(args.output_dir, dataset.stage, curriculum.stage_start_step)
 
     # ----- TRAINING STARTS HERE -----
     rank_print("\n[TRAIN] Starting training...\n")
@@ -2228,7 +3168,7 @@ def main():
 
         barrier()
 
-    # ----- Final eval: TF + greedy at α=1.0 and α=base_alpha -----
+    # ----- Final eval: TF + greedy at alpha=1.0 and alpha=base_alpha -----
     if args.do_final_eval:
         trainer.model.eval()
 
@@ -2240,14 +3180,6 @@ def main():
         assert fp_easy == eval_fingerprint_easy, f"Easy eval fingerprint mismatch! {fp_easy} != {eval_fingerprint_easy}"
         rank_print(f"[FINAL-EVAL] Fingerprints verified ✓")
 
-        # Hard eval: α=1.0
-        # final_tf_hard = run_eval_teacher_forced_parity(
-        #     trainer.model, tokenizer, args.task, eval_inputs_hard, eval_labels_hard,
-        #     num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-        #     print_mistakes=args.print_eval_examples, gc_every=50, **task_kwargs
-        # )
-        # rank_print(f"[FINAL-TF-α1.0] First={final_tf_hard['first_token_acc']:.2%} | Full={final_tf_hard['full_word_acc']:.2%} | N={final_tf_hard['total']}")
-
         greedy_hard = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
             eval_inputs_hard, eval_labels_hard,
@@ -2255,15 +3187,7 @@ def main():
             print_examples=min(3, args.print_eval_examples), **task_kwargs
         )
         rank_print(
-            f"[FINAL-GREEDY-α1.0] First={greedy_hard['first_token_acc']:.2%} | Full={greedy_hard['full_word_acc']:.2%} | N={greedy_hard['total']}")
-
-        # Easy eval: α=base_alpha
-        # final_tf_easy = run_eval_teacher_forced_parity(
-        #     trainer.model, tokenizer, args.task, eval_inputs_easy, eval_labels_easy,
-        #     num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-        #     print_mistakes=0, gc_every=50, **task_kwargs
-        # )
-        # rank_print(f"[FINAL-TF-α{args.base_alpha}] First={final_tf_easy['first_token_acc']:.2%} | Full={final_tf_easy['full_word_acc']:.2%} | N={final_tf_easy['total']}")
+            f"[FINAL-GREEDY-alpha1.0] First={greedy_hard['first_token_acc']:.2%} | Full={greedy_hard['full_word_acc']:.2%} | N={greedy_hard['total']}")
 
         greedy_easy = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
@@ -2272,7 +3196,7 @@ def main():
             print_examples=0, **task_kwargs
         )
         rank_print(
-            f"[FINAL-GREEDY-α{args.base_alpha}] First={greedy_easy['first_token_acc']:.2%} | Full={greedy_easy['full_word_acc']:.2%} | N={greedy_easy['total']}")
+            f"[FINAL-GREEDY-alpha{args.base_alpha}] First={greedy_easy['first_token_acc']:.2%} | Full={greedy_easy['full_word_acc']:.2%} | N={greedy_easy['total']}")
 
         # Save metrics
         if is_main_process():
@@ -2301,7 +3225,7 @@ def main():
         if red_n is None or red_n <= 0:
             red_n = args.eval_samples
 
-        # Redact the hard eval set (α=1.0)
+        # Redact the hard eval set (alpha=1.0)
         red_inputs, red_labels = build_redacted_eval_set(
             eval_inputs_hard, eval_labels_hard,
             token=args.redaction_token,
@@ -2319,6 +3243,18 @@ def main():
                 f"[REDACTED] First={red_result['first_token_acc']:.2%} | Full={red_result['full_word_acc']:.2%} | N={red_result['total']}")
         else:
             rank_print("[REDACTED-EVAL] Skipped (could not redact any eval items cleanly)")
+
+    if is_main_process():
+        # Save final loss history
+        try:
+            with open(os.path.join(args.output_dir, "loss_history.json"), "w") as f:
+                json.dump(curriculum.loss_history, f)
+            rank_print(f"[LOSS] Saved {len(curriculum.loss_history)} records")
+        except Exception as e:
+            rank_print(f"[LOSS] Warning: {e}")
+
+        # Final overall plot
+        plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages)
 
     # Final cleanup
     gc.collect()
