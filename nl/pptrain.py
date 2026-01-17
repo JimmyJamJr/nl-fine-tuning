@@ -1,7 +1,9 @@
 import argparse
+import json
 import os
 from collections import deque
-from typing import Iterator, Dict, Any, Optional, List, Tuple
+from pathlib import Path
+from typing import Iterator, Dict, Any, Optional, List, Tuple, Set
 
 import torch
 import torch.nn.functional as F
@@ -24,6 +26,24 @@ def load_model_and_tokenizer(model_name: str):
     return model, tokenizer
 
 
+def load_heldout_prompts(heldout_path: str, *, max_prompts: Optional[int] = None) -> Set[str]:
+    prompts: Set[str] = set()
+    with open(heldout_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            t = row.get("input_text")
+            if t:
+                prompts.add(t)
+                if max_prompts is not None and len(prompts) >= max_prompts:
+                    break
+    if not prompts:
+        raise RuntimeError(f"No prompts loaded from heldout_path={heldout_path}")
+    return prompts
+
+
 def synthetic_nl_stream(
     *,
     max_input_size: int,
@@ -31,6 +51,7 @@ def synthetic_nl_stream(
     seed: int,
     rank: int,
     world_size: int,
+    reserved_inputs: Optional[Set[str]] = None,
 ) -> Tuple[SyntheticNL, Iterator[Dict[str, Any]]]:
     ds = SyntheticNL(
         max_input_size=max_input_size,
@@ -39,6 +60,7 @@ def synthetic_nl_stream(
         rank=rank,
         world_size=world_size,
         stage=1,
+        reserved_inputs=reserved_inputs,
     )
 
     def _it():
@@ -77,6 +99,7 @@ def build_synth_collate_fn(*, tokenizer, seq_len: int):
         for ex in batch:
             p_ids = tokenizer(ex["prompt"], add_special_tokens=True, truncation=False)["input_ids"]
             a_ids = _tokenize_leading_space(tokenizer, ex["answer"])
+
             ids = p_ids + a_ids + [eos_id]
             labels_pred = ([-100] * len(p_ids)) + a_ids + [eos_id]
 
@@ -185,8 +208,40 @@ def reduce_max_bool(flag: bool, accelerator: Accelerator) -> bool:
     return bool(t.item())
 
 
+def checkpoint_dir(run_dir: str, step: int) -> Path:
+    return Path(run_dir) / "checkpoints" / f"step_{step:08d}"
+
+
+def save_train_state(
+    *,
+    ckpt: Path,
+    step: int,
+    stage: int,
+    curr_flags: List[bool],
+    heldout_path: str,
+) -> None:
+    ckpt.mkdir(parents=True, exist_ok=True)
+    state = {
+        "step": int(step),
+        "synthetic_stage": int(stage),
+        "curr_flags": [bool(x) for x in curr_flags],
+        "heldout_path": heldout_path,
+    }
+    with (ckpt / "train_state.json").open("w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+def load_train_state(ckpt: Path) -> Dict[str, Any]:
+    p = ckpt / "train_state.json"
+    if not p.exists():
+        raise RuntimeError(f"Missing train_state.json in checkpoint: {ckpt}")
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def build_argparser():
     p = argparse.ArgumentParser()
+
     p.add_argument("--run_dir", required=True)
     p.add_argument("--model_name", default="EleutherAI/pythia-160m")
     p.add_argument("--seed", type=int, default=1337)
@@ -206,7 +261,12 @@ def build_argparser():
     p.add_argument("--mixed_precision", choices=["no", "fp16", "bf16"], default="bf16")
 
     p.add_argument("--save_every", type=int, default=200)
-    p.add_argument("--resume_from", default=None)
+    p.add_argument(
+        "--resume_from",
+        type=str,
+        default=None,
+        help="Path to a checkpoint dir like .../checkpoints/step_00000200",
+    )
 
     p.add_argument("--max_input_size", type=int, default=256)
     p.add_argument("--max_lookahead", type=int, default=64)
@@ -214,12 +274,27 @@ def build_argparser():
     p.add_argument("--curr_window", type=int, default=200)
     p.add_argument("--curr_check_every", type=int, default=200)
     p.add_argument("--curr_threshold", type=float, default=0.98)
+
+    p.add_argument(
+        "--heldout_path",
+        type=str,
+        required=True,
+        help="Path to heldout.jsonl (prompts excluded from training via reserved_inputs).",
+    )
+    p.add_argument(
+        "--heldout_max_prompts",
+        type=int,
+        default=0,
+        help="Optional cap on heldout prompts to load (0 = load all).",
+    )
+
     return p
 
 
 def main():
     args = build_argparser().parse_args()
-    os.makedirs(os.path.join(args.run_dir, "checkpoints"), exist_ok=True)
+    ckpt_root = Path(args.run_dir) / "checkpoints"
+    ckpt_root.mkdir(parents=True, exist_ok=True)
 
     accelerator = Accelerator(
         mixed_precision=None if args.mixed_precision == "no" else args.mixed_precision,
@@ -237,18 +312,29 @@ def main():
 
     model, tokenizer = load_model_and_tokenizer(args.model_name)
 
+    max_prompts = None if args.heldout_max_prompts == 0 else int(args.heldout_max_prompts)
+    heldout_prompts = load_heldout_prompts(args.heldout_path, max_prompts=max_prompts)
+    if accelerator.is_main_process:
+        print(f"loaded heldout prompts: {len(heldout_prompts)} from {args.heldout_path}", flush=True)
+
     synth_ds, item_iter = synthetic_nl_stream(
         max_input_size=args.max_input_size,
         max_lookahead=args.max_lookahead,
         seed=args.seed,
         rank=accelerator.process_index,
         world_size=accelerator.num_processes,
+        reserved_inputs=heldout_prompts,
     )
     dataset = PromptAnswerDataset(item_iter=item_iter)
     collate_fn = build_synth_collate_fn(tokenizer=tokenizer, seq_len=args.seq_len)
-    loader = DataLoader(dataset, batch_size=args.micro_batch, collate_fn=collate_fn)
 
-    curr_deque = deque(maxlen=args.curr_window)
+    loader = DataLoader(
+        dataset,
+        batch_size=args.micro_batch,
+        collate_fn=collate_fn,
+        num_workers=0,
+        pin_memory=True,
+    )
 
     optimizer = AdamW(
         model.parameters(),
@@ -261,9 +347,36 @@ def main():
     model, optimizer, loader = accelerator.prepare(model, optimizer, loader)
     model.train()
 
+    curr_deque: deque = deque(maxlen=args.curr_window)
+
+    start_step = 0
+    if args.resume_from is not None:
+        resume_dir = Path(args.resume_from).expanduser().resolve()
+        if accelerator.is_main_process:
+            print(f"resuming from checkpoint: {resume_dir}", flush=True)
+
+        accelerator.load_state(str(resume_dir))
+        state = load_train_state(resume_dir)
+
+        start_step = int(state.get("step", 0))
+        saved_stage = int(state.get("synthetic_stage", 1))
+        synth_ds.stage = saved_stage
+
+        saved_flags = state.get("curr_flags", [])
+        curr_deque.clear()
+        for x in saved_flags[-args.curr_window :]:
+            curr_deque.append(bool(x))
+
+        if accelerator.is_main_process:
+            print(
+                f"loaded train_state: step={start_step} stage={synth_ds.stage} "
+                f"curr_window_filled={len(curr_deque)}/{args.curr_window}",
+                flush=True,
+            )
+
     loader_iter = iter(loader)
 
-    for step in range(args.max_steps):
+    for step in range(start_step, args.max_steps):
         with accelerator.accumulate(model):
             batch = next(loader_iter)
 
@@ -319,6 +432,20 @@ def main():
                     if accelerator.is_main_process:
                         print("finished curriculum (stage > max_lookahead).", flush=True)
                     break
+
+        if args.save_every > 0 and (step + 1) % args.save_every == 0:
+            ckpt = checkpoint_dir(args.run_dir, step + 1)
+            accelerator.wait_for_everyone()
+            accelerator.save_state(str(ckpt))
+            if accelerator.is_main_process:
+                save_train_state(
+                    ckpt=ckpt,
+                    step=step + 1,
+                    stage=synth_ds.stage,
+                    curr_flags=list(curr_deque),
+                    heldout_path=args.heldout_path,
+                )
+                print(f"saved checkpoint: {ckpt}", flush=True)
 
     accelerator.wait_for_everyone()
 
