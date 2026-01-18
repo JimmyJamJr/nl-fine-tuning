@@ -1,6 +1,5 @@
 import multiprocessing
 from typing import Optional, Set, Dict, Any, Iterator, List, Tuple
-import hashlib
 import torch
 from torch.utils.data import IterableDataset
 
@@ -18,6 +17,7 @@ class SyntheticNL(IterableDataset):
         reserved_inputs: Optional[Set[str]] = None,
         world_size: int = 1,
         rank: int = 0,
+        start_index: int = 0,
         **task_kwargs,
     ):
         self.task = task
@@ -25,9 +25,11 @@ class SyntheticNL(IterableDataset):
         self.max_lookahead = int(max_lookahead)
         self.seed = seed
         self._stage = multiprocessing.Value("i", int(stage))
+        self._current_index = multiprocessing.Value("i", int(start_index))
         self.reserved_inputs = reserved_inputs or set()
         self.world_size = int(world_size)
         self.rank = int(rank)
+        self.start_index = int(start_index)
         self.task_kwargs = task_kwargs
 
     @property
@@ -37,6 +39,10 @@ class SyntheticNL(IterableDataset):
     @stage.setter
     def stage(self, value: int) -> None:
         self._stage.value = int(value)
+
+    @property
+    def current_index(self) -> int:
+        return int(self._current_index.value)
 
     def current_alpha(self) -> float:
         return float(self.stage) / float(self.max_lookahead)
@@ -50,7 +56,7 @@ class SyntheticNL(IterableDataset):
 
         base_seed = (self.seed or 0) + self.rank * 9973 + worker_id * 997
 
-        i = 0
+        i = self.start_index
 
         while True:
             stage = self.stage
@@ -92,6 +98,7 @@ class SyntheticNL(IterableDataset):
                 )
 
             i += 1
+            self._current_index.value = i
 
 
 def build_heldout_set(
