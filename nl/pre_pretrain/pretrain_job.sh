@@ -29,6 +29,7 @@ echo "Job ID: $SLURM_JOB_ID"
 
 # ========== Environment ==========
 module load conda
+source /home/mnickel/miniconda3/etc/profile.d/conda.sh
 conda activate pptrain
 
 export SCRATCH="/scratch/gautschi/$USER"
@@ -59,60 +60,17 @@ nvidia-smi || true
 # ==========================================================
 #                    CONFIGURATION
 # ==========================================================
+# Only specify values that differ from pretrain.py defaults
+# Defaults: model=pythia-160m, total_steps=10000, mixin_percent=0.02,
+#           pptrain_checkpoint="latest", micro_batch=2, grad_accum=2, etc.
 
-# Model (will load from pptrain checkpoint)
-MODEL_NAME="EleutherAI/pythia-160m"
-
-# Training
-MICRO_BATCH=2
-GRAD_ACCUM=2
-LR=5e-4
-MIN_LR_RATIO=0.1
-WARMUP_STEPS=1000
-TOTAL_STEPS=10000
-SEQ_LEN=2048
-MIXED_PRECISION="bf16"
-
-# Optimizer
-WEIGHT_DECAY=0.1
-ADAM_BETA1=0.9
-ADAM_BETA2=0.999
-ADAM_EPS=1e-6
-GRAD_CLIP=1.0
-
-# Data
-DATA_DIR="$SCRATCH/pptrain/data"
-MIXIN_PERCENT=0.02
-
-# Checkpointing
-SAVE_EVERY=500
-LOG_EVERY=10
-EVAL_EVERY=500
-EVAL_SUBSET_SIZE=500
-
-# Pre-pretraining checkpoint ("latest" auto-finds most recent)
-PPTRAIN_CHECKPOINT="latest"
+DATA_DIR="/scratch/gautschi/mnickel/data/nl_splits/mis384_look64_seed12345"
 
 # ==========================================================
 
-# ========== Find latest checkpoint for auto-resume ==========
-CKPT_DIR="$SCRATCH/pretrain/checkpoints"
-LATEST_CKPT=""
-if [ -d "$CKPT_DIR" ]; then
-    LATEST_CKPT=$(ls -d "$CKPT_DIR"/step_* 2>/dev/null | sort | tail -n1 || true)
-fi
-
-if [ -n "$LATEST_CKPT" ]; then
-    echo "Found checkpoint for resume: $LATEST_CKPT"
-else
-    echo "No checkpoint found, starting fresh from pptrain checkpoint"
-fi
-
 echo "=========================================="
 echo "PRETRAINING (pretrain)"
-echo "Model: $MODEL_NAME"
-echo "PPTrain checkpoint: $PPTRAIN_CHECKPOINT"
-echo "Effective batch size: $((MICRO_BATCH * GRAD_ACCUM * GPUS_PER_NODE))"
+echo "Data dir: $DATA_DIR"
 echo "Scratch: $SCRATCH"
 echo "=========================================="
 
@@ -128,38 +86,23 @@ except:
     subprocess.check_call([sys.executable, 'nl_generator.py'])
 "
 
-# ========== Build arguments ==========
+# ========== Find latest checkpoint for auto-resume ==========
+CKPT_DIR="$SCRATCH/pretrain/checkpoints"
+LATEST_CKPT=""
+if [ -d "$CKPT_DIR" ]; then
+    LATEST_CKPT=$(ls -d "$CKPT_DIR"/step_* 2>/dev/null | sort | tail -n1 || true)
+fi
+
+if [ -n "$LATEST_CKPT" ]; then
+    echo "Found checkpoint for resume: $LATEST_CKPT"
+else
+    echo "No checkpoint found, will load from pptrain checkpoint"
+fi
+
+# ========== Build arguments (minimal - use defaults) ==========
 ARGS=(
     --scratch_dir "$SCRATCH"
-    --model_name "$MODEL_NAME"
-    --pptrain_checkpoint "$PPTRAIN_CHECKPOINT"
     --data_dir "$DATA_DIR"
-
-    # Training
-    --micro_batch "$MICRO_BATCH"
-    --grad_accum "$GRAD_ACCUM"
-    --lr "$LR"
-    --min_lr_ratio "$MIN_LR_RATIO"
-    --warmup_steps "$WARMUP_STEPS"
-    --total_steps "$TOTAL_STEPS"
-    --seq_len "$SEQ_LEN"
-    --mixed_precision "$MIXED_PRECISION"
-
-    # Optimizer
-    --weight_decay "$WEIGHT_DECAY"
-    --adam_beta1 "$ADAM_BETA1"
-    --adam_beta2 "$ADAM_BETA2"
-    --adam_eps "$ADAM_EPS"
-    --grad_clip "$GRAD_CLIP"
-
-    # Data
-    --mixin_percent "$MIXIN_PERCENT"
-
-    # Checkpointing & Eval
-    --save_every "$SAVE_EVERY"
-    --log_every "$LOG_EVERY"
-    --eval_every "$EVAL_EVERY"
-    --eval_subset_size "$EVAL_SUBSET_SIZE"
 )
 
 # Add resume flag if checkpoint exists
@@ -174,7 +117,6 @@ cd /home/$USER/git/nl-fine-tuning/nl
 
 accelerate launch \
     --num_processes=$GPUS_PER_NODE \
-    --mixed_precision="$MIXED_PRECISION" \
     pre_pretrain/pretrain.py "${ARGS[@]}"
 
 EXIT_CODE=$?

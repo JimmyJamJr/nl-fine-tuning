@@ -29,6 +29,7 @@ echo "Job ID: $SLURM_JOB_ID"
 
 # ========== Environment ==========
 module load conda
+source /home/mnickel/miniconda3/etc/profile.d/conda.sh
 conda activate pptrain
 
 export SCRATCH="/scratch/gautschi/$USER"
@@ -59,43 +60,19 @@ nvidia-smi || true
 # ==========================================================
 #                    CONFIGURATION
 # ==========================================================
+# Only specify values that differ from pptrain.py defaults
+# Defaults: model=pythia-160m, micro_batch=2, grad_accum=2,
+#           lr=5e-4, warmup_steps=1000, seq_len=2048, etc.
 
-# Model
-MODEL_NAME="EleutherAI/pythia-160m"
-
-# Training
-MICRO_BATCH=2
-GRAD_ACCUM=2
-LR=5e-4
-WARMUP=125
-MAX_STEPS=500000
-SEQ_LEN=1024
-MIXED_PRECISION="bf16"
-
-# Curriculum
-CURR_THRESHOLD=0.98
-CURR_WINDOW=200
-CURR_CHECK_EVERY=200
-MAX_LOOKAHEAD=64
-
-# Data
-TASK="search"
-MAX_INPUT_SIZE=256
-DATA_DIR="$SCRATCH/pptrain/data"
-
-# Checkpointing
-SAVE_EVERY=200
-LOG_EVERY=10
-
-# Evaluation
-NUM_EVAL=500
+MAX_STEPS=10000000000
+DATA_DIR="/scratch/gautschi/mnickel/data/nl_splits/mis384_look64_seed12345"
 
 # ==========================================================
 
 echo "=========================================="
 echo "PRE-PRETRAINING (pptrain)"
-echo "Model: $MODEL_NAME"
-echo "Effective batch size: $((MICRO_BATCH * GRAD_ACCUM * GPUS_PER_NODE))"
+echo "Data dir: $DATA_DIR"
+echo "Max steps: $MAX_STEPS"
 echo "Scratch: $SCRATCH"
 echo "=========================================="
 
@@ -115,7 +92,7 @@ except:
 python -c "
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
-m, c = '$MODEL_NAME', os.environ['HF_HOME']
+m, c = 'EleutherAI/pythia-160m', os.environ['HF_HOME']
 AutoTokenizer.from_pretrained(m, cache_dir=c, trust_remote_code=True)
 AutoModelForCausalLM.from_pretrained(m, cache_dir=c, trust_remote_code=True)
 print('[OK] Model cached')
@@ -134,37 +111,11 @@ else
     echo "No checkpoint found, starting fresh"
 fi
 
-# ========== Build arguments ==========
+# ========== Build arguments (minimal - use defaults) ==========
 ARGS=(
-    --model_name "$MODEL_NAME"
     --scratch_dir "$SCRATCH"
     --data_dir "$DATA_DIR"
-
-    # Training
-    --micro_batch "$MICRO_BATCH"
-    --grad_accum "$GRAD_ACCUM"
-    --lr "$LR"
-    --warmup "$WARMUP"
     --max_steps "$MAX_STEPS"
-    --seq_len "$SEQ_LEN"
-    --mixed_precision "$MIXED_PRECISION"
-
-    # Curriculum
-    --curr_threshold "$CURR_THRESHOLD"
-    --curr_window "$CURR_WINDOW"
-    --curr_check_every "$CURR_CHECK_EVERY"
-    --max_lookahead "$MAX_LOOKAHEAD"
-
-    # Data generation
-    --task "$TASK"
-    --max_input_size "$MAX_INPUT_SIZE"
-
-    # Checkpointing
-    --save_every "$SAVE_EVERY"
-    --log_every "$LOG_EVERY"
-
-    # Evaluation
-    --num_eval "$NUM_EVAL"
 )
 
 # Add resume flag if checkpoint exists
@@ -179,7 +130,6 @@ cd /home/$USER/git/nl-fine-tuning/nl
 
 accelerate launch \
     --num_processes=$GPUS_PER_NODE \
-    --mixed_precision="$MIXED_PRECISION" \
     pre_pretrain/pptrain.py "${ARGS[@]}"
 
 EXIT_CODE=$?

@@ -223,6 +223,28 @@ accelerate launch --num_processes 8 pretrain.py \
 
 1. **Single answer per example**: Currently uses only the first valid answer from `output_texts`. Other valid answers are ignored.
 
-## Not Yet Implemented
+## SLURM Job Scripts
 
-1. **SLURM job scripts**: Batch submission scripts for cluster
+Two job scripts are provided for cluster submission:
+
+- `pptrain_job.sh` - Pre-pretraining with curriculum learning
+- `pretrain_job.sh` - Pretraining on C4 with mixin
+
+**Features:**
+- Auto-resume: Finds latest checkpoint and passes `--resume_from`
+- Preemption handling: `--signal=B:USR1@180` triggers graceful requeue
+- Email notifications: BEGIN, END, FAIL, REQUEUE
+
+**Usage:**
+```bash
+cd /path/to/nl-fine-tuning/nl
+sbatch pre_pretrain/pptrain_job.sh   # Submit pre-pretraining
+sbatch pre_pretrain/pretrain_job.sh  # Submit pretraining (after pptrain completes)
+```
+
+**Monitoring:**
+```bash
+squeue -u $USER                       # Check job status
+tail -f slurm/<jobid>_pptrain.out     # Watch output
+scancel <jobid>                       # Cancel job
+```
