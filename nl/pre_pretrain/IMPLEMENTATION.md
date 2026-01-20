@@ -50,13 +50,13 @@ python scripts/build_pretrain.py \
   --effective_batch 32
 
 # 3. Run pre-pretraining (curriculum learning on synthetic data)
-python pptrain.py \
+accelerate launch --num_processes 8 pptrain.py \
   --scratch_dir /scratch/user \
   --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
   --max_steps 100000
 
 # 4. Run pretraining (C4 + mixin, starting from pre-pretrained checkpoint)
-python pretrain.py \
+accelerate launch --num_processes 8 pretrain.py \
   --scratch_dir /scratch/user \
   --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
   --pptrain_checkpoint latest \
@@ -203,7 +203,7 @@ Standard pretraining on C4 with synthetic data mixed in:
 
 **Usage:**
 ```bash
-python pretrain.py \
+accelerate launch --num_processes 8 pretrain.py \
   --scratch_dir /scratch/user \
   --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
   --pptrain_checkpoint latest \
@@ -213,7 +213,7 @@ python pretrain.py \
 
 **Resume from pretrain checkpoint:**
 ```bash
-python pretrain.py \
+accelerate launch --num_processes 8 pretrain.py \
   --scratch_dir /scratch/user \
   --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
   --resume_from /scratch/user/pretrain/checkpoints/step_00005000

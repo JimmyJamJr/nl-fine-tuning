@@ -227,7 +227,8 @@ def build_eval_collate_fn(tokenizer, seq_len: int):
 @torch.no_grad()
 def evaluate(model, tokenizer, examples: List[Dict[str, str]], seq_len: int,
              accelerator: Accelerator) -> Tuple[float, float]:
-    model.eval()
+    unwrapped = accelerator.unwrap_model(model)
+    unwrapped.eval()
     collate_fn = build_eval_collate_fn(tokenizer=tokenizer, seq_len=seq_len)
 
     total_correct, total_loss, total_examples = 0, 0.0, 0
@@ -237,7 +238,7 @@ def evaluate(model, tokenizer, examples: List[Dict[str, str]], seq_len: int,
         batch = collate_fn(batch_examples)
         batch = {k: v.to(accelerator.device) for k, v in batch.items()}
 
-        outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+        outputs = unwrapped(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
         loss = compute_lm_loss(outputs.logits, batch["input_ids"], batch["attention_mask"])
         correct_list = full_word_correct(outputs.logits, batch["labels_pred"])
 
@@ -245,7 +246,7 @@ def evaluate(model, tokenizer, examples: List[Dict[str, str]], seq_len: int,
         total_loss += loss.item() * len(batch_examples)
         total_examples += len(batch_examples)
 
-    model.train()
+    unwrapped.train()
     return total_correct / max(total_examples, 1), total_loss / max(total_examples, 1)
 
 

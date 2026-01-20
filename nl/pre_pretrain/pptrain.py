@@ -13,7 +13,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, IterableDataset
 
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 
 from nl.pre_pretrain.common import (
     load_model_and_tokenizer,
@@ -280,7 +280,8 @@ def write_eval_log(log_path: Path, step: int, stage: int, alpha: float,
 @torch.no_grad()
 def evaluate_heldout(model, tokenizer, examples: List[Dict[str, str]],
                      seq_len: int, accelerator: Accelerator) -> Tuple[float, float]:
-    model.eval()
+    unwrapped = accelerator.unwrap_model(model)
+    unwrapped.eval()
     collate_fn = build_collate_fn(tokenizer=tokenizer, seq_len=seq_len)
 
     total_correct, total_loss, total_examples = 0, 0.0, 0
@@ -290,7 +291,7 @@ def evaluate_heldout(model, tokenizer, examples: List[Dict[str, str]],
         batch = collate_fn(batch_examples)
         batch = {k: v.to(accelerator.device) for k, v in batch.items()}
 
-        outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+        outputs = unwrapped(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
         loss = weighted_fullseq_loss(
             logits=outputs.logits, input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"], pred_mask=batch["pred_mask"],
@@ -301,7 +302,7 @@ def evaluate_heldout(model, tokenizer, examples: List[Dict[str, str]],
         total_loss += loss.item() * len(batch_examples)
         total_examples += len(batch_examples)
 
-    model.train()
+    unwrapped.train()
     return total_correct / max(total_examples, 1), total_loss / max(total_examples, 1)
 
 
@@ -354,6 +355,7 @@ def main():
 
     accelerator = Accelerator(
         mixed_precision=None if args.mixed_precision == "no" else args.mixed_precision,
+        dataloader_config=DataLoaderConfiguration(dispatch_batches=False),
     )
 
     rank = accelerator.process_index
@@ -494,6 +496,7 @@ def main():
                 synth_ds.increment_stage(1)
                 curr_deque.clear()
 
+                accelerator.wait_for_everyone()
                 if accelerator.is_main_process:
                     print(f"Advanced curriculum -> stage={synth_ds.stage} alpha={synth_ds.current_alpha():.4f}", flush=True)
                     heldout_acc, heldout_loss = evaluate_heldout(model, tokenizer, eval_examples, args.seq_len, accelerator)
@@ -501,6 +504,7 @@ def main():
                     write_eval_log(eval_log_path, step=step + 1, stage=synth_ds.stage,
                                    alpha=synth_ds.current_alpha(), heldout_acc=heldout_acc,
                                    heldout_loss=heldout_loss, num_examples=len(eval_examples))
+                accelerator.wait_for_everyone()
 
                 if synth_ds.stage > synth_ds.max_lookahead:
                     if accelerator.is_main_process:
