@@ -118,7 +118,7 @@ def build_collate_fn(*, tokenizer, seq_len: int):
     pad_id = tokenizer.pad_token_id
 
     def collate(batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        input_ids_batch, labels_pred_batch, attn_batch, pred_mask_batch = [], [], [], []
+        input_ids_batch, labels_pred_batch, attn_batch = [], [], []
 
         for ex in batch:
             p_ids = tokenizer(ex["prompt"], add_special_tokens=True, truncation=False)["input_ids"]
@@ -132,21 +132,12 @@ def build_collate_fn(*, tokenizer, seq_len: int):
                 labels_pred = labels_pred[:seq_len]
 
             L = len(ids)
-            T = max(L - 1, 0)
-            pred_mask = [0] * T
-            p_len, a_len = len(p_ids), len(a_ids)
-
-            if T > 0:
-                for i in range(max(p_len - 1, 0), min(p_len + a_len, T)):
-                    pred_mask[i] = 1
 
             input_ids_batch.append(torch.tensor(ids, dtype=torch.long))
             labels_pred_batch.append(torch.tensor(labels_pred, dtype=torch.long))
             attn_batch.append(torch.ones(L, dtype=torch.long))
-            pred_mask_batch.append(torch.tensor(pred_mask, dtype=torch.long))
 
         max_len = max(x.shape[0] for x in input_ids_batch)
-        max_t = max(max_len - 1, 0)
 
         def pad_to(x: torch.Tensor, val: int, target: int) -> torch.Tensor:
             if x.shape[0] == target:
@@ -157,38 +148,25 @@ def build_collate_fn(*, tokenizer, seq_len: int):
             "input_ids": torch.stack([pad_to(x, pad_id, max_len) for x in input_ids_batch]),
             "labels_pred": torch.stack([pad_to(x, -100, max_len) for x in labels_pred_batch]),
             "attention_mask": torch.stack([pad_to(x, 0, max_len) for x in attn_batch]),
-            "pred_mask": torch.stack([pad_to(x, 0, max_t) for x in pred_mask_batch]),
         }
 
     return collate
 
 
-def weighted_fullseq_loss(
+def prediction_only_loss(
     *,
     logits: torch.Tensor,
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor,
-    pred_mask: torch.Tensor,
+    labels: torch.Tensor,
 ) -> torch.Tensor:
-    """Upweights prediction tokens: w_pred = 1 + (total_tokens / pred_tokens)"""
+    """Calculate loss only on prediction tokens (where labels != -100)"""
     shift_logits = logits[:, :-1, :].contiguous()
-    shift_labels = input_ids[:, 1:].contiguous()
-    valid = attention_mask[:, 1:].bool()
+    shift_labels = labels[:, 1:].contiguous()
 
-    B, T, V = shift_logits.shape
-    loss_tok = F.cross_entropy(
-        shift_logits.view(-1, V), shift_labels.view(-1), reduction="none"
-    ).view(B, T)
-
-    pred_mask = pred_mask.bool() & valid
-    weights = valid.float()
-
-    P = pred_mask.sum(dim=1).clamp_min(1).float()
-    Tn = valid.sum(dim=1).clamp_min(1).float()
-    w_pred = 1.0 + (Tn / P)
-
-    weights = weights + pred_mask.float() * (w_pred[:, None] - 1.0)
-    return (loss_tok * weights).sum() / weights.sum().clamp_min(1.0)
+    return F.cross_entropy(
+        shift_logits.view(-1, shift_logits.size(-1)),
+        shift_labels.view(-1),
+        ignore_index=-100
+    )
 
 
 def gather_bool_list(flags: List[bool], accelerator: Accelerator) -> List[bool]:
@@ -292,9 +270,8 @@ def evaluate_heldout(model, tokenizer, examples: List[Dict[str, str]],
         batch = {k: v.to(accelerator.device) for k, v in batch.items()}
 
         outputs = unwrapped(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
-        loss = weighted_fullseq_loss(
-            logits=outputs.logits, input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"], pred_mask=batch["pred_mask"],
+        loss = prediction_only_loss(
+            logits=outputs.logits, labels=batch["labels_pred"],
         )
         correct_list = full_word_correct(outputs.logits, batch["labels_pred"])
 
@@ -317,8 +294,8 @@ def build_argparser():
 
     p.add_argument("--max_steps", type=int, required=True)
     p.add_argument("--seq_len", type=int, default=2048)
-    p.add_argument("--micro_batch", type=int, default=2)
-    p.add_argument("--grad_accum", type=int, default=2)
+    p.add_argument("--micro_batch", type=int, default=16)
+    p.add_argument("--grad_accum", type=int, default=1)
 
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--weight_decay", type=float, default=0.1)
@@ -371,7 +348,7 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed + rank)
 
-    start_step, start_stage = 0, 1
+    start_step, start_stage = 0, 4
     start_index = 0
     curr_deque: deque = deque(maxlen=args.curr_window)
     resume_dir: Optional[Path] = None
@@ -381,7 +358,7 @@ def main():
         state = load_train_state(resume_dir)
 
         start_step = int(state.get("step", 0))
-        start_stage = int(state.get("synthetic_stage", 1))
+        start_stage = int(state.get("synthetic_stage", 4))
         start_index = int(state.get("consumed_index", start_step * args.micro_batch))
 
         saved_micro_batch = state.get("micro_batch")
@@ -463,9 +440,8 @@ def main():
         for accum_idx in range(args.grad_accum):
             batch = next(loader_iter)
             outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
-            loss = weighted_fullseq_loss(
-                logits=outputs.logits, input_ids=batch["input_ids"],
-                attention_mask=batch["attention_mask"], pred_mask=batch["pred_mask"],
+            loss = prediction_only_loss(
+                logits=outputs.logits, labels=batch["labels_pred"],
             ) / args.grad_accum
             accelerator.backward(loss)
             step_loss += loss.item()
@@ -493,7 +469,7 @@ def main():
                       f"alpha={synth_ds.current_alpha():.4f} acc={acc:.4f}", flush=True)
 
             if acc >= args.curr_threshold:
-                synth_ds.increment_stage(1)
+                synth_ds.increment_stage(4)
                 curr_deque.clear()
 
                 accelerator.wait_for_everyone()

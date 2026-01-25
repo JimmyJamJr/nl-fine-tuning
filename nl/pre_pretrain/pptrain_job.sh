@@ -61,7 +61,7 @@ nvidia-smi || true
 #                    CONFIGURATION
 # ==========================================================
 # Only specify values that differ from pptrain.py defaults
-# Defaults: model=pythia-160m, micro_batch=2, grad_accum=2,
+# Defaults: model=pythia-160m, micro_batch=16, grad_accum=1,
 #           lr=5e-4, warmup_steps=1000, seq_len=2048, etc.
 
 MAX_STEPS=10000000000
