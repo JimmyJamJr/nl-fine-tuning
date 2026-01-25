@@ -102,6 +102,12 @@ def broadcast_object(obj, src: int = 0):
     return obj_list[0]
 
 
+def estimate_flops_per_token(model) -> int:
+    """Estimate FLOPs per token (6N approximation per Kaplan et al.)"""
+    total_params = sum(p.numel() for p in model.parameters())
+    return 6 * total_params
+
+
 # Function for setting seed across libraries and GPUs
 def set_all_seeds(seed: int):
     r = get_rank()
@@ -177,10 +183,21 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
         curriculum.stage_start_step = int(cs.get("stage_start_step", 0))
         rank_print(
             f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step} from {fp}")
-        return True
     except Exception as e:
         rank_print(f"[CURRICULUM][WARN] Failed to restore from {fp}: {e}")
         return False
+
+    # Restore loss history
+    loss_path = os.path.join(os.path.dirname(path), "loss_history.json")
+    if os.path.isfile(loss_path):
+        try:
+            with open(loss_path) as f:
+                curriculum.loss_history = json.load(f)
+            rank_print(f"[CURRICULUM] Restored {len(curriculum.loss_history)} loss history records")
+        except Exception as e:
+            rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
+
+    return True
 
 
 # ================== Task helpers ==================
@@ -372,6 +389,7 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str):
 
     ax.set_xlabel('Steps in Stage')
     ax.set_ylabel('Loss')
+    ax.set_yscale('log')
 
     # Build title with available info
     title = f'Stage {stage} Loss ({len(stage_data)} steps, final={losses[-1]:.4f})'
@@ -444,6 +462,7 @@ def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int):
 
     ax.set_xlabel('Step')
     ax.set_ylabel('Loss')
+    ax.set_yscale('log')
     ax.set_title('Training Loss (Overall)')
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -451,6 +470,74 @@ def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "loss_overall.png"), dpi=150)
     plt.close()
+
+
+def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_token: int, n_stages: int):
+    """Plot loss vs cumulative FLOPs."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not loss_history or flops_per_token is None:
+        return
+
+    # Calculate cumulative FLOPs
+    cumulative_flops = []
+    total_flops = 0
+    for h in loss_history:
+        tokens = h.get("tokens", 0)
+        total_flops += tokens * flops_per_token
+        cumulative_flops.append(total_flops)
+
+    losses = [h["loss"] for h in loss_history]
+    stages = [h["stage"] for h in loss_history]
+
+    # Convert to PetaFLOPs for readability
+    cumulative_pflops = [f / 1e15 for f in cumulative_flops]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(cumulative_pflops, losses, alpha=0.3, linewidth=0.5, color='blue')
+
+    # Smoothed
+    window = min(100, len(losses) // 10) or 1
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        ax.plot(cumulative_pflops[window - 1:], smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    # Stage transitions
+    stage_info = {}
+    for i, h in enumerate(loss_history):
+        s = h["stage"]
+        if s not in stage_info:
+            stage_info[s] = (cumulative_pflops[i], h.get("effective_L"))
+
+    prev_stage = stages[0]
+    colors = plt.cm.tab10(np.linspace(0, 1, max(max(stages), n_stages)))
+
+    for i, (pflops, stage) in enumerate(zip(cumulative_pflops, stages)):
+        if stage != prev_stage:
+            ax.axvline(x=pflops, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
+            effective_L = stage_info.get(stage, (None, None))[1]
+            label = f'S{stage}\nL={effective_L}' if effective_L else f'S{stage}'
+            ax.text(pflops, ax.get_ylim()[1] * 0.95 if ax.get_ylim()[1] > 0 else losses[0],
+                    label, fontsize=8, ha='left', va='top')
+            prev_stage = stage
+
+    ax.set_xlabel('Cumulative PFLOPs')
+    ax.set_ylabel('Loss')
+    ax.set_yscale('log')
+    ax.set_title(f'Training Loss vs Compute (6N approx, {flops_per_token / 1e9:.1f}B FLOPs/token)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "loss_vs_flops.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved loss_vs_flops.png")
 
 
 class SinglePathARDataset(Dataset):
@@ -580,15 +667,13 @@ class SinglePathARDataset(Dataset):
             parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
         return "\n\n".join(parts) + ("\n\n" if parts else "")
 
-    def _get_worker_state(self) -> Tuple[NaturalLanguageGraphGenerator, random.Random]:
-        """Lazily initialize per-worker generator and RNG (called once per worker)"""
+    def _get_worker_state(self, idx: int) -> Tuple[NaturalLanguageGraphGenerator, random.Random]:
         worker_info = torch.utils.data.get_worker_info()
         current_worker_id = worker_info.id if worker_info else 0
 
-        # Reinitialize if worker changed (shouldn't happen, but safety check)
         if self._worker_generator is None or self._worker_id != current_worker_id:
             rank = get_rank()
-            worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919 + self.resume_step * 13
+            worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919
 
             self._worker_generator = NaturalLanguageGraphGenerator(
                 self.max_input_size,
@@ -596,6 +681,13 @@ class SinglePathARDataset(Dataset):
             )
             self._worker_rng = random.Random(worker_seed)
             self._worker_id = current_worker_id
+
+        # Reseed RNG per batch
+        batch_seed = ((self.seed or 0) +
+                      idx * 104729 +
+                      self._worker_id * 7919 +
+                      get_rank() * 999983)
+        self._worker_rng.seed(batch_seed)
 
         return self._worker_generator, self._worker_rng
 
@@ -605,7 +697,8 @@ class SinglePathARDataset(Dataset):
         Index is used to vary the seed for diversity across samples.
         """
 
-        gen, rng = self._get_worker_state()
+        effective_idx = idx + self.resume_step
+        gen, rng = self._get_worker_state(effective_idx)
 
         # max_len = getattr(self.tokenizer, "model_max_length", 512)
         alpha = self._stage_alpha()
@@ -824,17 +917,13 @@ class PackedSequenceDataset(Dataset):
         return "\n\n".join(parts) + ("\n\n" if parts else "")
 
     def _get_worker_state(self, idx: int):
-        """
-        Lazily initialize per-worker generator and RNG.
-        Seeds are unique per (worker, idx, resume_step) to avoid duplicates.
-        """
+        """idx should already be offset by resume_step from __getitem__"""
         worker_info = torch.utils.data.get_worker_info()
         current_worker_id = worker_info.id if worker_info else 0
 
-        # Initialize generator once per worker
         if self._worker_generator is None or self._worker_id != current_worker_id:
             rank = get_rank()
-            worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919 + self.resume_step * 13
+            worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919
 
             self._worker_generator = NaturalLanguageGraphGenerator(
                 self.max_input_size,
@@ -843,12 +932,10 @@ class PackedSequenceDataset(Dataset):
             self._worker_rng = random.Random(worker_seed)
             self._worker_id = current_worker_id
 
-        # Reseed RNG for this specific batch
-        # Includes resume_step to avoid repeating samples after checkpoint resume
+        # idx already includes resume_step, so batch_seed naturally differs after resume
         batch_seed = ((self.seed or 0) +
                       idx * 104729 +
                       self._worker_id * 7919 +
-                      self.resume_step * 31337 +
                       get_rank() * 999983)
         self._worker_rng.seed(batch_seed)
 
@@ -998,7 +1085,8 @@ class PackedSequenceDataset(Dataset):
         Each call generates target_samples_per_batch samples and packs them
         into rows of pack_length tokens.
         """
-        gen, rng = self._get_worker_state(idx)
+        effective_idx = idx + self.resume_step
+        gen, rng = self._get_worker_state(effective_idx)
 
         target_samples = self.target_samples_per_batch
 
@@ -1999,6 +2087,8 @@ class FirstTokenCurriculum(TrainerCallback):
 
         # Loss tracking
         self.loss_history = []
+        # Flops tracking
+        self.flops_per_token = None
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
@@ -2129,6 +2219,8 @@ class FirstTokenCurriculum(TrainerCallback):
                 "stage": self.dataset.stage,
                 "alpha": self.dataset._stage_alpha(),
                 "effective_L": effective_L,
+                "tokens": self.trainer._last_batch_tokens * get_world_size() if hasattr(self.trainer,
+                                                                                        '_last_batch_tokens') else 0,
             })
 
         current_time = datetime.datetime.now()
@@ -2252,6 +2344,8 @@ class FirstTokenCurriculum(TrainerCallback):
                 if is_main_process():
                     plot_stage_loss(self.loss_history, old_stage, self.trainer.args.output_dir)
                     plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages)
+                    plot_loss_vs_flops(self.loss_history, self.trainer.args.output_dir, self.flops_per_token,
+                                       self.n_stages)
 
                 # Check if this was the final stage
                 if self.dataset._is_final_stage():
@@ -2950,6 +3044,61 @@ def main():
             if match:
                 curriculum.last_resume_step = int(match.group(1))
 
+    # ==================== RETROACTIVE PLOT GENERATION ====================
+    # If resuming a completed job, generate plots and exit
+    if resume_ckpt and curriculum.loss_history:
+        # Check if curriculum was already finished
+        is_finished = dataset._is_final_stage() and curriculum.stage_start_step > 0
+
+        # Or check for explicit completion marker
+        completion_marker = os.path.join(args.output_dir, "final", "config.json")
+        if os.path.exists(completion_marker):
+            is_finished = True
+
+        if is_finished:
+            rank_print(f"[RETROACTIVE] Detected completed job with {len(curriculum.loss_history)} loss records")
+
+            # Compute flops_per_token
+            flops_per_token = estimate_flops_per_token(model)
+            rank_print(
+                f"[FLOPS] Model has {sum(p.numel() for p in model.parameters()) / 1e9:.2f}B params, ~{flops_per_token / 1e9:.1f}B FLOPs/token")
+
+            # Check if loss_history has tokens field, backfill if missing
+            has_tokens = any(h.get("tokens", 0) > 0 for h in curriculum.loss_history)
+            if not has_tokens:
+                rank_print("[RETROACTIVE] Loss history missing 'tokens' field - estimating from steps")
+                # Estimate tokens per step based on packing config
+                if args.use_packing:
+                    # Rough estimate: target_samples * avg_seq_len * world_size
+                    avg_seq_len = 300  # Rough estimate for search task
+                    est_tokens_per_step = args.target_samples_per_batch * avg_seq_len * get_world_size()
+                else:
+                    # batch_size * avg_seq_len * world_size
+                    avg_seq_len = 300
+                    est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
+
+                rank_print(f"[RETROACTIVE] Estimating ~{est_tokens_per_step} tokens/step")
+                for h in curriculum.loss_history:
+                    h["tokens"] = est_tokens_per_step
+
+            if is_main_process():
+                rank_print("[RETROACTIVE] Generating plots for completed job...")
+
+                # Generate all plots
+                plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages)
+                plot_loss_vs_flops(curriculum.loss_history, args.output_dir, flops_per_token, args.n_stages)
+
+                # Per-stage plots
+                stages_seen = set(h["stage"] for h in curriculum.loss_history)
+                for stage in sorted(stages_seen):
+                    plot_stage_loss(curriculum.loss_history, stage, args.output_dir)
+
+                rank_print(f"[RETROACTIVE] Generated plots for {len(stages_seen)} stages")
+                rank_print("[RETROACTIVE] Done. Exiting without training.")
+
+            barrier()
+            return 0
+
     # Disable Accelerate batch dispatching for token-budget training
     if args.use_packing:
         os.environ["ACCELERATE_DISPATCH_BATCHES"] = "false"
@@ -2990,6 +3139,8 @@ def main():
         ddp_find_unused_parameters=False,
         gradient_checkpointing=args.gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False} if args.gradient_checkpointing else None,
+
+        ignore_data_skip=True,
     )
 
     # Baseline runner uses pre-generated eval data
@@ -3059,6 +3210,10 @@ def main():
         )
     curriculum.trainer = trainer
     baseline_cb.trainer = trainer
+
+    curriculum.flops_per_token = estimate_flops_per_token(model)
+    rank_print(
+        f"[FLOPS] Model has {sum(p.numel() for p in model.parameters()) / 1e9:.2f}B params, ~{curriculum.flops_per_token / 1e9:.1f}B FLOPs/token")
 
     if not resume_ckpt:
         if is_main_process():
@@ -3255,6 +3410,7 @@ def main():
 
         # Final overall plot
         plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages)
+        plot_loss_vs_flops(curriculum.loss_history, args.output_dir, curriculum.flops_per_token, args.n_stages)
 
     # Final cleanup
     gc.collect()
