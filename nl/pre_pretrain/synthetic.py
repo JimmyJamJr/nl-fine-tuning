@@ -13,7 +13,7 @@ class SyntheticNL(IterableDataset):
         max_lookahead: int = 100,
         seed: Optional[int] = None,
         task: str = "search",
-        stage: int = 1,
+        stage: int = 4,
         reserved_inputs: Optional[Set[str]] = None,
         world_size: int = 1,
         rank: int = 0,
