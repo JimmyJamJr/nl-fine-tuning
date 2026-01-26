@@ -365,6 +365,82 @@ def build_redacted_eval_set(
     return red_inputs, red_labels
 
 
+def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 50) -> Optional[Dict[str, float]]:
+    """
+    Fit exponential decay: L(t) = a * exp(-b * t) + c
+
+    Returns dict with:
+        - a: initial amplitude above asymptote
+        - b: decay rate
+        - c: asymptote (estimated minimum loss)
+        - r_squared: goodness of fit
+        - half_life: steps to decay halfway to asymptote
+    Returns None if fit fails.
+    """
+    try:
+        from scipy.optimize import curve_fit
+    except ImportError:
+        rank_print("[FIT] scipy not installed, skipping exponential fit")
+        return None
+
+    if len(losses) < 20:
+        return None
+
+    # Smooth the data first
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        fit_steps = steps[window - 1:]
+    else:
+        smoothed = np.array(losses)
+        fit_steps = steps
+
+    if len(smoothed) < 10:
+        return None
+
+    # Normalize steps to start at 0
+    t = np.array(fit_steps, dtype=float) - fit_steps[0]
+    y = np.array(smoothed, dtype=float)
+
+    def exp_decay(t, a, b, c):
+        return a * np.exp(-b * t) + c
+
+    # Initial guesses
+    a0 = max(y[0] - y[-1], 0.01)
+    c0 = max(y[-1], 0.001)
+    b0 = 1.0 / max(len(t) / 3, 1)
+
+    try:
+        popt, _ = curve_fit(
+            exp_decay, t, y,
+            p0=[a0, b0, c0],
+            bounds=([0, 1e-10, 0], [np.inf, 1.0, np.inf]),
+            maxfev=5000
+        )
+        a, b, c = popt
+
+        # Calculate R-squared
+        y_pred = exp_decay(t, a, b, c)
+        ss_res = np.sum((y - y_pred) ** 2)
+        ss_tot = np.sum((y - np.mean(y)) ** 2)
+        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+        # Half-life: time to decay halfway to asymptote
+        half_life = np.log(2) / b if b > 0 else float('inf')
+
+        return {
+            "a": a,
+            "b": b,
+            "c": c,
+            "r_squared": r_squared,
+            "half_life": half_life,
+            "fit_steps": fit_steps,
+            "fit_values": exp_decay(t, a, b, c).tolist(),
+        }
+    except Exception as e:
+        rank_print(f"[FIT] Exponential fit failed: {e}")
+        return None
+
+
 def _build_plot_subtitle(metadata: Dict) -> str:
     """Build a subtitle string from plot metadata."""
     parts = []
@@ -390,7 +466,7 @@ def _build_plot_subtitle(metadata: Dict) -> str:
 
 
 def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metadata: Dict = None):
-    """Plot loss curve for a single completed stage."""
+    """Plot loss curve for a single completed stage with exponential fit."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -415,13 +491,32 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
     rel_steps = [s - start_step for s in steps]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue')
+    ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue', label='Raw')
 
     # Smoothed line
     window = min(50, len(losses) // 5) or 1
+    smoothed = None
     if len(losses) >= window:
         smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
         ax.plot(range(window - 1, len(losses)), smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    # Exponential fit
+    fit_result = fit_exponential_decay(rel_steps, losses, window=window)
+    fit_text = ""
+    if fit_result and fit_result["r_squared"] > 0.8:  # Only show good fits
+        fit_steps = [s - start_step for s in fit_result["fit_steps"]]
+        ax.plot(fit_steps, fit_result["fit_values"], '--', linewidth=2, color='red',
+                label=f'Exp fit (R²={fit_result["r_squared"]:.3f})')
+
+        # Asymptote line
+        ax.axhline(y=fit_result["c"], color='green', linestyle=':', alpha=0.7,
+                   label=f'Asymptote={fit_result["c"]:.4f}')
+
+        # Build fit info text
+        fit_text = (f'Fit: L(t) = {fit_result["a"]:.3f}·e^(-{fit_result["b"]:.2e}·t) + {fit_result["c"]:.4f}\n'
+                    f'Est. minimum: {fit_result["c"]:.4f} | Half-life: {fit_result["half_life"]:.0f} steps | R²={fit_result["r_squared"]:.3f}')
+    elif fit_result:
+        fit_text = f'Exp fit poor (R²={fit_result["r_squared"]:.3f})'
 
     ax.set_xlabel('Steps in Stage')
     ax.set_ylabel('Loss')
@@ -435,24 +530,35 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
         title += f' | α={alpha:.3f}'
     ax.set_title(title)
 
+    # Add fit info as text box
+    if fit_text:
+        ax.text(0.02, 0.02, fit_text, transform=ax.transAxes, fontsize=8,
+                verticalalignment='bottom', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
     # Add subtitle with metadata
     if metadata:
         subtitle = _build_plot_subtitle(metadata)
         fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
 
-    ax.legend()
+    ax.legend(loc='upper right')
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.subplots_adjust(bottom=0.15)  # Make room for subtitle
+    plt.subplots_adjust(bottom=0.15)
     plt.savefig(os.path.join(output_dir, f"loss_stage_{stage}.png"), dpi=150)
     plt.close()
 
-    rank_print(f"[PLOT] Saved loss_stage_{stage}.png")
+    # Log fit results
+    if fit_result and fit_result["r_squared"] > 0.8:
+        rank_print(
+            f"[PLOT] Saved loss_stage_{stage}.png | Est. min={fit_result['c']:.4f}, half-life={fit_result['half_life']:.0f} steps")
+    else:
+        rank_print(f"[PLOT] Saved loss_stage_{stage}.png")
 
 
 def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int, metadata: Dict = None):
-    """Plot full training loss with stage markers."""
+    """Plot full training loss with stage markers and exponential fits."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -502,23 +608,56 @@ def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int, 
             ax.text(step, ax.get_ylim()[1] * 0.95, label, fontsize=8, ha='left', va='top')
             prev_stage = stage
 
+    # Fit exponential to each stage and collect asymptotes
+    stage_fits = {}
+    stages_seen = sorted(set(stages))
+    for stg in stages_seen:
+        stage_data = [h for h in loss_history if h["stage"] == stg]
+        if len(stage_data) < 20:
+            continue
+        stg_steps = [h["step"] for h in stage_data]
+        stg_losses = [h["loss"] for h in stage_data]
+        fit = fit_exponential_decay(stg_steps, stg_losses, window=min(50, len(stg_losses) // 5) or 1)
+        if fit and fit["r_squared"] > 0.8:
+            stage_fits[stg] = fit
+            # Draw asymptote segment for this stage
+            start_step = stg_steps[0]
+            end_step = stg_steps[-1]
+            ax.hlines(y=fit["c"], xmin=start_step, xmax=end_step,
+                      colors='green', linestyles=':', alpha=0.6, linewidth=1.5)
+
     ax.set_xlabel('Step')
     ax.set_ylabel('Loss')
     ax.set_yscale('log')
     ax.set_title('Training Loss (Overall)')
+
+    # Build fit summary text
+    if stage_fits:
+        fit_lines = ["Stage asymptotes:"]
+        for stg in sorted(stage_fits.keys()):
+            f = stage_fits[stg]
+            L = stage_info.get(stg, (None, None))[1]
+            L_str = f"L={L}" if L else ""
+            fit_lines.append(f"  S{stg} {L_str}: min≈{f['c']:.4f}")
+        fit_text = "\n".join(fit_lines)
+        ax.text(0.98, 0.98, fit_text, transform=ax.transAxes, fontsize=7,
+                verticalalignment='top', horizontalalignment='right', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
     # Add subtitle with metadata
     if metadata:
         subtitle = _build_plot_subtitle(metadata)
         fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
 
-    ax.legend()
+    ax.legend(loc='upper left')
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.12)
     plt.savefig(os.path.join(output_dir, "loss_overall.png"), dpi=150)
     plt.close()
+
+    rank_print(f"[PLOT] Saved loss_overall.png ({len(stage_fits)} stages with exp fits)")
 
 
 def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_token: int, n_stages: int,
@@ -3278,16 +3417,38 @@ def main():
             if match:
                 curriculum.last_resume_step = int(match.group(1))
 
-    # ==================== RETROACTIVE PLOT GENERATION ====================
-    # If resuming a completed job, generate plots and exit
+    # ==================== RETROACTIVE PLOT GENERATION / EXTENSION CHECK ====================
+    # If resuming a completed job, either generate plots and exit, or continue with extended params
     if resume_ckpt and curriculum.loss_history:
-        # Check if curriculum was already finished
+        # Check if curriculum would be finished under CURRENT parameters
         is_finished = dataset._is_final_stage() and curriculum.stage_start_step > 0
 
-        # Or check for explicit completion marker
-        completion_marker = os.path.join(args.output_dir, "final", "config.json")
-        if os.path.exists(completion_marker):
-            is_finished = True
+        # Check for completion marker (indicates previous run finished)
+        # Look in both current output_dir and source checkpoint directory
+        source_dir = os.path.dirname(resume_ckpt)
+        completion_markers = [
+            os.path.join(args.output_dir, "final", "config.json"),
+            os.path.join(source_dir, "final", "config.json"),
+        ]
+        was_previously_completed = any(os.path.exists(m) for m in completion_markers)
+
+        if was_previously_completed:
+            if dataset._is_final_stage():
+                # Current params also consider it finished
+                is_finished = True
+            elif getattr(dataset, 'linear_lookahead', False) and dataset.task == "search":
+                # Previous run completed, but we're extending with higher max_lookahead
+                current_L = dataset._stage_target_lookahead()
+                max_L = dataset.task_kwargs.get("max_lookahead")
+                old_max_L = current_L  # The old max was whatever stage we're at
+
+                rank_print(f"\n{'=' * 60}")
+                rank_print(f"[CURRICULUM] EXTENDING from completed job")
+                rank_print(f"[CURRICULUM] Resumed at stage {dataset.stage} (L={current_L})")
+                rank_print(f"[CURRICULUM] New max_lookahead: {max_L}")
+                rank_print(f"[CURRICULUM] Will continue training to L={max_L}")
+                rank_print(f"{'=' * 60}\n")
+                # is_finished stays False - continue training
 
         if is_finished:
             rank_print(f"[RETROACTIVE] Detected completed job with {len(curriculum.loss_history)} loss records")
@@ -3301,13 +3462,10 @@ def main():
             has_tokens = any(h.get("tokens", 0) > 0 for h in curriculum.loss_history)
             if not has_tokens:
                 rank_print("[RETROACTIVE] Loss history missing 'tokens' field - estimating from steps")
-                # Estimate tokens per step based on packing config
                 if args.use_packing:
-                    # Rough estimate: target_samples * avg_seq_len * world_size
-                    avg_seq_len = 300  # Rough estimate for search task
+                    avg_seq_len = 300
                     est_tokens_per_step = args.target_samples_per_batch * avg_seq_len * get_world_size()
                 else:
-                    # batch_size * avg_seq_len * world_size
                     avg_seq_len = 300
                     est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
 
@@ -3329,7 +3487,6 @@ def main():
             if is_main_process():
                 rank_print("[RETROACTIVE] Generating plots for completed job...")
 
-                # Generate all plots
                 plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages, plot_metadata)
                 plot_loss_vs_flops(curriculum.loss_history, args.output_dir, flops_per_token, args.n_stages,
                                    plot_metadata)
