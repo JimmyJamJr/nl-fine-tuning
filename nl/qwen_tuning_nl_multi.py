@@ -129,12 +129,16 @@ def set_all_seeds(seed: int):
 
 # ================== Curriculum state persistence ==================
 
-def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int) -> None:
+def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int, wall_time_offset: float = 0.0) -> None:
     try:
         os.makedirs(dirpath, exist_ok=True)
         fp = os.path.join(dirpath, "curriculum_state.json")
         with open(fp, "w") as f:
-            json.dump({"stage": int(stage), "stage_start_step": int(stage_start_step)}, f)
+            json.dump({
+                "stage": int(stage),
+                "stage_start_step": int(stage_start_step),
+                "wall_time_offset": float(wall_time_offset),
+            }, f)
     except Exception as e:
         rank_print(f"[CURRICULUM][WARN] Failed to save state: {e}")
 
@@ -181,8 +185,9 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
             cs = json.load(f)
         dataset.stage = int(cs.get("stage", dataset.stage))
         curriculum.stage_start_step = int(cs.get("stage_start_step", 0))
+        curriculum.wall_time_offset = float(cs.get("wall_time_offset", 0.0))
         rank_print(
-            f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step} from {fp}")
+            f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step}, wall_time_offset={curriculum.wall_time_offset:.1f}s from {fp}")
     except Exception as e:
         rank_print(f"[CURRICULUM][WARN] Failed to restore from {fp}: {e}")
         return False
@@ -194,6 +199,13 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
             with open(loss_path) as f:
                 curriculum.loss_history = json.load(f)
             rank_print(f"[CURRICULUM] Restored {len(curriculum.loss_history)} loss history records")
+
+            # Update wall_time_offset from last recorded entry if available
+            if curriculum.loss_history:
+                last_wall_time = curriculum.loss_history[-1].get("wall_time", 0.0)
+                if last_wall_time > curriculum.wall_time_offset:
+                    curriculum.wall_time_offset = last_wall_time
+                    rank_print(f"[CURRICULUM] Updated wall_time_offset to {last_wall_time:.1f}s from loss history")
         except Exception as e:
             rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
 
@@ -353,8 +365,108 @@ def build_redacted_eval_set(
     return red_inputs, red_labels
 
 
-def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str):
-    """Plot loss curve for a single completed stage."""
+def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 50) -> Optional[Dict[str, float]]:
+    """
+    Fit exponential decay: L(t) = a * exp(-b * t) + c
+
+    Returns dict with:
+        - a: initial amplitude above asymptote
+        - b: decay rate
+        - c: asymptote (estimated minimum loss)
+        - r_squared: goodness of fit
+        - half_life: steps to decay halfway to asymptote
+    Returns None if fit fails.
+    """
+    try:
+        from scipy.optimize import curve_fit
+    except ImportError:
+        rank_print("[FIT] scipy not installed, skipping exponential fit")
+        return None
+
+    if len(losses) < 20:
+        return None
+
+    # Smooth the data first
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        fit_steps = steps[window - 1:]
+    else:
+        smoothed = np.array(losses)
+        fit_steps = steps
+
+    if len(smoothed) < 10:
+        return None
+
+    # Normalize steps to start at 0
+    t = np.array(fit_steps, dtype=float) - fit_steps[0]
+    y = np.array(smoothed, dtype=float)
+
+    def exp_decay(t, a, b, c):
+        return a * np.exp(-b * t) + c
+
+    # Initial guesses
+    a0 = max(y[0] - y[-1], 0.01)
+    c0 = max(y[-1], 0.001)
+    b0 = 1.0 / max(len(t) / 3, 1)
+
+    try:
+        popt, _ = curve_fit(
+            exp_decay, t, y,
+            p0=[a0, b0, c0],
+            bounds=([0, 1e-10, 0], [np.inf, 1.0, np.inf]),
+            maxfev=5000
+        )
+        a, b, c = popt
+
+        # Calculate R-squared
+        y_pred = exp_decay(t, a, b, c)
+        ss_res = np.sum((y - y_pred) ** 2)
+        ss_tot = np.sum((y - np.mean(y)) ** 2)
+        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+        # Half-life: time to decay halfway to asymptote
+        half_life = np.log(2) / b if b > 0 else float('inf')
+
+        return {
+            "a": a,
+            "b": b,
+            "c": c,
+            "r_squared": r_squared,
+            "half_life": half_life,
+            "fit_steps": fit_steps,
+            "fit_values": exp_decay(t, a, b, c).tolist(),
+        }
+    except Exception as e:
+        rank_print(f"[FIT] Exponential fit failed: {e}")
+        return None
+
+
+def _build_plot_subtitle(metadata: Dict) -> str:
+    """Build a subtitle string from plot metadata."""
+    parts = []
+
+    if metadata.get("model_name"):
+        parts.append(f"Model: {metadata['model_name']}")
+
+    if metadata.get("model_params_b"):
+        parts.append(f"{metadata['model_params_b']:.2f}B params")
+
+    if metadata.get("use_packing"):
+        parts.append(f"Packed (target={metadata.get('target_samples', '?')})")
+    else:
+        parts.append(f"BS={metadata.get('batch_size', '?')}")
+
+    if metadata.get("learning_rate"):
+        parts.append(f"LR={metadata['learning_rate']:.1e}")
+
+    if metadata.get("accuracy_threshold"):
+        parts.append(f"Acc≥{metadata['accuracy_threshold']:.0%}")
+
+    return " | ".join(parts)
+
+
+def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metadata: Dict = None):
+    """Plot loss curve for a single completed stage with exponential fit."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -379,13 +491,32 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str):
     rel_steps = [s - start_step for s in steps]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue')
+    ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue', label='Raw')
 
     # Smoothed line
     window = min(50, len(losses) // 5) or 1
+    smoothed = None
     if len(losses) >= window:
         smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
         ax.plot(range(window - 1, len(losses)), smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    # Exponential fit
+    fit_result = fit_exponential_decay(rel_steps, losses, window=window)
+    fit_text = ""
+    if fit_result and fit_result["r_squared"] > 0.8:  # Only show good fits
+        fit_steps = [s - start_step for s in fit_result["fit_steps"]]
+        ax.plot(fit_steps, fit_result["fit_values"], '--', linewidth=2, color='red',
+                label=f'Exp fit (R²={fit_result["r_squared"]:.3f})')
+
+        # Asymptote line
+        ax.axhline(y=fit_result["c"], color='green', linestyle=':', alpha=0.7,
+                   label=f'Asymptote={fit_result["c"]:.4f}')
+
+        # Build fit info text
+        fit_text = (f'Fit: L(t) = {fit_result["a"]:.3f}·e^(-{fit_result["b"]:.2e}·t) + {fit_result["c"]:.4f}\n'
+                    f'Est. minimum: {fit_result["c"]:.4f} | Half-life: {fit_result["half_life"]:.0f} steps | R²={fit_result["r_squared"]:.3f}')
+    elif fit_result:
+        fit_text = f'Exp fit poor (R²={fit_result["r_squared"]:.3f})'
 
     ax.set_xlabel('Steps in Stage')
     ax.set_ylabel('Loss')
@@ -399,18 +530,35 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str):
         title += f' | α={alpha:.3f}'
     ax.set_title(title)
 
-    ax.legend()
+    # Add fit info as text box
+    if fit_text:
+        ax.text(0.02, 0.02, fit_text, transform=ax.transAxes, fontsize=8,
+                verticalalignment='bottom', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+    # Add subtitle with metadata
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
+    ax.legend(loc='upper right')
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)
     plt.savefig(os.path.join(output_dir, f"loss_stage_{stage}.png"), dpi=150)
     plt.close()
 
-    rank_print(f"[PLOT] Saved loss_stage_{stage}.png")
+    # Log fit results
+    if fit_result and fit_result["r_squared"] > 0.8:
+        rank_print(
+            f"[PLOT] Saved loss_stage_{stage}.png | Est. min={fit_result['c']:.4f}, half-life={fit_result['half_life']:.0f} steps")
+    else:
+        rank_print(f"[PLOT] Saved loss_stage_{stage}.png")
 
 
-def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int):
-    """Plot full training loss with stage markers."""
+def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int, metadata: Dict = None):
+    """Plot full training loss with stage markers and exponential fits."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -460,19 +608,60 @@ def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int):
             ax.text(step, ax.get_ylim()[1] * 0.95, label, fontsize=8, ha='left', va='top')
             prev_stage = stage
 
+    # Fit exponential to each stage and collect asymptotes
+    stage_fits = {}
+    stages_seen = sorted(set(stages))
+    for stg in stages_seen:
+        stage_data = [h for h in loss_history if h["stage"] == stg]
+        if len(stage_data) < 20:
+            continue
+        stg_steps = [h["step"] for h in stage_data]
+        stg_losses = [h["loss"] for h in stage_data]
+        fit = fit_exponential_decay(stg_steps, stg_losses, window=min(50, len(stg_losses) // 5) or 1)
+        if fit and fit["r_squared"] > 0.8:
+            stage_fits[stg] = fit
+            # Draw asymptote segment for this stage
+            start_step = stg_steps[0]
+            end_step = stg_steps[-1]
+            ax.hlines(y=fit["c"], xmin=start_step, xmax=end_step,
+                      colors='green', linestyles=':', alpha=0.6, linewidth=1.5)
+
     ax.set_xlabel('Step')
     ax.set_ylabel('Loss')
     ax.set_yscale('log')
     ax.set_title('Training Loss (Overall)')
-    ax.legend()
+
+    # Build fit summary text
+    if stage_fits:
+        fit_lines = ["Stage asymptotes:"]
+        for stg in sorted(stage_fits.keys()):
+            f = stage_fits[stg]
+            L = stage_info.get(stg, (None, None))[1]
+            L_str = f"L={L}" if L else ""
+            fit_lines.append(f"  S{stg} {L_str}: min≈{f['c']:.4f}")
+        fit_text = "\n".join(fit_lines)
+        ax.text(0.98, 0.98, fit_text, transform=ax.transAxes, fontsize=7,
+                verticalalignment='top', horizontalalignment='right', fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+    # Add subtitle with metadata
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
+    ax.legend(loc='upper left')
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
     plt.savefig(os.path.join(output_dir, "loss_overall.png"), dpi=150)
     plt.close()
 
+    rank_print(f"[PLOT] Saved loss_overall.png ({len(stage_fits)} stages with exp fits)")
 
-def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_token: int, n_stages: int):
+
+def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_token: int, n_stages: int,
+                       metadata: Dict = None):
     """Plot loss vs cumulative FLOPs."""
     try:
         import matplotlib
@@ -530,14 +719,154 @@ def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_toke
     ax.set_ylabel('Loss')
     ax.set_yscale('log')
     ax.set_title(f'Training Loss vs Compute (6N approx, {flops_per_token / 1e9:.1f}B FLOPs/token)')
+
+    # Add subtitle with metadata
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
     ax.legend()
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
     plt.savefig(os.path.join(output_dir, "loss_vs_flops.png"), dpi=150)
     plt.close()
 
     rank_print(f"[PLOT] Saved loss_vs_flops.png")
+
+
+def plot_loss_vs_walltime(loss_history: List[Dict], output_dir: str, n_stages: int, metadata: Dict = None):
+    """Plot loss vs wall clock time."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not loss_history:
+        return
+
+    # Check if wall_time field exists
+    if not any(h.get("wall_time", 0) > 0 for h in loss_history):
+        rank_print("[PLOT] No wall_time data available, skipping wall clock plot")
+        return
+
+    wall_times = [h.get("wall_time", 0) / 3600 for h in loss_history]  # Convert to hours
+    losses = [h["loss"] for h in loss_history]
+    stages = [h["stage"] for h in loss_history]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(wall_times, losses, alpha=0.3, linewidth=0.5, color='blue')
+
+    # Smoothed
+    window = min(100, len(losses) // 10) or 1
+    if len(losses) >= window:
+        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
+        ax.plot(wall_times[window - 1:], smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
+
+    # Stage transitions
+    stage_info = {}
+    for i, h in enumerate(loss_history):
+        s = h["stage"]
+        if s not in stage_info:
+            stage_info[s] = (wall_times[i], h.get("effective_L"))
+
+    prev_stage = stages[0]
+    colors = plt.cm.tab10(np.linspace(0, 1, max(max(stages), n_stages)))
+
+    for i, (wt, stage) in enumerate(zip(wall_times, stages)):
+        if stage != prev_stage:
+            ax.axvline(x=wt, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
+            effective_L = stage_info.get(stage, (None, None))[1]
+            label = f'S{stage}\nL={effective_L}' if effective_L else f'S{stage}'
+            ax.text(wt, ax.get_ylim()[1] * 0.95 if ax.get_ylim()[1] > 0 else losses[0],
+                    label, fontsize=8, ha='left', va='top')
+            prev_stage = stage
+
+    ax.set_xlabel('Wall Clock Time (hours)')
+    ax.set_ylabel('Loss')
+    ax.set_yscale('log')
+    ax.set_title('Training Loss vs Wall Time')
+
+    # Add subtitle with metadata
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    plt.savefig(os.path.join(output_dir, "loss_vs_walltime.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved loss_vs_walltime.png")
+
+
+def plot_achieved_tflops(loss_history: List[Dict], output_dir: str, n_stages: int, metadata: Dict = None):
+    """Plot achieved TFLOPs/s over training."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not loss_history:
+        return
+
+    # Check if achieved_tflops field exists
+    if not any(h.get("achieved_tflops", 0) > 0 for h in loss_history):
+        rank_print("[PLOT] No achieved_tflops data available, skipping TFLOPs plot")
+        return
+
+    steps = [h["step"] for h in loss_history]
+    tflops = [h.get("achieved_tflops", 0) for h in loss_history]
+    stages = [h["stage"] for h in loss_history]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(steps, tflops, alpha=0.3, linewidth=0.5, color='green')
+
+    # Smoothed
+    window = min(100, len(tflops) // 10) or 1
+    if len(tflops) >= window:
+        smoothed = np.convolve(tflops, np.ones(window) / window, mode='valid')
+        ax.plot(steps[window - 1:], smoothed, linewidth=2, color='green', label=f'Smoothed (w={window})')
+
+    # Stage transitions
+    prev_stage = stages[0]
+    colors = plt.cm.tab10(np.linspace(0, 1, max(max(stages), n_stages)))
+
+    for i, (step, stage) in enumerate(zip(steps, stages)):
+        if stage != prev_stage:
+            ax.axvline(x=step, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
+            prev_stage = stage
+
+    ax.set_xlabel('Step')
+    ax.set_ylabel('Achieved TFLOPs/s')
+    ax.set_title('GPU Compute Throughput Over Training')
+
+    # Add average line
+    avg_tflops = np.mean([t for t in tflops if t > 0])
+    ax.axhline(y=avg_tflops, color='red', linestyle=':', alpha=0.7, label=f'Avg: {avg_tflops:.1f}')
+
+    # Add subtitle with metadata
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    plt.savefig(os.path.join(output_dir, "achieved_tflops.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved achieved_tflops.png (avg: {avg_tflops:.1f} TFLOPs/s)")
 
 
 class SinglePathARDataset(Dataset):
@@ -2089,6 +2418,10 @@ class FirstTokenCurriculum(TrainerCallback):
         self.loss_history = []
         # Flops tracking
         self.flops_per_token = None
+        self.cumulative_wall_time = 0.0  # Total wall time across resumes (seconds)
+        self.wall_time_offset = 0.0  # Offset from previous runs
+        self.training_start_time = None  # Set when training starts
+        self.plot_metadata = None  # Set after trainer creation
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
@@ -2103,6 +2436,11 @@ class FirstTokenCurriculum(TrainerCallback):
             self.stage_start_time = datetime.datetime.now()
             self.samples_this_stage = 0
             self.tokens_this_stage = 0
+
+        # Track wall time
+        if self.training_start_time is None:
+            self.training_start_time = time.time()
+
         return control
 
     def _current_metric(self) -> float:
@@ -2121,9 +2459,13 @@ class FirstTokenCurriculum(TrainerCallback):
     def on_save(self, args, state, control, **kwargs):
         """Save curriculum state alongside checkpoint"""
         barrier()
+        current_wall_time = self.wall_time_offset
+        if self.training_start_time is not None:
+            current_wall_time += (time.time() - self.training_start_time)
+
         if is_main_process():
             checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
-            _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step)
+            _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step, current_wall_time)
 
         if is_main_process():
             try:
@@ -2213,14 +2555,30 @@ class FirstTokenCurriculum(TrainerCallback):
                     cap = self.dataset.task_kwargs.get("max_lookahead")
                     effective_L = effective_search_L(alpha, n, max_lookahead_cap=cap)
 
+            # Calculate current wall time
+            current_wall_time = self.wall_time_offset
+            if self.training_start_time is not None:
+                current_wall_time += (time.time() - self.training_start_time)
+
+            # Calculate achieved TFLOPs/s
+            tokens_this_step = self.trainer._last_batch_tokens * get_world_size() if hasattr(self.trainer,
+                                                                                             '_last_batch_tokens') else 0
+            achieved_tflops = 0.0
+            if hasattr(self.trainer, '_train_timing') and self.trainer._train_timing["steps"] > 0:
+                recent_step_time = self.trainer._train_timing["total_step"] / self.trainer._train_timing["steps"]
+                if recent_step_time > 0 and self.flops_per_token and tokens_this_step > 0:
+                    flops_this_step = tokens_this_step * self.flops_per_token
+                    achieved_tflops = flops_this_step / recent_step_time / 1e12
+
             self.loss_history.append({
                 "step": state.global_step,
                 "loss": current_loss,
                 "stage": self.dataset.stage,
                 "alpha": self.dataset._stage_alpha(),
                 "effective_L": effective_L,
-                "tokens": self.trainer._last_batch_tokens * get_world_size() if hasattr(self.trainer,
-                                                                                        '_last_batch_tokens') else 0,
+                "tokens": tokens_this_step,
+                "wall_time": current_wall_time,
+                "achieved_tflops": achieved_tflops,
             })
 
         current_time = datetime.datetime.now()
@@ -2284,6 +2642,11 @@ class FirstTokenCurriculum(TrainerCallback):
             # Format tokens/s with K suffix for readability
             tokens_per_sec_str = f"{tokens_per_sec / 1000:.1f}K" if tokens_per_sec >= 1000 else f"{tokens_per_sec:.0f}"
 
+            achieved_tflops_str = ""
+            if self.flops_per_token and tokens_per_sec > 0:
+                achieved_tflops = tokens_per_sec * self.flops_per_token / 1e12
+                achieved_tflops_str = f" | {achieved_tflops:.1f} TFLOPs/s"
+
             # Calculate proper stage denominator
             if getattr(self.dataset, 'linear_lookahead', False) and self.dataset.task == "search":
                 max_L = self.dataset.task_kwargs.get("max_lookahead", 12)
@@ -2296,7 +2659,7 @@ class FirstTokenCurriculum(TrainerCallback):
             print(f"{stage_str} step {state.global_step} | "
                   f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
                   f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
-                  f"Speed={samples_per_sec:.1f} samples/s ({tokens_per_sec_str} toks/s) | "
+                  f"Speed={samples_per_sec:.1f} samples/s ({tokens_per_sec_str} toks/s){achieved_tflops_str} | "
                   f"Stage time={stage_time_str}{extra_info}{warmup_msg}")
             self._last_log = state.global_step
 
@@ -2342,10 +2705,15 @@ class FirstTokenCurriculum(TrainerCallback):
                 self._run_stage_eval(old_stage, state.global_step)
 
                 if is_main_process():
-                    plot_stage_loss(self.loss_history, old_stage, self.trainer.args.output_dir)
-                    plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages)
+                    plot_stage_loss(self.loss_history, old_stage, self.trainer.args.output_dir, self.plot_metadata)
+                    plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages,
+                                      self.plot_metadata)
                     plot_loss_vs_flops(self.loss_history, self.trainer.args.output_dir, self.flops_per_token,
-                                       self.n_stages)
+                                       self.n_stages, self.plot_metadata)
+                    plot_loss_vs_walltime(self.loss_history, self.trainer.args.output_dir, self.n_stages,
+                                          self.plot_metadata)
+                    plot_achieved_tflops(self.loss_history, self.trainer.args.output_dir, self.n_stages,
+                                         self.plot_metadata)
 
                 # Check if this was the final stage
                 if self.dataset._is_final_stage():
@@ -2388,7 +2756,12 @@ class FirstTokenCurriculum(TrainerCallback):
                                 msg += f" | effective_L={L_eff} (n={n}, cap={cap})"
                         print(msg)
 
-                        _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step)
+                        current_wall_time = self.wall_time_offset
+                        if self.training_start_time is not None:
+                            current_wall_time += (time.time() - self.training_start_time)
+
+                        _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step,
+                                               current_wall_time)
 
         # ==================== Memory Cleanup (every 100 steps) ====================
         if state.global_step > 0 and state.global_step % 100 == 0:
@@ -3044,16 +3417,38 @@ def main():
             if match:
                 curriculum.last_resume_step = int(match.group(1))
 
-    # ==================== RETROACTIVE PLOT GENERATION ====================
-    # If resuming a completed job, generate plots and exit
+    # ==================== RETROACTIVE PLOT GENERATION / EXTENSION CHECK ====================
+    # If resuming a completed job, either generate plots and exit, or continue with extended params
     if resume_ckpt and curriculum.loss_history:
-        # Check if curriculum was already finished
+        # Check if curriculum would be finished under CURRENT parameters
         is_finished = dataset._is_final_stage() and curriculum.stage_start_step > 0
 
-        # Or check for explicit completion marker
-        completion_marker = os.path.join(args.output_dir, "final", "config.json")
-        if os.path.exists(completion_marker):
-            is_finished = True
+        # Check for completion marker (indicates previous run finished)
+        # Look in both current output_dir and source checkpoint directory
+        source_dir = os.path.dirname(resume_ckpt)
+        completion_markers = [
+            os.path.join(args.output_dir, "final", "config.json"),
+            os.path.join(source_dir, "final", "config.json"),
+        ]
+        was_previously_completed = any(os.path.exists(m) for m in completion_markers)
+
+        if was_previously_completed:
+            if dataset._is_final_stage():
+                # Current params also consider it finished
+                is_finished = True
+            elif getattr(dataset, 'linear_lookahead', False) and dataset.task == "search":
+                # Previous run completed, but we're extending with higher max_lookahead
+                current_L = dataset._stage_target_lookahead()
+                max_L = dataset.task_kwargs.get("max_lookahead")
+                old_max_L = current_L  # The old max was whatever stage we're at
+
+                rank_print(f"\n{'=' * 60}")
+                rank_print(f"[CURRICULUM] EXTENDING from completed job")
+                rank_print(f"[CURRICULUM] Resumed at stage {dataset.stage} (L={current_L})")
+                rank_print(f"[CURRICULUM] New max_lookahead: {max_L}")
+                rank_print(f"[CURRICULUM] Will continue training to L={max_L}")
+                rank_print(f"{'=' * 60}\n")
+                # is_finished stays False - continue training
 
         if is_finished:
             rank_print(f"[RETROACTIVE] Detected completed job with {len(curriculum.loss_history)} loss records")
@@ -3067,13 +3462,10 @@ def main():
             has_tokens = any(h.get("tokens", 0) > 0 for h in curriculum.loss_history)
             if not has_tokens:
                 rank_print("[RETROACTIVE] Loss history missing 'tokens' field - estimating from steps")
-                # Estimate tokens per step based on packing config
                 if args.use_packing:
-                    # Rough estimate: target_samples * avg_seq_len * world_size
-                    avg_seq_len = 300  # Rough estimate for search task
+                    avg_seq_len = 300
                     est_tokens_per_step = args.target_samples_per_batch * avg_seq_len * get_world_size()
                 else:
-                    # batch_size * avg_seq_len * world_size
                     avg_seq_len = 300
                     est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
 
@@ -3081,17 +3473,30 @@ def main():
                 for h in curriculum.loss_history:
                     h["tokens"] = est_tokens_per_step
 
+            # Build metadata for retroactive plots
+            plot_metadata = {
+                "model_name": args.model_name.split("/")[-1],
+                "model_params_b": sum(p.numel() for p in model.parameters()) / 1e9,
+                "learning_rate": args.learning_rate,
+                "use_packing": args.use_packing,
+                "batch_size": args.batch_size,
+                "target_samples": args.target_samples_per_batch,
+                "accuracy_threshold": args.accuracy_threshold,
+            }
+
             if is_main_process():
                 rank_print("[RETROACTIVE] Generating plots for completed job...")
 
-                # Generate all plots
-                plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages)
-                plot_loss_vs_flops(curriculum.loss_history, args.output_dir, flops_per_token, args.n_stages)
+                plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages, plot_metadata)
+                plot_loss_vs_flops(curriculum.loss_history, args.output_dir, flops_per_token, args.n_stages,
+                                   plot_metadata)
+                plot_loss_vs_walltime(curriculum.loss_history, args.output_dir, args.n_stages, plot_metadata)
+                plot_achieved_tflops(curriculum.loss_history, args.output_dir, args.n_stages, plot_metadata)
 
                 # Per-stage plots
                 stages_seen = set(h["stage"] for h in curriculum.loss_history)
                 for stage in sorted(stages_seen):
-                    plot_stage_loss(curriculum.loss_history, stage, args.output_dir)
+                    plot_stage_loss(curriculum.loss_history, stage, args.output_dir, plot_metadata)
 
                 rank_print(f"[RETROACTIVE] Generated plots for {len(stages_seen)} stages")
                 rank_print("[RETROACTIVE] Done. Exiting without training.")
@@ -3214,6 +3619,17 @@ def main():
     curriculum.flops_per_token = estimate_flops_per_token(model)
     rank_print(
         f"[FLOPS] Model has {sum(p.numel() for p in model.parameters()) / 1e9:.2f}B params, ~{curriculum.flops_per_token / 1e9:.1f}B FLOPs/token")
+
+    # Build plot metadata
+    curriculum.plot_metadata = {
+        "model_name": args.model_name.split("/")[-1],  # Just the model name, not full path
+        "model_params_b": sum(p.numel() for p in model.parameters()) / 1e9,
+        "learning_rate": args.learning_rate,
+        "use_packing": args.use_packing,
+        "batch_size": args.batch_size,
+        "target_samples": args.target_samples_per_batch,
+        "accuracy_threshold": args.accuracy_threshold,
+    }
 
     if not resume_ckpt:
         if is_main_process():
@@ -3409,8 +3825,11 @@ def main():
             rank_print(f"[LOSS] Warning: {e}")
 
         # Final overall plot
-        plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages)
-        plot_loss_vs_flops(curriculum.loss_history, args.output_dir, curriculum.flops_per_token, args.n_stages)
+        plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages, curriculum.plot_metadata)
+        plot_loss_vs_flops(curriculum.loss_history, args.output_dir, curriculum.flops_per_token, args.n_stages,
+                           curriculum.plot_metadata)
+        plot_loss_vs_walltime(curriculum.loss_history, args.output_dir, args.n_stages, curriculum.plot_metadata)
+        plot_achieved_tflops(curriculum.loss_history, args.output_dir, args.n_stages, curriculum.plot_metadata)
 
     # Final cleanup
     gc.collect()
