@@ -15,14 +15,14 @@ from torch.utils.data import DataLoader, IterableDataset
 
 from accelerate import Accelerator, DataLoaderConfiguration
 
-from nl.pre_pretrain.common import (
+from common import (
     load_model_and_tokenizer,
     tokenize_leading_space,
     load_jsonl_examples,
     full_word_correct,
     checkpoint_dir,
 )
-from nl.pre_pretrain.synthetic import SyntheticNL
+from synthetic import SyntheticNL
 
 
 def load_data_dir_prompts(data_dir: str) -> Set[str]:
@@ -294,10 +294,10 @@ def build_argparser():
 
     p.add_argument("--max_steps", type=int, required=True)
     p.add_argument("--seq_len", type=int, default=2048)
-    p.add_argument("--micro_batch", type=int, default=16)
+    p.add_argument("--micro_batch", type=int, default=64)
     p.add_argument("--grad_accum", type=int, default=1)
 
-    p.add_argument("--lr", type=float, default=5e-4)
+    p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--weight_decay", type=float, default=0.1)
     p.add_argument("--adam_beta1", type=float, default=0.9)
     p.add_argument("--adam_beta2", type=float, default=0.999)

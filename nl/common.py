@@ -4,12 +4,13 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 
 
 def load_model_and_tokenizer(model_name: str):
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    config = AutoConfig.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_config(config)
     if tokenizer.eos_token_id is None:
         raise ValueError("Tokenizer has no eos_token_id")
     if tokenizer.pad_token_id is None:

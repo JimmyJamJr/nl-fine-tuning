@@ -22,7 +22,7 @@ from torch.optim.lr_scheduler import LambdaLR
 
 from accelerate import Accelerator
 
-from nl.pre_pretrain.common import (
+from common import (
     load_model_and_tokenizer,
     tokenize_leading_space,
     load_jsonl_examples,

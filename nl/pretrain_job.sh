@@ -110,14 +110,14 @@ if [ -n "$LATEST_CKPT" ]; then
     ARGS+=(--resume_from "$LATEST_CKPT")
 fi
 
-echo "Command: accelerate launch --num_processes=$GPUS_PER_NODE pre_pretrain/pretrain.py ${ARGS[*]}"
+echo "Command: accelerate launch --num_processes=$GPUS_PER_NODE pretrain.py ${ARGS[*]}"
 
 # ========== Run training ==========
 cd /home/$USER/git/nl-fine-tuning/nl
 
 accelerate launch \
     --num_processes=$GPUS_PER_NODE \
-    pre_pretrain/pretrain.py "${ARGS[@]}"
+    pretrain.py "${ARGS[@]}"
 
 EXIT_CODE=$?
 
