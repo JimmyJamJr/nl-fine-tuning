@@ -18,7 +18,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 
 import torch.nn.functional as F
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset
 
 from transformers import (
     AutoModelForCausalLM,
@@ -1144,10 +1144,7 @@ class SinglePathARDataset(Dataset):
         effective_idx = idx + self.resume_step
         gen, rng = self._get_worker_state(effective_idx)
 
-        # max_len = getattr(self.tokenizer, "model_max_length", 512)
         alpha = self._stage_alpha()
-
-        # base_seed = (self.seed or 0) + rank * 9973 + worker_id * 997 + idx
 
         # Try to generate a valid sample (up to 500 attempts)
         max_attempts = 500
@@ -1187,7 +1184,6 @@ class SinglePathARDataset(Dataset):
         prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
         ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
         end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
-        # full_len = len(prompt_ids) + len(ans_ids) + len(end_ids)
 
         # Build final sequences
         input_ids = prompt_ids + ans_ids + end_ids
@@ -3169,59 +3165,6 @@ def generate_eval_like_training(
     return eval_inputs, eval_labels, picked_answers
 
 
-def estimate_worst_case_length(args, tokenizer, safety_margin=1.25):
-    """
-    Generates 'hardest possible' samples to calculate a safe upper bound
-    for token length. Returns a HARD LIMIT that the dataset must respect.
-    """
-    if is_main_process():
-        print("[INIT] Estimating worst-case token length (Alpha=1.0)...")
-
-    g = NaturalLanguageGraphGenerator(args.max_input_size, seed=42)
-
-    # Generate a larger batch (50) to catch outliers
-    batch = g.generate_batch(
-        task=args.task,
-        batch_size=100,
-        alpha=1.0,
-        **{
-            "max_lookahead": args.max_lookahead,
-            "max_frontier_size": args.max_frontier_size,
-            "max_branch_size": args.max_branch_size,
-            "requested_backtrack": args.requested_backtrack
-        }
-    )
-
-    max_seen_len = 0
-    for ex in batch:
-        if not ex or not ex.output_texts: continue
-        task_type = _determine_task_type(args.task, ex.input_text)
-
-        # 1. Prompt
-        prompt_ids = tokenizer(ex.input_text, add_special_tokens=True, truncation=False)["input_ids"]
-        # 2. Answer (Max length one)
-        longest_ans = max(ex.output_texts, key=len)
-        ans_ids = _tokenize_leading_space(tokenizer, longest_ans)
-        # 3. End tokens
-        end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
-        total_len = len(prompt_ids) + len(ans_ids) + len(end_ids)
-        max_seen_len = max(max_seen_len, total_len)
-
-    # Apply Safety Margin
-    safe_len = int(max_seen_len * safety_margin)
-
-    # Clamp to model max
-    model_max = getattr(tokenizer, "model_max_length", 100000)
-    if model_max > 32768: model_max = 32768
-
-    final_len = min(safe_len, model_max)
-
-    if is_main_process():
-        print(f"[INIT] Max observed: {max_seen_len}. Hard Limit set to: {final_len} (+25%)")
-
-    return final_len
-
-
 def _eval_data_fingerprint(inputs: List[str], labels: List[List[str]]) -> str:
     """Create a fingerprint to verify eval data identity."""
     if not inputs:
@@ -3502,9 +3445,6 @@ def main():
 
     if is_main_process():
         model.print_trainable_parameters()
-
-    # Find hard limit to avoid OOM (no longer needed but kept for debug)
-    # _ = estimate_worst_case_length(args, tokenizer)
 
     # Reserved inputs for deduplication
     reserved_inputs: Set[str] = set()
