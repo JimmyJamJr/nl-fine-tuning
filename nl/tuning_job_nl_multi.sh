@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -J nl_search_1536_0.6B_la256_linear8
+#SBATCH -J nl_search_1536_0.6B_la256_linear8_lr1e-4_batch128_win200
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=112
 #SBATCH --mem=128G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
 #SBATCH -q preemptible
@@ -33,6 +33,10 @@ conda activate search
 export SCRATCH="/scratch/gautschi/$USER"
 mkdir -p "$SCRATCH/nl_output" "$SCRATCH/model_cache"
 export HF_HOME="$SCRATCH/model_cache"
+# Load tokens from .env (not committed to git)
+if [ -f "$(dirname "$0")/.env" ]; then
+    source "$(dirname "$0")/.env"
+fi
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
@@ -68,7 +72,7 @@ MODEL_NAME="Qwen/Qwen3-0.6B"
 # Training
 BATCH_SIZE=16
 GRADIENT_ACCUMULATION_STEPS=1
-LEARNING_RATE=3e-5
+LEARNING_RATE=1e-4
 WARMUP_STEPS=100
 SEED=1234
 NUM_SHOTS=0                      # 0, 1, or 2
@@ -84,8 +88,10 @@ BASE_ALPHA=0.1
 MAX_ALPHA=1.0                    # Cap training alpha (eval always uses 1.0)
 ACCURACY_THRESHOLD=0.98
 MIN_STEPS_PER_STAGE=200
-CHECK_EVERY=50
-FIRST_TOKEN_SOFT_WEIGHT=1.0
+CHECK_EVERY=25
+ACCURACY_WINDOW=200
+EVAL_EVERY_STEPS=0
+FIRST_TOKEN_SOFT_WEIGHT=0.0
 
 # Task parameters
 MAX_INPUT_SIZE=1536
@@ -98,7 +104,7 @@ REQUESTED_BACKTRACK=3            # dfs
 GRADIENT_CHECKPOINTING=true
 USE_LIGER=true                   # Fused RoPE/RMSNorm/SwiGLU kernels
 USE_CHUNKED_CE=true              # Memory-efficient cross-entropy
-CE_CHUNK_SIZE=1024
+CE_CHUNK_SIZE=4096
 
 # OOM handling
 OOM_AUTOSCALE=true
@@ -113,7 +119,7 @@ DO_SEEN_EVAL=true                # Seen-samples sanity check (should be ~100%)
 DO_STAGE_EVAL=true              # Eval at α=1.0 after each stage advancement
 
 # Resume from previous job (leave empty for fresh start)
-PREV_JOB_ID=""
+PREV_JOB_ID="7735383"
 
 # ==========================================================
 
@@ -150,7 +156,7 @@ ARGS=(
     --output_dir "$SCRATCH/nl_output"
     --scratch_dir "$SCRATCH"
     --job_id "$SLURM_JOB_ID"
-
+    
     # Training
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
@@ -167,6 +173,8 @@ ARGS=(
     --accuracy_threshold "$ACCURACY_THRESHOLD"
     --min_steps_per_stage "$MIN_STEPS_PER_STAGE"
     --check_every "$CHECK_EVERY"
+    --accuracy_window "$ACCURACY_WINDOW"
+    --eval_every_steps "$EVAL_EVERY_STEPS"
 
     # Task parameters
     --max_input_size "$MAX_INPUT_SIZE"
@@ -174,14 +182,14 @@ ARGS=(
     --max_frontier_size "$MAX_FRONTIER_SIZE"
     --max_branch_size "$MAX_BRANCH_SIZE"
     --requested_backtrack "$REQUESTED_BACKTRACK"
-
+    
     # Evaluation
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
 
     --use_packing
     --pack_length 16384
-    --target_samples_per_batch 48
+    --target_samples_per_batch 128
 
     --linear_lookahead
     --base_lookahead 16
