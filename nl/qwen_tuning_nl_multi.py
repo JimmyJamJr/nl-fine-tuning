@@ -8,7 +8,7 @@ import warnings
 import datetime
 import math
 import time
-from collections import deque
+from collections import deque, defaultdict
 from typing import List, Tuple, Dict, Any, Optional, Set
 import multiprocessing
 
@@ -109,7 +109,7 @@ def estimate_flops_per_token(model) -> int:
 
 
 # Function for setting seed across libraries and GPUs
-def set_all_seeds(seed: int):
+def set_all_seeds(seed: int, deterministic: bool = False):
     r = get_rank()
     true_seed = (seed or 0) + r * 9973
     rank_print(f"[SEED] Setting all random seeds to {true_seed}")
@@ -120,6 +120,16 @@ def set_all_seeds(seed: int):
         torch.cuda.manual_seed(true_seed)
         torch.cuda.manual_seed_all(true_seed)
     os.environ["PYTHONHASHSEED"] = str(true_seed)
+    if deterministic:
+        if torch.cuda.is_available():
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+        try:
+            torch.use_deterministic_algorithms(True)
+            rank_print("[SEED] Deterministic algorithms enabled")
+        except Exception as e:
+            rank_print(f"[SEED] Could not enable deterministic algorithms: {e}")
     try:
         from transformers import set_seed as hf_set_seed
         hf_set_seed(true_seed)
@@ -208,6 +218,16 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
                     rank_print(f"[CURRICULUM] Updated wall_time_offset to {last_wall_time:.1f}s from loss history")
         except Exception as e:
             rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
+
+    # Restore stage eval history
+    stage_eval_path = os.path.join(os.path.dirname(path), "stage_eval_history.json")
+    if os.path.isfile(stage_eval_path):
+        try:
+            with open(stage_eval_path) as f:
+                curriculum.stage_eval_history = json.load(f)
+            rank_print(f"[CURRICULUM] Restored {len(curriculum.stage_eval_history)} stage eval records")
+        except Exception as e:
+            rank_print(f"[CURRICULUM][WARN] Failed to restore stage eval history: {e}")
 
     return True
 
@@ -365,9 +385,13 @@ def build_redacted_eval_set(
     return red_inputs, red_labels
 
 
-def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 50) -> Optional[Dict[str, float]]:
+def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 50, skip_initial_spike: bool = True) -> \
+Optional[Dict[str, float]]:
     """
     Fit exponential decay: L(t) = a * exp(-b * t) + c
+
+    Args:
+        skip_initial_spike: If True, start fitting from the peak loss (skips initial rise)
 
     Returns dict with:
         - a: initial amplitude above asymptote
@@ -386,19 +410,37 @@ def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 5
     if len(losses) < 20:
         return None
 
-    # Smooth the data first
-    if len(losses) >= window:
-        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
-        fit_steps = steps[window - 1:]
+    fit_steps = list(steps)
+    fit_losses = list(losses)
+
+    # Skip initial spike - find peak and start from there
+    if skip_initial_spike and len(fit_losses) > 30:
+        # Look for peak in first 30% of stage
+        search_range = max(10, len(fit_losses) // 3)
+        peak_idx = np.argmax(fit_losses[:search_range])
+
+        # Only skip if peak isn't at the very start (i.e., there was a spike)
+        if peak_idx > 2:
+            fit_steps = fit_steps[peak_idx:]
+            fit_losses = fit_losses[peak_idx:]
+
+    if len(fit_losses) < 15:
+        return None
+
+    # Smooth the data
+    smooth_window = min(window, len(fit_losses) // 3) or 1
+    if len(fit_losses) >= smooth_window:
+        smoothed = np.convolve(fit_losses, np.ones(smooth_window) / smooth_window, mode='valid')
+        smooth_steps = fit_steps[smooth_window - 1:]
     else:
-        smoothed = np.array(losses)
-        fit_steps = steps
+        smoothed = np.array(fit_losses)
+        smooth_steps = fit_steps
 
     if len(smoothed) < 10:
         return None
 
     # Normalize steps to start at 0
-    t = np.array(fit_steps, dtype=float) - fit_steps[0]
+    t = np.array(smooth_steps, dtype=float) - smooth_steps[0]
     y = np.array(smoothed, dtype=float)
 
     def exp_decay(t, a, b, c):
@@ -433,7 +475,8 @@ def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 5
             "c": c,
             "r_squared": r_squared,
             "half_life": half_life,
-            "fit_steps": fit_steps,
+            "fit_start_step": smooth_steps[0],  # Where fit starts (after spike)
+            "fit_steps": smooth_steps,
             "fit_values": exp_decay(t, a, b, c).tolist(),
         }
     except Exception as e:
@@ -482,11 +525,9 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
     steps = [h["step"] for h in stage_data]
     losses = [h["loss"] for h in stage_data]
 
-    # Get alpha and effective_L for this stage
     alpha = stage_data[0].get("alpha", None)
     effective_L = stage_data[0].get("effective_L", None)
 
-    # Relative steps (starting from 0)
     start_step = steps[0]
     rel_steps = [s - start_step for s in steps]
 
@@ -494,8 +535,7 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
     ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue', label='Raw')
 
     # Smoothed line
-    window = min(50, len(losses) // 5) or 1
-    smoothed = None
+    window = min(200, len(losses) // 3) or 1
     if len(losses) >= window:
         smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
         ax.plot(range(window - 1, len(losses)), smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
@@ -503,16 +543,19 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
     # Exponential fit
     fit_result = fit_exponential_decay(rel_steps, losses, window=window)
     fit_text = ""
-    if fit_result and fit_result["r_squared"] > 0.8:  # Only show good fits
-        fit_steps = [s - start_step for s in fit_result["fit_steps"]]
-        ax.plot(fit_steps, fit_result["fit_values"], '--', linewidth=2, color='red',
+    if fit_result and fit_result["r_squared"] > 0.8:
+        # Show where fit starts (after spike)
+        fit_start = fit_result["fit_start_step"]  # Already relative since we passed rel_steps
+        ax.axvline(x=fit_start, color='orange', linestyle=':', alpha=0.5, label='Fit start')
+
+        # Draw fit curve
+        ax.plot(fit_result["fit_steps"], fit_result["fit_values"], '--', linewidth=2, color='red',
                 label=f'Exp fit (R²={fit_result["r_squared"]:.3f})')
 
         # Asymptote line
         ax.axhline(y=fit_result["c"], color='green', linestyle=':', alpha=0.7,
                    label=f'Asymptote={fit_result["c"]:.4f}')
 
-        # Build fit info text
         fit_text = (f'Fit: L(t) = {fit_result["a"]:.3f}·e^(-{fit_result["b"]:.2e}·t) + {fit_result["c"]:.4f}\n'
                     f'Est. minimum: {fit_result["c"]:.4f} | Half-life: {fit_result["half_life"]:.0f} steps | R²={fit_result["r_squared"]:.3f}')
     elif fit_result:
@@ -522,7 +565,6 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
     ax.set_ylabel('Loss')
     ax.set_yscale('log')
 
-    # Build title with available info
     title = f'Stage {stage} Loss ({len(stage_data)} steps, final={losses[-1]:.4f})'
     if effective_L is not None:
         title += f' | L={effective_L}'
@@ -530,13 +572,11 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
         title += f' | α={alpha:.3f}'
     ax.set_title(title)
 
-    # Add fit info as text box
     if fit_text:
         ax.text(0.02, 0.02, fit_text, transform=ax.transAxes, fontsize=8,
                 verticalalignment='bottom', fontfamily='monospace',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
-    # Add subtitle with metadata
     if metadata:
         subtitle = _build_plot_subtitle(metadata)
         fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
@@ -549,7 +589,6 @@ def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metad
     plt.savefig(os.path.join(output_dir, f"loss_stage_{stage}.png"), dpi=150)
     plt.close()
 
-    # Log fit results
     if fit_result and fit_result["r_squared"] > 0.8:
         rank_print(
             f"[PLOT] Saved loss_stage_{stage}.png | Est. min={fit_result['c']:.4f}, half-life={fit_result['half_life']:.0f} steps")
@@ -869,6 +908,79 @@ def plot_achieved_tflops(loss_history: List[Dict], output_dir: str, n_stages: in
     rank_print(f"[PLOT] Saved achieved_tflops.png (avg: {avg_tflops:.1f} TFLOPs/s)")
 
 
+def plot_stage_eval(stage_eval_history: List[Dict], output_dir: str, metadata: Dict = None):
+    """Plot held-out eval loss and accuracy vs effective L after each stage."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not stage_eval_history or len(stage_eval_history) < 2:
+        return
+
+    stages = [h["stage"] for h in stage_eval_history]
+    greedy_first = [h["greedy_first"] for h in stage_eval_history]
+    greedy_full = [h["greedy_full"] for h in stage_eval_history]
+    has_loss = "tf_loss" in stage_eval_history[0]
+    has_L = "effective_L" in stage_eval_history[0]
+
+    # Use effective_L for x-axis if available, else stage number
+    if has_L:
+        x_vals = [h["effective_L"] for h in stage_eval_history]
+        x_label = "Effective Lookahead (L)"
+    else:
+        x_vals = stages
+        x_label = "Stage"
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Left axis: accuracy
+    color_first = '#2196F3'
+    color_full = '#4CAF50'
+    ax1.plot(x_vals, greedy_first, 'o-', color=color_first, label='Greedy First Token', markersize=5)
+    ax1.plot(x_vals, greedy_full, 's-', color=color_full, label='Greedy Full Word', markersize=5)
+    ax1.set_xlabel(x_label)
+    ax1.set_ylabel('Accuracy')
+    ax1.set_ylim(0, 1.05)
+    ax1.grid(True, alpha=0.3)
+
+    if has_loss:
+        # Right axis: TF loss
+        ax2 = ax1.twinx()
+        tf_losses = [h["tf_loss"] for h in stage_eval_history]
+        color_loss = '#F44336'
+        ax2.plot(x_vals, tf_losses, '^--', color=color_loss, label='TF Loss (alpha=1.0)', markersize=5)
+        ax2.set_ylabel('Teacher-Forced Loss', color=color_loss)
+        ax2.tick_params(axis='y', labelcolor=color_loss)
+
+        # Combined legend
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='center right')
+    else:
+        ax1.legend(loc='lower right')
+
+    # Annotate each point with stage number
+    for i, h in enumerate(stage_eval_history):
+        ax1.annotate(f'S{h["stage"]}', (x_vals[i], greedy_full[i]),
+                     textcoords="offset points", xytext=(0, 8), fontsize=7, ha='center')
+
+    ax1.set_title('Held-Out Eval (alpha=1.0) After Each Stage')
+
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    plt.savefig(os.path.join(output_dir, "stage_eval.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved stage_eval.png ({len(stage_eval_history)} stages)")
+
+
 class SinglePathARDataset(Dataset):
     def __init__(
             self,
@@ -987,14 +1099,17 @@ class SinglePathARDataset(Dataset):
             return self.stage >= self.n_stages
 
     def _shots_prefix(self) -> str:
-        """Build few-shot prefix for prompts"""
-        if not self.few_shot_examples:
-            return ""
-        parts = []
-        for ex in self.few_shot_examples:
-            tt = _determine_task_type(self.task, ex["input"])
-            parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
-        return "\n\n".join(parts) + ("\n\n" if parts else "")
+        """Build few-shot prefix for prompts (cached after first call)."""
+        if not hasattr(self, '_cached_shots_prefix'):
+            if not self.few_shot_examples:
+                self._cached_shots_prefix = ""
+            else:
+                parts = []
+                for ex in self.few_shot_examples:
+                    tt = _determine_task_type(self.task, ex["input"])
+                    parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
+                self._cached_shots_prefix = "\n\n".join(parts) + ("\n\n" if parts else "")
+        return self._cached_shots_prefix
 
     def _get_worker_state(self, idx: int) -> Tuple[NaturalLanguageGraphGenerator, random.Random]:
         worker_info = torch.utils.data.get_worker_info()
@@ -1084,11 +1199,11 @@ class SinglePathARDataset(Dataset):
             self._seen_inputs.append(ex.input_text)
             self._seen_labels.append(list(ex.output_texts))
 
-        # Build valid first token targets
+        # Build valid first token targets (tokenize each alternative once)
         first_union = sorted({
-            _tokenize_leading_space(self.tokenizer, a)[0]
-            for a in ex.output_texts
-            if _tokenize_leading_space(self.tokenizer, a)
+            tokens[0]
+            for tokens in (_tokenize_leading_space(self.tokenizer, a) for a in ex.output_texts)
+            if tokens
         })
 
         return {
@@ -1236,14 +1351,17 @@ class PackedSequenceDataset(Dataset):
         return out[:k]
 
     def _shots_prefix(self) -> str:
-        """Build few-shot prefix for prompts."""
-        if not self.few_shot_examples:
-            return ""
-        parts = []
-        for ex in self.few_shot_examples:
-            tt = _determine_task_type(self.task, ex["input"])
-            parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
-        return "\n\n".join(parts) + ("\n\n" if parts else "")
+        """Build few-shot prefix for prompts (cached after first call)."""
+        if not hasattr(self, '_cached_shots_prefix'):
+            if not self.few_shot_examples:
+                self._cached_shots_prefix = ""
+            else:
+                parts = []
+                for ex in self.few_shot_examples:
+                    tt = _determine_task_type(self.task, ex["input"])
+                    parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
+                self._cached_shots_prefix = "\n\n".join(parts) + ("\n\n" if parts else "")
+        return self._cached_shots_prefix
 
     def _get_worker_state(self, idx: int):
         """idx should already be offset by resume_step from __getitem__"""
@@ -1303,10 +1421,11 @@ class PackedSequenceDataset(Dataset):
         input_ids = prompt_ids + ans_ids + end_ids
         labels = [-100] * len(prompt_ids) + ans_ids + end_ids
 
+        # Build valid first token targets (tokenize each alternative once)
         first_union = sorted({
-            _tokenize_leading_space(self.tokenizer, a)[0]
-            for a in ex.output_texts
-            if _tokenize_leading_space(self.tokenizer, a)
+            tokens[0]
+            for tokens in (_tokenize_leading_space(self.tokenizer, a) for a in ex.output_texts)
+            if tokens
         })
 
         # Store for seen eval (thread-safe)
@@ -1472,12 +1591,12 @@ class PackedSequenceTrainer(Trainer):
     Properly handles Qwen3's RoPE implementation.
     """
 
-    def __init__(self, *args, first_token_soft_weight=0.3, **kwargs):
+    def __init__(self, *args, first_token_soft_weight=0.3, accuracy_window=200, **kwargs):
         super().__init__(*args, **kwargs)
         self.first_token_soft_weight = first_token_soft_weight
         self.recent_losses = deque(maxlen=100)
-        self.first_token_correct = deque(maxlen=200)
-        self.full_word_correct = deque(maxlen=200)
+        self.first_token_correct = deque(maxlen=accuracy_window)
+        self.full_word_correct = deque(maxlen=accuracy_window)
 
         self._last_batch_samples = 0
         self._last_batch_tokens = 0
@@ -1515,24 +1634,11 @@ class PackedSequenceTrainer(Trainer):
         )
 
     def training_step(self, model, inputs, num_items_in_batch=None):
-        t_data_ready = time.perf_counter()
-
-        if self._step_start_time is not None:
-            self._train_timing["data_wait"] += (t_data_ready - self._step_start_time)
-
-        t_forward_start = time.perf_counter()
+        t0 = time.perf_counter()
         loss = super().training_step(model, inputs, num_items_in_batch)
-        t_forward_end = time.perf_counter()
-
-        self._train_timing["forward"] += (t_forward_end - t_forward_start)
+        dt = time.perf_counter() - t0
+        self._train_timing["total_step"] += dt
         self._train_timing["steps"] += 1
-
-        self._step_start_time = time.perf_counter()
-        self._train_timing["total_step"] += (self._step_start_time - t_data_ready)
-
-        # if self._train_timing["steps"] % 100 == 0:
-        #     self._report_train_timing()
-
         return loss
 
     def _report_train_timing(self):
@@ -1591,12 +1697,11 @@ class PackedSequenceTrainer(Trainer):
         # Add batch dim and transpose for RoPE: [1, num_heads, seq_len, head_dim]
         q = q.unsqueeze(0).transpose(1, 2)
         k = k.unsqueeze(0).transpose(1, 2)
-        v = v.unsqueeze(0).transpose(1, 2)
 
-        # Get cos/sin from rotary_emb
+        # Get cos/sin from rotary_emb (uses first arg only for dtype/device inference)
         cos, sin = rotary_emb(v, position_ids)
 
-        # Apply RoPE
+        # Apply RoPE (only to Q and K)
         if self._qwen_apply_rope is not None:
             q, k = self._qwen_apply_rope(q, k, cos, sin)
         else:
@@ -1608,13 +1713,8 @@ class PackedSequenceTrainer(Trainer):
         # Reshape for flash_attn_varlen: [seq_len, num_heads, head_dim]
         q = q.squeeze(0).transpose(0, 1).contiguous()
         k = k.squeeze(0).transpose(0, 1).contiguous()
-        v = v.squeeze(0).transpose(0, 1).contiguous()
-
-        # GQA: expand KV heads
-        if num_kv_heads != num_heads:
-            repeat_factor = num_heads // num_kv_heads
-            k = k.repeat_interleave(repeat_factor, dim=1)
-            v = v.repeat_interleave(repeat_factor, dim=1)
+        # V is already [seq_len, num_kv_heads, head_dim] from the view() above
+        v = v.contiguous()
 
         # Flash attention
         attn_output = flash_attn_varlen_func(
@@ -1696,6 +1796,11 @@ class PackedSequenceTrainer(Trainer):
         all_row_losses = []
         all_row_valid = []
 
+        # Pre-group sequence_info by row_idx (avoid repeated linear scans)
+        seqs_by_row = defaultdict(list)
+        for s in sequence_info:
+            seqs_by_row[s["row_idx"]].append(s)
+
         for row_idx in range(B):
             cu_seqlens = torch.tensor(cu_seqlens_list[row_idx], dtype=torch.int32, device=device)
             max_seqlen = max_seqlen_list[row_idx]
@@ -1746,7 +1851,14 @@ class PackedSequenceTrainer(Trainer):
                 )
 
                 # Apply soft first-token CE for sequences in this row
-                row_seqs = [s for s in sequence_info if s["row_idx"] == row_idx]
+                row_seqs = seqs_by_row[row_idx]
+
+                # Cache valid_positions and build position->ce_idx lookup once per row
+                valid_positions = torch.nonzero(valid_mask, as_tuple=True)[0]
+                pos_to_ce_idx = {}
+                for ci, pos in enumerate(valid_positions.tolist()):
+                    pos_to_ce_idx[pos] = ci
+
                 for seq in row_seqs:
                     first_idx = seq["start_idx"] + seq["prompt_len"] - 1
                     if first_idx < 0 or first_idx >= shift_logits.size(0):
@@ -1757,17 +1869,13 @@ class PackedSequenceTrainer(Trainer):
                     if not valid_first:
                         continue
 
-                    # Find position in ce tensor
-                    valid_positions = torch.nonzero(valid_mask, as_tuple=True)[0]
-                    ce_idx_matches = (valid_positions == first_idx).nonzero(as_tuple=True)[0]
-                    if len(ce_idx_matches) == 0:
+                    ce_idx = pos_to_ce_idx.get(first_idx)
+                    if ce_idx is None:
                         continue
-                    ce_idx = ce_idx_matches[0].item()
 
-                    # Soft CE
+                    # Soft CE (valid_first is already sorted unique from __getitem__)
                     logp = F.log_softmax(shift_logits[first_idx], dim=-1)
                     ids = torch.tensor(valid_first, device=device, dtype=torch.long)
-                    ids = torch.unique(ids)
                     soft_ce = -logp[ids].mean()
 
                     # Blend
@@ -1779,23 +1887,23 @@ class PackedSequenceTrainer(Trainer):
                 all_row_losses.append(ce.sum())
                 all_row_valid.append(n_valid)
 
-                # Track accuracy
+                # Track accuracy (vectorized)
                 with torch.no_grad():
+                    preds = shift_logits.argmax(dim=-1)  # [actual_len-1]
                     for seq in row_seqs:
                         first_idx = seq["start_idx"] + seq["prompt_len"] - 1
                         if 0 <= first_idx < shift_logits.size(0) and valid_mask[first_idx]:
-                            pred = torch.argmax(shift_logits[first_idx]).item()
-                            self.first_token_correct.append(pred in seq["valid_first_targets"])
+                            self.first_token_correct.append(preds[first_idx].item() in seq["valid_first_targets"])
 
                         # Full word accuracy
                         seq_start = seq["start_idx"] + seq["prompt_len"] - 1
                         seq_end = min(seq["end_idx"] - 1, shift_logits.size(0))
-                        ok = True
-                        for j in range(seq_start, seq_end):
-                            if valid_mask[j]:
-                                if torch.argmax(shift_logits[j]).item() != shift_labels[j].item():
-                                    ok = False
-                                    break
+                        seq_valid = valid_mask[seq_start:seq_end]
+                        if seq_valid.any():
+                            ok = (preds[seq_start:seq_end][seq_valid] == shift_labels[seq_start:seq_end][
+                                seq_valid]).all().item()
+                        else:
+                            ok = True
                         self.full_word_correct.append(ok)
 
         # Aggregate loss
@@ -1873,13 +1981,13 @@ def make_collate(tokenizer, pad_to_multiple_of=64):
 # ================== Trainer (soft first-token CE) ==================
 class SinglePathARTrainer(Trainer):
     def __init__(self, *args, first_token_soft_weight=0.3, use_chunked_ce=False, ce_chunk_size=1024, use_packing=False,
-                 **kwargs):
+                 accuracy_window=200, **kwargs):
         self.use_packing = use_packing
         super().__init__(*args, **kwargs)
         self.first_token_soft_weight = first_token_soft_weight
         self.recent_losses = deque(maxlen=100)
-        self.first_token_correct = deque(maxlen=200)
-        self.full_word_correct = deque(maxlen=200)
+        self.first_token_correct = deque(maxlen=accuracy_window)
+        self.full_word_correct = deque(maxlen=accuracy_window)
 
         self.use_chunked_ce = use_chunked_ce
         self.ce_chunk_size = ce_chunk_size
@@ -1902,31 +2010,11 @@ class SinglePathARTrainer(Trainer):
         self._last_batch_tokens = 0
 
     def training_step(self, model, inputs, num_items_in_batch=None):
-        """Override to add timing instrumentation"""
-        t_data_ready = time.perf_counter()
-
-        # Track data loading time (time since last step ended)
-        if self._step_start_time is not None:
-            self._train_timing["data_wait"] += (t_data_ready - self._step_start_time)
-
-        self._data_ready_time = t_data_ready
-
-        # Call parent's training_step (handles forward + loss computation)
-        t_forward_start = time.perf_counter()
+        t0 = time.perf_counter()
         loss = super().training_step(model, inputs, num_items_in_batch)
-        t_forward_end = time.perf_counter()
-
-        self._train_timing["forward"] += (t_forward_end - t_forward_start)
+        dt = time.perf_counter() - t0
+        self._train_timing["total_step"] += dt
         self._train_timing["steps"] += 1
-
-        # Mark step start for next iteration's data_wait calculation
-        self._step_start_time = time.perf_counter()
-        self._train_timing["total_step"] += (self._step_start_time - t_data_ready)
-
-        # Report every 100 steps
-        # if self._train_timing["steps"] % 100 == 0:
-        #     self._report_train_timing()
-
         return loss
 
     def _report_train_timing(self):
@@ -2026,12 +2114,6 @@ class SinglePathARTrainer(Trainer):
             if mask.any():
                 ids = valid_first[i][mask]
                 logp = F.log_softmax(shift_logits[i, first_idx, :], dim=-1)
-                soft = torch.zeros_like(logp)
-
-                # soft[ids] = 1.0 / ids.numel()
-                # soft_ce = -(soft * logp).sum()
-
-                ids = torch.unique(ids)
                 soft_ce = -logp[ids].mean()
 
                 ce_all[i, first_idx] = (
@@ -2043,23 +2125,20 @@ class SinglePathARTrainer(Trainer):
         loss = ce_all.sum() / denom
         self.recent_losses.append(loss.item())
 
-        # Training-time tracking
+        # Training-time tracking (vectorized)
         with torch.no_grad():
+            preds = shift_logits.argmax(dim=-1)  # [B, Tm1]
             for i in range(B):
                 first_idx = prompt_len[i].item() - 1
                 if 0 <= first_idx < Tm1 and valid_mask[i, first_idx]:
-                    pred_first = torch.argmax(shift_logits[i, first_idx, :]).item()
                     valid_ids = set(valid_first[i][valid_first_mask[i]].tolist())
-                    self.first_token_correct.append(pred_first in valid_ids)
+                    self.first_token_correct.append(preds[i, first_idx].item() in valid_ids)
 
-                ok = True
-                idxs = torch.nonzero(valid_mask[i], as_tuple=False).squeeze(-1)
-                for j in idxs.tolist():
-                    gold = shift_labels[i, j].item()
-                    pred = torch.argmax(shift_logits[i, j, :]).item()
-                    if gold != pred:
-                        ok = False
-                        break
+                row_valid = valid_mask[i]
+                if row_valid.any():
+                    ok = (preds[i][row_valid] == shift_labels[i][row_valid]).all().item()
+                else:
+                    ok = True
                 self.full_word_correct.append(ok)
 
         return (loss, outputs) if return_outputs else loss
@@ -2156,9 +2235,7 @@ class SinglePathARTrainer(Trainer):
             )
 
             logp = F.log_softmax(first_logits, dim=-1)
-            soft = torch.zeros_like(logp)
-            soft[ids] = 1.0 / ids.numel()
-            soft_ce = -(soft * logp).sum()
+            soft_ce = -logp[ids].mean()
 
             delta = self.first_token_soft_weight * (soft_ce - hard_ce)
             total_adjustment = total_adjustment + delta
@@ -2231,6 +2308,69 @@ class SinglePathARTrainer(Trainer):
 
 
 # ================== Eval helpers ==================
+@torch.no_grad()
+def run_eval_tf_loss(
+        model,
+        tokenizer,
+        task: str,
+        inputs: List[str],
+        labels: List[List[str]],
+        **kwargs,
+) -> float:
+    """Compute average teacher-forced CE loss on eval set (distributed)."""
+    barrier()
+    rank = get_rank()
+    world_size = get_world_size()
+    device = next(model.parameters()).device
+
+    total_len = len(inputs)
+    chunk_size = math.ceil(total_len / world_size)
+    start_idx = rank * chunk_size
+    end_idx = min(start_idx + chunk_size, total_len)
+
+    my_inputs = inputs[start_idx:end_idx]
+    my_labels = labels[start_idx:end_idx]
+    actual_count = len(my_inputs)
+
+    rng = random.Random((kwargs.get("seed", 0) or 0) + 777)
+    num_shots = kwargs.get("num_shots", 0)
+    max_input_size = kwargs.get("max_input_size", 256)
+
+    local_loss_sum = 0.0
+    local_count = 0
+    unwrapped = model.module if hasattr(model, "module") else model
+
+    for x, ys in zip(my_inputs, my_labels):
+        ys = ys if isinstance(ys, list) else [ys]
+        chosen = rng.choice(ys)
+        task_type = _determine_task_type(task, x)
+
+        prompt_ids = tokenizer(x, add_special_tokens=True, truncation=False)["input_ids"]
+        ans_ids = _tokenize_leading_space(tokenizer, chosen)
+        end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+
+        input_ids = torch.tensor([prompt_ids + ans_ids + end_ids], device=device)
+        label_ids = torch.tensor([[-100] * len(prompt_ids) + ans_ids + end_ids], device=device)
+
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            out = unwrapped(input_ids=input_ids, labels=label_ids)
+
+        local_loss_sum += out.loss.item()
+        local_count += 1
+
+    metrics = torch.tensor([local_loss_sum, float(local_count)], dtype=torch.float64, device=device)
+    if dist_is_initialized():
+        torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
+
+    total_loss = metrics[0].item()
+    total_count = int(metrics[1].item())
+
+    barrier()
+    avg_loss = total_loss / total_count if total_count > 0 else 0.0
+    rank_print(f"[EVAL-TF] Loss={avg_loss:.4f} (n={total_count})")
+    return avg_loss
+
+
 @torch.no_grad()
 def run_eval_greedy_readable(
         model,
@@ -2367,6 +2507,7 @@ class FirstTokenCurriculum(TrainerCallback):
             use_packing: bool = False,  # NEW
             # Stage eval config
             do_stage_eval: bool = False,
+            eval_every_steps: int = 0,
             eval_inputs_hard: List[str] = None,
             eval_labels_hard: List[List[str]] = None,
             eval_fingerprint_hard: str = None,
@@ -2403,6 +2544,7 @@ class FirstTokenCurriculum(TrainerCallback):
 
         # Stage eval config
         self.do_stage_eval = do_stage_eval
+        self.eval_every_steps = eval_every_steps
         self.eval_inputs_hard = eval_inputs_hard
         self.eval_labels_hard = eval_labels_hard
         self.eval_fingerprint_hard = eval_fingerprint_hard
@@ -2477,8 +2619,10 @@ class FirstTokenCurriculum(TrainerCallback):
         barrier()
         return control
 
-    def _run_stage_eval(self, stage: int, global_step: int):
-        """Run greedy eval at alpha=1.0 after stage advancement."""
+    def _run_stage_eval(self, stage: int, global_step: int, is_periodic: bool = False):
+        """Run greedy eval + TF loss at alpha=1.0 after stage advancement.
+        If curriculum is enabled and this is not a periodic eval, also evaluate
+        at the current stage's alpha to measure accuracy on stage-difficulty data."""
         if not self.do_stage_eval:
             return
         if self.eval_inputs_hard is None or self.tokenizer is None:
@@ -2490,7 +2634,18 @@ class FirstTokenCurriculum(TrainerCallback):
         if fp != self.eval_fingerprint_hard:
             rank_print(f"[STAGE-EVAL] WARNING: Fingerprint mismatch! {fp} != {self.eval_fingerprint_hard}")
 
-        rank_print(f"\n[STAGE-EVAL] Stage {stage} complete (step {global_step}), evaluating at alpha=1.0...")
+        # Get effective L for this stage
+        target_L = self.dataset._stage_target_lookahead()
+        if target_L is not None:
+            effective_L = target_L
+        else:
+            alpha = self.dataset._stage_alpha()
+            n = getattr(self.dataset, "max_input_size", 256)
+            cap = self.dataset.task_kwargs.get("max_lookahead")
+            effective_L = effective_search_L(alpha, n, max_lookahead_cap=cap)
+
+        rank_print(
+            f"\n[STAGE-EVAL] Stage {stage} complete (step {global_step}, L={effective_L}), evaluating at alpha=1.0...")
 
         # Switch to eval mode
         model = self.trainer.model
@@ -2498,6 +2653,15 @@ class FirstTokenCurriculum(TrainerCallback):
         model.eval()
 
         with torch.no_grad():
+            # Teacher-forced loss
+            tf_loss = run_eval_tf_loss(
+                model, self.tokenizer, self.task,
+                self.eval_inputs_hard, self.eval_labels_hard,
+                num_shots=self.num_shots, max_input_size=self.max_input_size,
+                seed=self.seed, **self.task_kwargs
+            )
+
+            # Greedy accuracy
             greedy_result = run_eval_greedy_readable(
                 model, self.tokenizer, self.task,
                 self.eval_inputs_hard, self.eval_labels_hard,
@@ -2506,33 +2670,83 @@ class FirstTokenCurriculum(TrainerCallback):
                 **self.task_kwargs
             )
 
+            # Stage-alpha eval: generate and evaluate on stage-difficulty data
+            # Skip for periodic evals (no stage transition) and single-stage runs
+            stage_greedy_result = None
+            stage_alpha = self.dataset._stage_alpha()
+            max_alpha_L = self.dataset.task_kwargs.get("max_lookahead")
+            is_full_difficulty = (target_L is not None and target_L >= (max_alpha_L or 256))
+            if not is_periodic and not is_full_difficulty and stage_alpha < 1.0:
+                rank_print(f"[STAGE-EVAL] Also evaluating at stage alpha={stage_alpha:.4f} (L={effective_L})...")
+                # Generate stage-difficulty eval data on the fly
+                stage_eval_inputs, stage_eval_labels = None, None
+                if is_main_process():
+                    n_stage_samples = min(len(self.eval_inputs_hard), 500)
+                    stage_eval_inputs, stage_eval_labels, _ = generate_eval_like_training(
+                        n_samples=n_stage_samples,
+                        task=self.task,
+                        tokenizer=self.tokenizer,
+                        max_input_size=self.max_input_size,
+                        alpha=stage_alpha,
+                        num_shots=self.num_shots,
+                        reserved_inputs=set(),
+                        seed=(self.seed or 0) + global_step,  # Vary seed per eval
+                        **self.task_kwargs,
+                    )
+                barrier()
+                stage_eval_inputs = broadcast_object(stage_eval_inputs, src=0)
+                stage_eval_labels = broadcast_object(stage_eval_labels, src=0)
+
+                if stage_eval_inputs:
+                    stage_greedy_result = run_eval_greedy_readable(
+                        model, self.tokenizer, self.task,
+                        stage_eval_inputs, stage_eval_labels,
+                        num_shots=self.num_shots, max_input_size=self.max_input_size,
+                        seed=self.seed, print_examples=0,
+                        **self.task_kwargs
+                    )
+
         # Restore training mode
         if was_training:
             model.train()
 
         # Log results
-        rank_print(
-            f"[STAGE-EVAL] Stage {stage} | Step {global_step} | "
+        log_msg = (
+            f"[STAGE-EVAL] Stage {stage} | Step {global_step} | L={effective_L} | "
+            f"TF Loss={tf_loss:.4f} | "
             f"Greedy: First={greedy_result['first_token_acc']:.2%}, Full={greedy_result['full_word_acc']:.2%}"
         )
+        if stage_greedy_result:
+            log_msg += (
+                f"\n[STAGE-EVAL] Stage {stage} | Step {global_step} | L={effective_L} (stage-alpha) | "
+                f"Greedy: First={stage_greedy_result['first_token_acc']:.2%}, Full={stage_greedy_result['full_word_acc']:.2%}"
+            )
+        rank_print(log_msg)
 
         # Store history
-        self.stage_eval_history.append({
+        entry = {
             "stage": stage,
             "step": global_step,
-            "alpha_training": self.dataset._stage_alpha(),
+            "effective_L": effective_L,
+            "alpha_training": stage_alpha,
+            "tf_loss": tf_loss,
             "greedy_first": greedy_result['first_token_acc'],
             "greedy_full": greedy_result['full_word_acc'],
-        })
+        }
+        if stage_greedy_result:
+            entry["stage_greedy_first"] = stage_greedy_result['first_token_acc']
+            entry["stage_greedy_full"] = stage_greedy_result['full_word_acc']
+        self.stage_eval_history.append(entry)
 
-        # Save to file
+        # Save to file and plot
         if is_main_process():
             try:
                 out_path = os.path.join(self.trainer.args.output_dir, "stage_eval_history.json")
                 with open(out_path, "w") as f:
                     json.dump(self.stage_eval_history, f, indent=2)
+                plot_stage_eval(self.stage_eval_history, self.trainer.args.output_dir, self.plot_metadata)
             except Exception as e:
-                rank_print(f"[STAGE-EVAL] Warning: Could not save history: {e}")
+                rank_print(f"[STAGE-EVAL] Warning: Could not save history/plot: {e}")
 
     def on_step_end(self, args, state, control, **kwargs):
         # Early exit conditions
@@ -2670,6 +2884,17 @@ class FirstTokenCurriculum(TrainerCallback):
                 print(f"[CURRICULUM] Skipping checks during warmup ({remaining} steps remaining)")
             return control
 
+        # ==================== Periodic Eval (independent of stage advancement) ====================
+        if self.eval_every_steps > 0 and state.global_step % self.eval_every_steps == 0:
+            self._run_stage_eval(self.dataset.stage, state.global_step, is_periodic=True)
+            if is_main_process():
+                plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages, self.plot_metadata)
+                plot_loss_vs_flops(self.loss_history, self.trainer.args.output_dir, self.flops_per_token, self.n_stages,
+                                   self.plot_metadata)
+                plot_loss_vs_walltime(self.loss_history, self.trainer.args.output_dir, self.n_stages,
+                                      self.plot_metadata)
+                plot_achieved_tflops(self.loss_history, self.trainer.args.output_dir, self.n_stages, self.plot_metadata)
+
         # ==================== Stage Advancement Check ====================
         if state.global_step % self.check_every == 0 and (state.global_step - self.stage_start_step) >= self.min_steps:
 
@@ -2703,6 +2928,26 @@ class FirstTokenCurriculum(TrainerCallback):
 
                 # Run stage eval BEFORE advancing
                 self._run_stage_eval(old_stage, state.global_step)
+
+                # Save persistent stage checkpoint (won't be rotated by save_total_limit)
+                try:
+                    target_L = self.dataset._stage_target_lookahead()
+                    ckpt_L = target_L if target_L is not None else "?"
+                    stage_ckpt_dir = os.path.join(
+                        self.trainer.args.output_dir,
+                        "stage_checkpoints",
+                        f"stage_{old_stage}_step_{state.global_step}_L{ckpt_L}"
+                    )
+                    rank_print(f"[STAGE-CKPT] Saving persistent checkpoint to {stage_ckpt_dir}")
+                    self.trainer.save_model(stage_ckpt_dir)
+                    barrier()
+                    if is_main_process():
+                        _save_curriculum_state(stage_ckpt_dir, old_stage, self.stage_start_step,
+                                               self.wall_time_offset + (
+                                                           time.time() - self.training_start_time) if self.training_start_time else self.wall_time_offset)
+                    rank_print(f"[STAGE-CKPT] Saved stage {old_stage} checkpoint")
+                except Exception as e:
+                    rank_print(f"[STAGE-CKPT] Warning: Could not save stage checkpoint: {e}")
 
                 if is_main_process():
                     plot_stage_loss(self.loss_history, old_stage, self.trainer.args.output_dir, self.plot_metadata)
@@ -2762,17 +3007,6 @@ class FirstTokenCurriculum(TrainerCallback):
 
                         _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step,
                                                current_wall_time)
-
-        # ==================== Memory Cleanup (every 100 steps) ====================
-        if state.global_step > 0 and state.global_step % 100 == 0:
-            if torch.cuda.is_available():
-                peak_mem = torch.cuda.max_memory_allocated() / 1e9
-                torch.cuda.empty_cache()
-                if is_main_process() and state.global_step % 1000 == 0:
-                    curr_mem = torch.cuda.memory_allocated() / 1e9
-                    print(f"[MEM] Step {state.global_step} | "
-                          f"Current: {curr_mem:.2f}GB | Peak: {peak_mem:.2f}GB")
-                torch.cuda.reset_peak_memory_stats()
 
         return control
 
@@ -3019,6 +3253,8 @@ def main():
 
     # Seed
     p.add_argument("--seed", type=int, default=1234)
+    p.add_argument("--deterministic", action="store_true",
+                   help="Enable CUDA deterministic algorithms (may be slower)")
 
     # Training hyperparams
     p.add_argument("--batch_size", type=int, default=16)
@@ -3043,6 +3279,8 @@ def main():
     p.add_argument("--accuracy_threshold", type=float, default=0.98)
     p.add_argument("--min_steps_per_stage", type=int, default=500)
     p.add_argument("--check_every", type=int, default=50)
+    p.add_argument("--accuracy_window", type=int, default=200,
+                   help="Rolling window size (per GPU) for advancement accuracy check")
 
     # Task params
     p.add_argument("--max_input_size", type=int, default=256)
@@ -3062,6 +3300,8 @@ def main():
     p.add_argument("--do_seen_eval", action="store_true", help="Run seen-samples sanity check (should be ~100%)")
     p.add_argument("--do_stage_eval", action="store_true",
                    help="Run TF+greedy eval at alpha=1.0 after each stage advancement")
+    p.add_argument("--eval_every_steps", type=int, default=0,
+                   help="Run greedy eval every N steps (0=disabled, useful for no-curriculum runs)")
 
     # Redacted eval config
     p.add_argument("--eval_redacted_samples", type=int, default=None)
@@ -3070,6 +3310,7 @@ def main():
     # Memory control
     p.add_argument("--gradient_checkpointing", action="store_true")
     p.add_argument("--oom_autoscale", action="store_true")
+    p.add_argument("--torch_compile", action="store_true", help="Enable torch.compile for the model")
 
     # Scratch / resume
     p.add_argument("--scratch_dir", type=str,
@@ -3123,7 +3364,7 @@ def main():
 
     # Seeds
     if args.seed is not None:
-        set_all_seeds(args.seed)
+        set_all_seeds(args.seed, deterministic=getattr(args, 'deterministic', False))
 
     # Scratch dir names
     if args.job_id:
@@ -3399,6 +3640,7 @@ def main():
         use_packing=args.use_packing,
         # Stage eval config
         do_stage_eval=args.do_stage_eval,
+        eval_every_steps=args.eval_every_steps,
         eval_inputs_hard=eval_inputs_hard,
         eval_labels_hard=eval_labels_hard,
         eval_fingerprint_hard=eval_fingerprint_hard,
@@ -3498,6 +3740,10 @@ def main():
                 for stage in sorted(stages_seen):
                     plot_stage_loss(curriculum.loss_history, stage, args.output_dir, plot_metadata)
 
+                # Stage eval plot
+                if curriculum.stage_eval_history:
+                    plot_stage_eval(curriculum.stage_eval_history, args.output_dir, plot_metadata)
+
                 rank_print(f"[RETROACTIVE] Generated plots for {len(stages_seen)} stages")
                 rank_print("[RETROACTIVE] Done. Exiting without training.")
 
@@ -3537,9 +3783,9 @@ def main():
 
         seed=args.seed if args.seed is not None else 42,
 
-        torch_compile=False,
-        torch_compile_backend="inductor",  # default
-        torch_compile_mode="reduce-overhead",  # optional
+        torch_compile=args.torch_compile,
+        torch_compile_backend="inductor",
+        torch_compile_mode="reduce-overhead",
 
         ddp_find_unused_parameters=False,
         gradient_checkpointing=args.gradient_checkpointing,
@@ -3599,6 +3845,7 @@ def main():
             data_collator=data_collator,
             callbacks=[curriculum, baseline_cb],
             first_token_soft_weight=args.first_token_soft_weight,
+            accuracy_window=args.accuracy_window,
         )
     else:
         trainer = SinglePathARTrainer(
@@ -3612,6 +3859,7 @@ def main():
             use_chunked_ce=args.use_chunked_ce,
             ce_chunk_size=args.ce_chunk_size,
             use_packing=False,
+            accuracy_window=args.accuracy_window,
         )
     curriculum.trainer = trainer
     baseline_cb.trainer = trainer
@@ -3830,6 +4078,8 @@ def main():
                            curriculum.plot_metadata)
         plot_loss_vs_walltime(curriculum.loss_history, args.output_dir, args.n_stages, curriculum.plot_metadata)
         plot_achieved_tflops(curriculum.loss_history, args.output_dir, args.n_stages, curriculum.plot_metadata)
+        if curriculum.stage_eval_history:
+            plot_stage_eval(curriculum.stage_eval_history, args.output_dir, curriculum.plot_metadata)
 
     # Final cleanup
     gc.collect()
