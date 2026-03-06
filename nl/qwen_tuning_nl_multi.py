@@ -139,16 +139,28 @@ def set_all_seeds(seed: int, deterministic: bool = False):
 
 # ================== Curriculum state persistence ==================
 
-def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int, wall_time_offset: float = 0.0) -> None:
+def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int, wall_time_offset: float = 0.0,
+                           first_token_correct=None, full_word_correct=None,
+                           recent_losses=None, samples_this_stage: int = 0,
+                           tokens_this_stage: int = 0) -> None:
     try:
         os.makedirs(dirpath, exist_ok=True)
         fp = os.path.join(dirpath, "curriculum_state.json")
+        data = {
+            "stage": int(stage),
+            "stage_start_step": int(stage_start_step),
+            "wall_time_offset": float(wall_time_offset),
+            "samples_this_stage": int(samples_this_stage),
+            "tokens_this_stage": int(tokens_this_stage),
+        }
+        if first_token_correct is not None:
+            data["first_token_correct"] = list(first_token_correct)
+        if full_word_correct is not None:
+            data["full_word_correct"] = list(full_word_correct)
+        if recent_losses is not None:
+            data["recent_losses"] = list(recent_losses)
         with open(fp, "w") as f:
-            json.dump({
-                "stage": int(stage),
-                "stage_start_step": int(stage_start_step),
-                "wall_time_offset": float(wall_time_offset),
-            }, f)
+            json.dump(data, f)
     except Exception as e:
         rank_print(f"[CURRICULUM][WARN] Failed to save state: {e}")
 
@@ -196,6 +208,13 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
         dataset.stage = int(cs.get("stage", dataset.stage))
         curriculum.stage_start_step = int(cs.get("stage_start_step", 0))
         curriculum.wall_time_offset = float(cs.get("wall_time_offset", 0.0))
+        curriculum._restored_trainer_state = {
+            "first_token_correct": cs.get("first_token_correct"),
+            "full_word_correct": cs.get("full_word_correct"),
+            "recent_losses": cs.get("recent_losses"),
+        }
+        curriculum.samples_this_stage = int(cs.get("samples_this_stage", 0))
+        curriculum.tokens_this_stage = int(cs.get("tokens_this_stage", 0))
         rank_print(
             f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step}, wall_time_offset={curriculum.wall_time_offset:.1f}s from {fp}")
     except Exception as e:
@@ -216,6 +235,24 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
                 if last_wall_time > curriculum.wall_time_offset:
                     curriculum.wall_time_offset = last_wall_time
                     rank_print(f"[CURRICULUM] Updated wall_time_offset to {last_wall_time:.1f}s from loss history")
+
+                # Mark resume point in loss history
+                last_entry = curriculum.loss_history[-1]
+                curriculum.loss_history.append({
+                    "step": last_entry.get("step", 0),
+                    "loss": last_entry.get("loss", 0),
+                    "stage": last_entry.get("stage", 1),
+                    "alpha": last_entry.get("alpha", 0),
+                    "effective_L": last_entry.get("effective_L"),
+                    "tokens": 0,
+                    "wall_time": last_wall_time,
+                    "achieved_tflops": 0,
+                    "resume": True,
+                })
+                rank_print(f"[CURRICULUM] Marked resume point at step {last_entry.get('step', 0)}")
+
+            # Set _last_persist_step so we don't re-persist old steps on resume
+            curriculum._last_persist_step = last_entry.get("step", 0)
         except Exception as e:
             rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
 
@@ -484,6 +521,24 @@ Optional[Dict[str, float]]:
         return None
 
 
+def _draw_resume_markers(ax, loss_history: List[Dict], x_key: str = "step", x_values=None):
+    """Draw vertical dashed red lines at resume points in loss_history.
+
+    Args:
+        ax: matplotlib axes
+        loss_history: list of dicts, entries with "resume": True mark resume points
+        x_key: which key to use for x position ("step", "wall_time", or None if x_values provided)
+        x_values: pre-computed x values (e.g. cumulative FLOPs) aligned with loss_history
+    """
+    for i, h in enumerate(loss_history):
+        if h.get("resume"):
+            if x_values is not None:
+                x = x_values[i]
+            else:
+                x = h.get(x_key, 0)
+            ax.axvline(x=x, color='red', linestyle=':', alpha=0.5, linewidth=1.5, zorder=5)
+
+
 def _build_plot_subtitle(metadata: Dict) -> str:
     """Build a subtitle string from plot metadata."""
     parts = []
@@ -690,6 +745,7 @@ def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int, 
 
     ax.legend(loc='upper left')
     ax.grid(True, alpha=0.3)
+    _draw_resume_markers(ax, loss_history, x_key="step")
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.12)
@@ -766,6 +822,7 @@ def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_toke
 
     ax.legend()
     ax.grid(True, alpha=0.3)
+    _draw_resume_markers(ax, loss_history, x_values=cumulative_pflops)
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.12)
@@ -836,6 +893,7 @@ def plot_loss_vs_walltime(loss_history: List[Dict], output_dir: str, n_stages: i
 
     ax.legend()
     ax.grid(True, alpha=0.3)
+    _draw_resume_markers(ax, loss_history, x_key="wall_time")
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.12)
@@ -899,6 +957,7 @@ def plot_achieved_tflops(loss_history: List[Dict], output_dir: str, n_stages: in
 
     ax.legend()
     ax.grid(True, alpha=0.3)
+    _draw_resume_markers(ax, loss_history, x_key="step")
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.12)
@@ -979,6 +1038,149 @@ def plot_stage_eval(stage_eval_history: List[Dict], output_dir: str, metadata: D
     plt.close()
 
     rank_print(f"[PLOT] Saved stage_eval.png ({len(stage_eval_history)} stages)")
+
+
+def plot_eval_acc_vs_step(stage_eval_history: List[Dict], output_dir: str, metadata: Dict = None,
+                          loss_history: List[Dict] = None):
+    """Plot full-alpha and stage-alpha greedy accuracy vs training step."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not stage_eval_history or len(stage_eval_history) < 2:
+        return
+
+    steps = [h["step"] for h in stage_eval_history]
+    greedy_full = [h["greedy_full"] * 100 for h in stage_eval_history]
+    greedy_first = [h["greedy_first"] * 100 for h in stage_eval_history]
+
+    has_stage_alpha = "stage_greedy_full" in stage_eval_history[0]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.plot(steps, greedy_full, 's-', color='#4CAF50', label='Full Alpha (α=1.0) Full Word', markersize=5)
+    ax.plot(steps, greedy_first, 'o-', color='#2196F3', label='Full Alpha (α=1.0) First Token', markersize=5, alpha=0.6)
+
+    if has_stage_alpha:
+        stage_full = [h.get("stage_greedy_full", 0) * 100 for h in stage_eval_history]
+        stage_first = [h.get("stage_greedy_first", 0) * 100 for h in stage_eval_history]
+        ax.plot(steps, stage_full, 's--', color='#FF9800', label='Stage Alpha Full Word', markersize=5)
+        ax.plot(steps, stage_first, 'o--', color='#F44336', label='Stage Alpha First Token', markersize=5, alpha=0.6)
+
+    # Annotate with L values
+    for i, h in enumerate(stage_eval_history):
+        if "effective_L" in h:
+            ax.annotate(f'L={h["effective_L"]}', (steps[i], greedy_full[i]),
+                        textcoords="offset points", xytext=(0, 8), fontsize=7, ha='center')
+
+    ax.set_xlabel('Training Step', fontsize=12)
+    ax.set_ylabel('Greedy Accuracy (%)', fontsize=12)
+    ax.set_title('Eval Accuracy vs Step')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+    if loss_history:
+        _draw_resume_markers(ax, loss_history, x_key="step")
+
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    plt.savefig(os.path.join(output_dir, "eval_acc_vs_step.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved eval_acc_vs_step.png ({len(stage_eval_history)} evals)")
+
+
+def plot_eval_acc_vs_flops(stage_eval_history: List[Dict], loss_history: List[Dict],
+                           output_dir: str, flops_per_token: int, metadata: Dict = None):
+    """Plot full-alpha and stage-alpha greedy accuracy vs cumulative FLOPs."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+
+    if not stage_eval_history or len(stage_eval_history) < 2:
+        return
+    if not loss_history or not flops_per_token:
+        return
+
+    # Build step -> cumulative FLOPs mapping from loss_history
+    step_to_flops = {}
+    total_flops = 0
+    for h in loss_history:
+        total_flops += h.get("tokens", 0) * flops_per_token
+        step_to_flops[h["step"]] = total_flops
+
+    # Map eval steps to cumulative FLOPs (find nearest step if exact not found)
+    eval_flops = []
+    for h in stage_eval_history:
+        s = h["step"]
+        if s in step_to_flops:
+            eval_flops.append(step_to_flops[s])
+        else:
+            # Find closest step <= eval step
+            closest = max((k for k in step_to_flops if k <= s), default=None)
+            if closest is not None:
+                eval_flops.append(step_to_flops[closest])
+            else:
+                eval_flops.append(0)
+
+    # Convert to ExaFLOPs
+    eval_exaflops = [f / 1e18 for f in eval_flops]
+
+    greedy_full = [h["greedy_full"] * 100 for h in stage_eval_history]
+    greedy_first = [h["greedy_first"] * 100 for h in stage_eval_history]
+    has_stage_alpha = "stage_greedy_full" in stage_eval_history[0]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.plot(eval_exaflops, greedy_full, 's-', color='#4CAF50', label='Full Alpha (α=1.0) Full Word', markersize=5)
+    ax.plot(eval_exaflops, greedy_first, 'o-', color='#2196F3', label='Full Alpha (α=1.0) First Token', markersize=5, alpha=0.6)
+
+    if has_stage_alpha:
+        stage_full = [h.get("stage_greedy_full", 0) * 100 for h in stage_eval_history]
+        stage_first = [h.get("stage_greedy_first", 0) * 100 for h in stage_eval_history]
+        ax.plot(eval_exaflops, stage_full, 's--', color='#FF9800', label='Stage Alpha Full Word', markersize=5)
+        ax.plot(eval_exaflops, stage_first, 'o--', color='#F44336', label='Stage Alpha First Token', markersize=5, alpha=0.6)
+
+    # Annotate with L values
+    for i, h in enumerate(stage_eval_history):
+        if "effective_L" in h:
+            ax.annotate(f'L={h["effective_L"]}', (eval_exaflops[i], greedy_full[i]),
+                        textcoords="offset points", xytext=(0, 8), fontsize=7, ha='center')
+
+    ax.set_xlabel('Cumulative FLOPs (ExaFLOPs)', fontsize=12)
+    ax.set_ylabel('Greedy Accuracy (%)', fontsize=12)
+    ax.set_title('Eval Accuracy vs Compute')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # Resume markers using FLOPs x-values
+    if loss_history:
+        cum_flops_all = []
+        total = 0
+        for h in loss_history:
+            total += h.get("tokens", 0) * flops_per_token
+            cum_flops_all.append(total / 1e18)
+        _draw_resume_markers(ax, loss_history, x_values=cum_flops_all)
+
+    if metadata:
+        subtitle = _build_plot_subtitle(metadata)
+        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+    plt.savefig(os.path.join(output_dir, "eval_acc_vs_flops.png"), dpi=150)
+    plt.close()
+
+    rank_print(f"[PLOT] Saved eval_acc_vs_flops.png ({len(stage_eval_history)} evals)")
 
 
 class SinglePathARDataset(Dataset):
@@ -1126,12 +1328,16 @@ class SinglePathARDataset(Dataset):
             self._worker_rng = random.Random(worker_seed)
             self._worker_id = current_worker_id
 
-        # Reseed RNG per batch
+        # Reseed ALL RNGs per batch so data is deterministic by index, not call order.
+        # This prevents data cycling on resume (where workers are recreated with fresh RNG state).
         batch_seed = ((self.seed or 0) +
                       idx * 104729 +
                       self._worker_id * 7919 +
                       get_rank() * 999983)
         self._worker_rng.seed(batch_seed)
+        import generator as _gen_module
+        _gen_module.set_seed(batch_seed & 0x7FFFFFFF)  # C++ minstd_rand uses unsigned 31-bit seed
+        random.seed(batch_seed)  # NL text generation uses global random
 
         return self._worker_generator, self._worker_rng
 
@@ -1375,12 +1581,16 @@ class PackedSequenceDataset(Dataset):
             self._worker_rng = random.Random(worker_seed)
             self._worker_id = current_worker_id
 
-        # idx already includes resume_step, so batch_seed naturally differs after resume
+        # Reseed ALL RNGs per batch so data is deterministic by index, not call order.
+        # This prevents data cycling on resume (where workers are recreated with fresh RNG state).
         batch_seed = ((self.seed or 0) +
                       idx * 104729 +
                       self._worker_id * 7919 +
                       get_rank() * 999983)
         self._worker_rng.seed(batch_seed)
+        import generator as _gen_module
+        _gen_module.set_seed(batch_seed & 0x7FFFFFFF)  # C++ minstd_rand uses unsigned 31-bit seed
+        random.seed(batch_seed)  # NL text generation uses global random
 
         return self._worker_generator, self._worker_rng
 
@@ -1763,21 +1973,27 @@ class PackedSequenceTrainer(Trainer):
 
         use_checkpoint = getattr(self.args, 'gradient_checkpointing', False)
 
-        # Unwrap model to get components
+        # Unwrap model to get CausalLM (e.g. Qwen3ForCausalLM)
         unwrapped = model
         while hasattr(unwrapped, "module"):
             unwrapped = unwrapped.module
-        if hasattr(unwrapped, "base_model"):
-            unwrapped = unwrapped.base_model
-        if hasattr(unwrapped, "model"):
-            unwrapped = unwrapped.model
+        # Unwrap PEFT wrapper if present (check class name, not base_model attr which all nn.Module have)
+        try:
+            from peft import PeftModel
+            is_peft = isinstance(unwrapped, PeftModel)
+        except ImportError:
+            is_peft = False
+        if is_peft:
+            unwrapped = unwrapped.base_model.model  # PeftModel -> LoraModel -> CausalLM
+        # unwrapped is now the CausalLM; .model is the inner transformer
+        inner = unwrapped.model
+        lm_head = unwrapped.lm_head
 
         # Get model components
-        embed_tokens = unwrapped.model.embed_tokens
-        layers = unwrapped.model.layers
-        norm = unwrapped.model.norm
-        lm_head = unwrapped.lm_head
-        rotary_emb = unwrapped.model.rotary_emb  # Model-level RoPE
+        embed_tokens = inner.embed_tokens
+        layers = inner.layers
+        norm = inner.norm
+        rotary_emb = inner.rotary_emb  # Model-level RoPE
 
         # Get config
         config = unwrapped.config
@@ -2149,13 +2365,14 @@ class SinglePathARTrainer(Trainer):
         unwrapped = model
         while hasattr(unwrapped, "module"):
             unwrapped = unwrapped.module
-        if hasattr(unwrapped, "base_model"):  # LoRA
-            unwrapped = unwrapped.base_model
-        if hasattr(unwrapped, "model"):
-            unwrapped = unwrapped.model
-
-        # Get the inner transformer (e.g., Qwen2Model) and lm_head separately
-        transformer = unwrapped.model  # The transformer layers
+        try:
+            from peft import PeftModel
+            is_peft = isinstance(unwrapped, PeftModel)
+        except ImportError:
+            is_peft = False
+        if is_peft:
+            unwrapped = unwrapped.base_model.model  # PeftModel -> LoraModel -> CausalLM
+        transformer = unwrapped.model
         lm_head_weight = unwrapped.lm_head.weight
 
         # Forward through transformer only - returns last_hidden_state directly
@@ -2513,6 +2730,7 @@ class FirstTokenCurriculum(TrainerCallback):
             num_shots: int = 0,
             max_input_size: int = 256,
             seed: int = None,
+            persist_every: int = 2000,
     ):
         self.dataset = dataset
         self.n_stages = n_stages
@@ -2529,10 +2747,6 @@ class FirstTokenCurriculum(TrainerCallback):
         self.stage_start_time = None
         self.samples_this_stage = 0  # Track actual samples for token budget mode
         self.tokens_this_stage = 0  # Track actual tokens
-
-        # Resume cooldown
-        self.resume_cooldown_steps = 50
-        self.last_resume_step = -1
 
         # Capture grad_norm and lr from Trainer logs
         self.last_grad_norm = 0.0
@@ -2560,6 +2774,8 @@ class FirstTokenCurriculum(TrainerCallback):
         self.wall_time_offset = 0.0  # Offset from previous runs
         self.training_start_time = None  # Set when training starts
         self.plot_metadata = None  # Set after trainer creation
+        self.persist_every = persist_every
+        self._last_persist_step = 0
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
@@ -2603,7 +2819,12 @@ class FirstTokenCurriculum(TrainerCallback):
 
         if is_main_process():
             checkpoint_dir = os.path.join(args.output_dir, f"checkpoint-{state.global_step}")
-            _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step, current_wall_time)
+            _save_curriculum_state(checkpoint_dir, self.dataset.stage, self.stage_start_step, current_wall_time,
+                                   first_token_correct=self.trainer.first_token_correct,
+                                   full_word_correct=self.trainer.full_word_correct,
+                                   recent_losses=self.trainer.recent_losses,
+                                   samples_this_stage=self.samples_this_stage,
+                                   tokens_this_stage=self.tokens_this_stage)
 
         if is_main_process():
             try:
@@ -2612,6 +2833,29 @@ class FirstTokenCurriculum(TrainerCallback):
                     json.dump(self.loss_history, f)
             except Exception as e:
                 rank_print(f"[LOSS] Warning: Could not save loss history: {e}")
+
+        # Persistent checkpoint (not rotated by save_total_limit)
+        if (self.persist_every > 0
+                and state.global_step >= self._last_persist_step + self.persist_every):
+            try:
+                persist_dir = os.path.join(args.output_dir, "persistent_checkpoints",
+                                           f"step_{state.global_step}")
+                if is_main_process():
+                    rank_print(f"[PERSIST] Saving persistent checkpoint to {persist_dir}")
+                self.trainer.save_model(persist_dir)
+                barrier()
+                if is_main_process():
+                    _save_curriculum_state(persist_dir, self.dataset.stage,
+                                           self.stage_start_step, current_wall_time,
+                                           first_token_correct=self.trainer.first_token_correct,
+                                           full_word_correct=self.trainer.full_word_correct,
+                                           recent_losses=self.trainer.recent_losses,
+                                           samples_this_stage=self.samples_this_stage,
+                                           tokens_this_stage=self.tokens_this_stage)
+                self._last_persist_step = state.global_step
+            except Exception as e:
+                rank_print(f"[PERSIST] Warning: Could not save persistent checkpoint: {e}")
+
         barrier()
         return control
 
@@ -2741,6 +2985,10 @@ class FirstTokenCurriculum(TrainerCallback):
                 with open(out_path, "w") as f:
                     json.dump(self.stage_eval_history, f, indent=2)
                 plot_stage_eval(self.stage_eval_history, self.trainer.args.output_dir, self.plot_metadata)
+                plot_eval_acc_vs_step(self.stage_eval_history, self.trainer.args.output_dir, self.plot_metadata,
+                                     loss_history=self.loss_history)
+                plot_eval_acc_vs_flops(self.stage_eval_history, self.loss_history,
+                                      self.trainer.args.output_dir, self.flops_per_token, self.plot_metadata)
             except Exception as e:
                 rank_print(f"[STAGE-EVAL] Warning: Could not save history/plot: {e}")
 
@@ -2829,12 +3077,6 @@ class FirstTokenCurriculum(TrainerCallback):
                         world_size = get_world_size()
                         samples_per_sec = (steps_in_stage * batch_size * world_size) / stage_time
 
-            # Warmup indicator
-            warmup_msg = ""
-            if self.last_resume_step >= 0 and (state.global_step - self.last_resume_step) < self.resume_cooldown_steps:
-                remaining = self.resume_cooldown_steps - (state.global_step - self.last_resume_step)
-                warmup_msg = f" | Warmup={remaining}"
-
             # Extra info for packing mode
             extra_info = ""
             if self.use_packing and self.samples_this_stage > 0:
@@ -2860,7 +3102,10 @@ class FirstTokenCurriculum(TrainerCallback):
             # Calculate proper stage denominator
             if getattr(self.dataset, 'linear_lookahead', False) and self.dataset.task == "search":
                 max_L = self.dataset.task_kwargs.get("max_lookahead", 12)
-                expected_stages = math.ceil((max_L - self.dataset.base_lookahead) / self.dataset.lookahead_step) + 1
+                if self.dataset.lookahead_step > 0:
+                    expected_stages = math.ceil((max_L - self.dataset.base_lookahead) / self.dataset.lookahead_step) + 1
+                else:
+                    expected_stages = 1
                 current_L = self.dataset._stage_target_lookahead()
                 stage_str = f"[Stage {self.dataset.stage}/{expected_stages} L={current_L}]"
             else:
@@ -2870,15 +3115,8 @@ class FirstTokenCurriculum(TrainerCallback):
                   f"loss_avg={loss:.4f}({len(self.trainer.recent_losses)}) | First={f1:.2%} | Full={fw:.2%} | "
                   f"lr={self.last_lr:.2e} | grad_norm={self.last_grad_norm:.2f} | "
                   f"Speed={samples_per_sec:.1f} samples/s ({tokens_per_sec_str} toks/s){achieved_tflops_str} | "
-                  f"Stage time={stage_time_str}{extra_info}{warmup_msg}")
+                  f"Stage time={stage_time_str}{extra_info}")
             self._last_log = state.global_step
-
-        # ==================== Resume Warmup ====================
-        if self.last_resume_step >= 0 and (state.global_step - self.last_resume_step) < self.resume_cooldown_steps:
-            if is_main_process() and state.global_step % 10 == 0:
-                remaining = self.resume_cooldown_steps - (state.global_step - self.last_resume_step)
-                print(f"[CURRICULUM] Skipping checks during warmup ({remaining} steps remaining)")
-            return control
 
         # ==================== Periodic Eval (independent of stage advancement) ====================
         if self.eval_every_steps > 0 and state.global_step % self.eval_every_steps == 0:
@@ -2940,7 +3178,12 @@ class FirstTokenCurriculum(TrainerCallback):
                     if is_main_process():
                         _save_curriculum_state(stage_ckpt_dir, old_stage, self.stage_start_step,
                                                self.wall_time_offset + (
-                                                           time.time() - self.training_start_time) if self.training_start_time else self.wall_time_offset)
+                                                           time.time() - self.training_start_time) if self.training_start_time else self.wall_time_offset,
+                                               first_token_correct=self.trainer.first_token_correct,
+                                               full_word_correct=self.trainer.full_word_correct,
+                                               recent_losses=self.trainer.recent_losses,
+                                               samples_this_stage=self.samples_this_stage,
+                                               tokens_this_stage=self.tokens_this_stage)
                     rank_print(f"[STAGE-CKPT] Saved stage {old_stage} checkpoint")
                 except Exception as e:
                     rank_print(f"[STAGE-CKPT] Warning: Could not save stage checkpoint: {e}")
@@ -3002,7 +3245,12 @@ class FirstTokenCurriculum(TrainerCallback):
                             current_wall_time += (time.time() - self.training_start_time)
 
                         _save_curriculum_state(self.trainer.args.output_dir, self.dataset.stage, self.stage_start_step,
-                                               current_wall_time)
+                                               current_wall_time,
+                                               first_token_correct=self.trainer.first_token_correct,
+                                               full_word_correct=self.trainer.full_word_correct,
+                                               recent_losses=self.trainer.recent_losses,
+                                               samples_this_stage=self.samples_this_stage,
+                                               tokens_this_stage=self.tokens_this_stage)
 
         return control
 
@@ -3046,15 +3294,18 @@ class BaselineEvalCallback(TrainerCallback):
 
 
 # out-of-memory auto-scaling batch size and gradient accumulation training loop
-def train_with_oom_autoscale(trainer, init_bs, init_gas, resume_from_checkpoint):
+def train_with_oom_autoscale(trainer, init_bs, init_gas, resume_from_checkpoint, actual_batch_size=None):
     # This function now acts as a wrapper that simply runs training,
     # but handles the OOM by saving state and CRASHING all ranks.
 
     # Save the initial config as "stable" when we start.
+    # Use actual_batch_size (from --batch_size CLI arg) if provided,
+    # since per_device_train_batch_size is 1 in packing mode.
+    bs_to_save = actual_batch_size if actual_batch_size is not None else trainer.args.per_device_train_batch_size
     if is_main_process():
         _save_run_config(
             trainer.args.output_dir,
-            trainer.args.per_device_train_batch_size,
+            bs_to_save,
             trainer.args.gradient_accumulation_steps
         )
 
@@ -3189,6 +3440,10 @@ def main():
     p.add_argument("--cache_dir", type=str, default=None)
     p.add_argument("--output_dir", type=str, default="./nl_output")
 
+    # Model initialization
+    p.add_argument("--reinit_weights", action="store_true", default=False,
+                   help="Re-initialize model weights randomly instead of using pretrained weights")
+
     # LoRA
     p.add_argument("--use_lora", action="store_true", default=False)
     p.add_argument("--lora_rank", type=int, default=16)
@@ -3245,6 +3500,8 @@ def main():
                    help="Run TF+greedy eval at alpha=1.0 after each stage advancement")
     p.add_argument("--eval_every_steps", type=int, default=0,
                    help="Run greedy eval every N steps (0=disabled, useful for no-curriculum runs)")
+    p.add_argument("--persist_every", type=int, default=2000,
+                   help="Save persistent checkpoint every N steps (not rotated by save_total_limit). 0=disabled.")
 
     # Redacted eval config
     p.add_argument("--eval_redacted_samples", type=int, default=None)
@@ -3287,7 +3544,10 @@ def main():
             args.linear_lookahead = False
         else:
             # Calculate expected number of stages
-            expected_stages = math.ceil((args.max_lookahead - args.base_lookahead) / args.lookahead_step) + 1
+            if args.lookahead_step > 0:
+                expected_stages = math.ceil((args.max_lookahead - args.base_lookahead) / args.lookahead_step) + 1
+            else:
+                expected_stages = 1  # No curriculum progression (fixed lookahead)
             rank_print(
                 f"[CURRICULUM] Linear lookahead mode: L={args.base_lookahead} to {args.max_lookahead}, step={args.lookahead_step}")
             rank_print(f"[CURRICULUM] Expected stages: {expected_stages}")
@@ -3408,7 +3668,13 @@ def main():
         except ImportError:
             rank_print("[LIGER] liger-kernel not installed, continuing without")
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
+    if getattr(args, 'reinit_weights', False):
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(args.model_name, cache_dir=args.cache_dir, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_config(config, **{k: v for k, v in model_kwargs.items() if k != "cache_dir"})
+        rank_print("[INIT] Randomly initialized model weights (--reinit_weights)")
+    else:
+        model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
 
     if is_main_process():
         attn_impl = getattr(model.config, "_attn_implementation", "unknown")
@@ -3444,7 +3710,12 @@ def main():
                 rank_print("[MEM] Enabled input grads for Gradient Checkpointing + LoRA")
 
     if is_main_process():
-        model.print_trainable_parameters()
+        if hasattr(model, 'print_trainable_parameters'):
+            model.print_trainable_parameters()
+        else:
+            total = sum(p.numel() for p in model.parameters())
+            trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            rank_print(f"trainable params: {trainable:,} || all params: {total:,} || trainable%: {100*trainable/total:.4f}")
 
     # Reserved inputs for deduplication
     reserved_inputs: Set[str] = set()
@@ -3590,20 +3861,21 @@ def main():
         num_shots=args.num_shots,
         max_input_size=args.max_input_size,
         seed=args.seed,
+        persist_every=getattr(args, 'persist_every', 2000),
     )
 
     if resume_ckpt:
         if _try_restore_curriculum_state(resume_ckpt, dataset, curriculum):
             rank_print(f"[CURRICULUM] Synced state with checkpoint: {resume_ckpt}")
-            match = re.search(r'checkpoint-(\d+)', resume_ckpt)
-            if match:
-                curriculum.last_resume_step = int(match.group(1))
 
     # ==================== RETROACTIVE PLOT GENERATION / EXTENSION CHECK ====================
     # If resuming a completed job, either generate plots and exit, or continue with extended params
     if resume_ckpt and curriculum.loss_history:
         # Check if curriculum would be finished under CURRENT parameters
-        is_finished = dataset._is_final_stage() and curriculum.stage_start_step > 0
+        # Only consider finished if we're at the final stage AND training actually completed
+        # (has a completion marker). Being at the final stage alone just means we were
+        # preempted mid-training at the last stage.
+        is_finished = False
 
         # Check for completion marker (indicates previous run finished)
         # Look in both current output_dir and source checkpoint directory
@@ -3683,6 +3955,10 @@ def main():
                 # Stage eval plot
                 if curriculum.stage_eval_history:
                     plot_stage_eval(curriculum.stage_eval_history, args.output_dir, plot_metadata)
+                    plot_eval_acc_vs_step(curriculum.stage_eval_history, args.output_dir, plot_metadata,
+                                         loss_history=curriculum.loss_history)
+                    plot_eval_acc_vs_flops(curriculum.stage_eval_history, curriculum.loss_history,
+                                          args.output_dir, flops_per_token, plot_metadata)
 
                 rank_print(f"[RETROACTIVE] Generated plots for {len(stages_seen)} stages")
                 rank_print("[RETROACTIVE] Done. Exiting without training.")
@@ -3804,6 +4080,20 @@ def main():
     curriculum.trainer = trainer
     baseline_cb.trainer = trainer
 
+    # Restore trainer deques from checkpoint if available
+    if hasattr(curriculum, '_restored_trainer_state') and curriculum._restored_trainer_state:
+        restored = curriculum._restored_trainer_state
+        if restored.get("first_token_correct") is not None:
+            trainer.first_token_correct.extend(restored["first_token_correct"])
+            rank_print(f"[CURRICULUM] Restored {len(restored['first_token_correct'])} first_token_correct entries")
+        if restored.get("full_word_correct") is not None:
+            trainer.full_word_correct.extend(restored["full_word_correct"])
+            rank_print(f"[CURRICULUM] Restored {len(restored['full_word_correct'])} full_word_correct entries")
+        if restored.get("recent_losses") is not None:
+            trainer.recent_losses.extend(restored["recent_losses"])
+            rank_print(f"[CURRICULUM] Restored {len(restored['recent_losses'])} recent_losses entries")
+        del curriculum._restored_trainer_state
+
     curriculum.flops_per_token = estimate_flops_per_token(model)
     rank_print(
         f"[FLOPS] Model has {sum(p.numel() for p in model.parameters()) / 1e9:.2f}B params, ~{curriculum.flops_per_token / 1e9:.1f}B FLOPs/token")
@@ -3821,7 +4111,7 @@ def main():
 
     if not resume_ckpt:
         if is_main_process():
-            _save_run_config(args.output_dir, trainer.args.per_device_train_batch_size,
+            _save_run_config(args.output_dir, args.batch_size,
                              trainer.args.gradient_accumulation_steps)
 
     # Save run metadata
@@ -3853,9 +4143,7 @@ def main():
         match = re.search(r'checkpoint-(\d+)', resume_ckpt)
         if match:
             resume_step = int(match.group(1))
-            curriculum.last_resume_step = resume_step
             rank_print(f"[CURRICULUM] Resuming from step {resume_step}")
-            rank_print(f"[CURRICULUM] Will skip checks for {curriculum.resume_cooldown_steps} steps (warmup period)")
 
     if args.oom_autoscale:
         train_with_oom_autoscale(
@@ -3863,6 +4151,7 @@ def main():
             init_bs=trainer.args.per_device_train_batch_size,
             init_gas=trainer.args.gradient_accumulation_steps,
             resume_from_checkpoint=resume_ckpt,
+            actual_batch_size=args.batch_size,
         )
     else:
         trainer.train(resume_from_checkpoint=resume_ckpt)
@@ -4020,6 +4309,10 @@ def main():
         plot_achieved_tflops(curriculum.loss_history, args.output_dir, args.n_stages, curriculum.plot_metadata)
         if curriculum.stage_eval_history:
             plot_stage_eval(curriculum.stage_eval_history, args.output_dir, curriculum.plot_metadata)
+            plot_eval_acc_vs_step(curriculum.stage_eval_history, args.output_dir, curriculum.plot_metadata,
+                                 loss_history=curriculum.loss_history)
+            plot_eval_acc_vs_flops(curriculum.stage_eval_history, curriculum.loss_history,
+                                  args.output_dir, curriculum.flops_per_token, curriculum.plot_metadata)
 
     # Final cleanup
     gc.collect()
