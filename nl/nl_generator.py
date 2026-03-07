@@ -865,17 +865,17 @@ if __name__ == "__main__":
     print("Natural Language Graph Generator - Testing Multiple Outputs")
     print("=" * 60)
 
-    # Test with debug mode to see symbolic output
-    print("\n1. SEARCH TASK:")
-    print("-" * 40)
-    inputs, outputs, labels = generate_nl_dataset('search', 100, 9, max_lookahead=10, seed=42, debug=True)
-    for i in range(len(inputs)):
-        # if not len(labels[i]) > 1:
-        #     continue
-        print(f"\nExample {i + 1}:")
-        print(f"Input: {inputs[i]}")
-        print(f"Correct outputs: {outputs[i]}")  # Now shows list of correct answers
-        print(f"Labels (node IDs): {labels[i]}")
+    # # Test with debug mode to see symbolic output
+    # print("\n1. SEARCH TASK:")
+    # print("-" * 40)
+    # inputs, outputs, labels = generate_nl_dataset('search', 100, 9, max_lookahead=10, seed=42, debug=True)
+    # for i in range(len(inputs)):
+    #     # if not len(labels[i]) > 1:
+    #     #     continue
+    #     print(f"\nExample {i + 1}:")
+    #     print(f"Input: {inputs[i]}")
+    #     print(f"Correct outputs: {outputs[i]}")  # Now shows list of correct answers
+    #     print(f"Labels (node IDs): {labels[i]}")
 
     # print("\n" + "=" * 60)
     # print("\n2. DFS TASK:")
@@ -889,15 +889,15 @@ if __name__ == "__main__":
     #     print(f"Correct outputs: {outputs[i]}")  # Now shows list of correct answers
     #     print(f"Labels (node IDs): {labels[i]}")
 
-    # print("\n" + "=" * 60)
-    # print("\n3. SI TASK:")
-    # print("-" * 40)
-    # inputs, outputs, labels = generate_nl_dataset('si', 256, 20, max_frontier_size=12, max_branch_size=12, seed=42,
-    #                                               debug=True)
-    # for i in range(len(inputs)):
-    #     # if not len(labels[i]) > 1:
-    #     #     continue
-    #     print(f"\nExample {i + 1}:")
-    #     print(f"Input: {inputs[i]}")
-    #     print(f"Correct outputs: {outputs[i]}")  # Now shows list of correct answers
-    #     print(f"Labels (node IDs): {labels[i]}")
+    print("\n" + "=" * 60)
+    print("\n3. SI TASK:")
+    print("-" * 40)
+    inputs, outputs, labels = generate_nl_dataset('si', 256, 20, max_frontier_size=12, max_branch_size=12, seed=42,
+                                                  debug=True)
+    for i in range(len(inputs)):
+        # if not len(labels[i]) > 1:
+        #     continue
+        print(f"\nExample {i + 1}:")
+        print(f"Input: {inputs[i]}")
+        print(f"Correct outputs: {outputs[i]}")  # Now shows list of correct answers
+        print(f"Labels (node IDs): {labels[i]}")
