@@ -1,14 +1,13 @@
 #!/bin/bash
-#SBATCH -J pptrain
+#SBATCH -J pptrain--lr1e-4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=112
 #SBATCH --mem=128G
-#SBATCH --time=48:00:00
+#SBATCH --time=8:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
-#SBATCH -q preemptible
 #SBATCH --mail-user=mnickel@purdue.edu
 #SBATCH --mail-type=BEGIN,END,FAIL,REQUEUE
 #SBATCH -o ./slurm/%j_%x.out
@@ -33,7 +32,7 @@ source /home/mnickel/miniconda3/etc/profile.d/conda.sh
 conda activate pptrain
 
 export SCRATCH="/scratch/gautschi/$USER"
-mkdir -p "$SCRATCH/pptrain" "$SCRATCH/model_cache"
+mkdir -p "$SCRATCH/model_cache"
 export HF_HOME="$SCRATCH/model_cache"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
@@ -60,20 +59,56 @@ nvidia-smi || true
 # ==========================================================
 #                    CONFIGURATION
 # ==========================================================
-# Only specify values that differ from pptrain.py defaults
-# Defaults: model=pythia-160m, micro_batch=16, grad_accum=1,
-#           lr=5e-4, warmup_steps=1000, seq_len=2048, etc.
+# All pptrain.py arguments are listed here for easy modification.
+# ==========================================================
 
-MAX_STEPS=10000000000
-DATA_DIR="/scratch/gautschi/mnickel/data/nl_splits/mis384_look64_seed12345"
+# Run configuration
+RUN_NAME="pptrain--lr1e-4"
+DATA_DIR="/scratch/gautschi/mnickel/data/nl_splits"
+
+# Model
+MODEL_NAME="EleutherAI/pythia-160m"
+SEED=1337
+
+# Training limits (empty = run until curriculum complete)
+MAX_STEPS=""
+
+# Batch configuration
+SEQ_LEN=2048
+MICRO_BATCH=16
+GRAD_ACCUM=4
+
+# Optimizer
+LR="1e-4"
+WEIGHT_DECAY="0.1"
+ADAM_BETA1="0.9"
+ADAM_BETA2="0.999"
+ADAM_EPS="1e-6"
+GRAD_CLIP="1.0"
+WARMUP_STEPS=500
+
+# Precision and checkpointing
+MIXED_PRECISION="bf16"
+SAVE_EVERY=200
+
+# Curriculum settings (max_input_size = 6 * MAX_LOOKAHEAD)
+MAX_LOOKAHEAD=32
+START_STAGE=4
+STAGE_STEP=4
+CURR_WINDOW=1000
+CURR_THRESHOLD="0.98"
 
 # ==========================================================
 
 echo "=========================================="
-echo "PRE-PRETRAINING (pptrain)"
+echo "PRE-PRETRAINING: $RUN_NAME"
+echo "Run dir: $SCRATCH/$RUN_NAME"
 echo "Data dir: $DATA_DIR"
-echo "Max steps: $MAX_STEPS"
-echo "Scratch: $SCRATCH"
+echo "Model: $MODEL_NAME"
+echo "Max lookahead: $MAX_LOOKAHEAD (max_input_size=$(( 6 * MAX_LOOKAHEAD )))"
+echo "Batch: micro=$MICRO_BATCH grad_accum=$GRAD_ACCUM seq_len=$SEQ_LEN"
+echo "Optimizer: lr=$LR warmup=$WARMUP_STEPS"
+echo "Curriculum: start_stage=$START_STAGE step=$STAGE_STEP threshold=$CURR_THRESHOLD"
 echo "=========================================="
 
 # ========== Build C++ generator if needed ==========
@@ -92,14 +127,14 @@ except:
 python -c "
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
-m, c = 'EleutherAI/pythia-160m', os.environ['HF_HOME']
+m, c = '$MODEL_NAME', os.environ['HF_HOME']
 AutoTokenizer.from_pretrained(m, cache_dir=c, trust_remote_code=True)
 AutoModelForCausalLM.from_pretrained(m, cache_dir=c, trust_remote_code=True)
 print('[OK] Model cached')
 "
 
 # ========== Find latest checkpoint for auto-resume ==========
-CKPT_DIR="$SCRATCH/pptrain/checkpoints"
+CKPT_DIR="$SCRATCH/$RUN_NAME/checkpoints"
 LATEST_CKPT=""
 if [ -d "$CKPT_DIR" ]; then
     LATEST_CKPT=$(ls -d "$CKPT_DIR"/step_* 2>/dev/null | sort | tail -n1 || true)
@@ -111,12 +146,36 @@ else
     echo "No checkpoint found, starting fresh"
 fi
 
-# ========== Build arguments (minimal - use defaults) ==========
+# ========== Build arguments ==========
 ARGS=(
     --scratch_dir "$SCRATCH"
+    --run_name "$RUN_NAME"
     --data_dir "$DATA_DIR"
-    --max_steps "$MAX_STEPS"
+    --model_name "$MODEL_NAME"
+    --seed "$SEED"
+    --seq_len "$SEQ_LEN"
+    --micro_batch "$MICRO_BATCH"
+    --grad_accum "$GRAD_ACCUM"
+    --lr "$LR"
+    --weight_decay "$WEIGHT_DECAY"
+    --adam_beta1 "$ADAM_BETA1"
+    --adam_beta2 "$ADAM_BETA2"
+    --adam_eps "$ADAM_EPS"
+    --grad_clip "$GRAD_CLIP"
+    --warmup_steps "$WARMUP_STEPS"
+    --mixed_precision "$MIXED_PRECISION"
+    --save_every "$SAVE_EVERY"
+    --max_lookahead "$MAX_LOOKAHEAD"
+    --start_stage "$START_STAGE"
+    --stage_step "$STAGE_STEP"
+    --curr_window "$CURR_WINDOW"
+    --curr_threshold "$CURR_THRESHOLD"
 )
+
+# Add max_steps if specified
+if [ -n "$MAX_STEPS" ]; then
+    ARGS+=(--max_steps "$MAX_STEPS")
+fi
 
 # Add resume flag if checkpoint exists
 if [ -n "$LATEST_CKPT" ]; then

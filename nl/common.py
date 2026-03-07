@@ -27,8 +27,13 @@ def load_jsonl_examples(
     path: Path,
     subset_size: Optional[int] = None,
     seed: int = 42,
-) -> List[Dict[str, str]]:
-    """Load examples from JSONL with input_text/output_texts format."""
+) -> List[Dict[str, Any]]:
+    """Load examples from JSONL with input_text/output_texts format.
+
+    Returns list of dicts with:
+        - prompt: str
+        - answers: List[str] (all valid answers)
+    """
     examples = []
     with path.open("r", encoding="utf-8") as f:
         for line in f:
@@ -39,7 +44,7 @@ def load_jsonl_examples(
             prompt = row.get("input_text")
             outputs = row.get("output_texts", [])
             if prompt and outputs:
-                examples.append({"prompt": prompt, "answer": outputs[0]})
+                examples.append({"prompt": prompt, "answers": outputs})
 
     if subset_size and len(examples) > subset_size:
         examples = random.Random(seed).sample(examples, subset_size)

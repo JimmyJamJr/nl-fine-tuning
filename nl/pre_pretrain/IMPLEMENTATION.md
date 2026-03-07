@@ -1,252 +1,176 @@
 # Pre-Pretraining Implementation
-salloc -A asaparov -p ai -N 1 --ntasks=1 --gres=gpu:8 -c 112 --time=01:00:00
 
-## Overview
+## Research Question
 
-Pre-pretrain a language model on synthetic NL data with curriculum learning, then follow with standard pretraining on C4 (with synthetic data mixed in).
+Does pre-pretraining on synthetic curriculum data improve sample efficiency compared to standard pretraining?
 
-## Scratch Directory Structure
+## Model
 
-All data and outputs organized under a single `--scratch_dir`:
+- **Architecture**: Pythia-160M (160 million parameters)
+- **Initialization**: Random weights
+
+## Experimental Conditions
+
+| Condition | Phase 1 | Phase 2 | Job Script |
+|-----------|---------|---------|------------|
+| **A** | Curriculum pptrain | 95% C4 + 5% synthetic | `pretrain_from_pptrain_job.sh` |
+| **B** | — | 100% C4 | `pretrain_fresh_job.sh` |
+| **C** | — | 95% C4 + 5% synthetic | `pretrain_mix_job.sh` |
+
+---
+
+## Directory Structure
 
 ```
-{scratch_dir}/
+nl/
+├── nl_generator.py        # C++ generator wrapper (compiles generator.cpp)
+├── generator.cpp          # C++ source for fast generation
+├── common.py              # Shared utilities (model loading, tokenization)
+├── synthetic.py           # Synthetic data generation (SyntheticNL, build_heldout_set)
+├── pptrain.py             # Phase 1: Pre-pretraining with curriculum
+├── pretrain.py            # Phase 2: Standard pretraining on C4
+└── pre_pretrain/
+    ├── IMPLEMENTATION.md  # This file
+    ├── jobs/              # SLURM job scripts
+    │   ├── pptrain_job.sh
+    │   ├── pretrain_fresh_job.sh
+    │   ├── pretrain_mix_job.sh
+    │   └── pretrain_from_pptrain_job.sh
+    └── scripts/           # Utility scripts
+        ├── generate_eval.py   # Generate eval.jsonl
+        └── prepare_c4.py      # Tokenize C4 dataset
+```
+
+---
+
+## Phase 1: Pre-Pretraining (pptrain)
+
+Curriculum learning on synthetic NL data. Stages advance (4→8→12→...→32) when training accuracy reaches 98% over a rolling window.
+
+### Hyperparameters
+
+| Parameter | Value |
+|-----------|-------|
+| Effective batch | 512 examples (16 micro × 4 accum × 8 GPUs) |
+| Tokens per step | ~1M |
+| Learning rate | 3×10⁻⁴ (linear warmup 500 steps) |
+| Max lookahead | 32 (max_input_size = 192) |
+| Curriculum threshold | 98% training accuracy |
+| Curriculum window | 1000 examples (rolling) |
+
+### Run
+
+```bash
+cd ~/git/nl-fine-tuning/nl/pre_pretrain
+sbatch jobs/pptrain_job.sh
+```
+
+---
+
+## Phase 2: Pretraining
+
+Standard pretraining on C4 with optional synthetic data mixed in.
+
+### Hyperparameters (Updated for Scaling Laws)
+
+| Parameter | Value |
+|-----------|-------|
+| Total steps | 2000 |
+| Tokens per step | ~2M (16 micro × 8 accum × 8 GPUs × 2048 seq) |
+| **Total tokens** | **4B** |
+| Learning rate | 6×10⁻⁴ with cosine decay |
+| Min LR ratio | 0.1 |
+| Warmup steps | 100 (5%) |
+| Synthetic mix | 5% (Conditions A & C) |
+
+### Run Jobs
+
+```bash
+cd ~/git/nl-fine-tuning/nl/pre_pretrain
+
+# Condition A: Pre-pretrained + 5% synthetic (from latest pptrain checkpoint)
+sbatch jobs/pretrain_from_pptrain_job.sh
+
+# Condition B: Baseline (100% C4, fresh model)
+sbatch jobs/pretrain_fresh_job.sh
+
+# Condition C: Fresh model + 5% synthetic
+sbatch jobs/pretrain_mix_job.sh
+```
+
+---
+
+## Data
+
+### Synthetic Evaluation Set
+
+2000 examples at alpha=1.0 (full difficulty) for evaluating model checkpoints.
+
+**Location**: `/scratch/gautschi/mnickel/data/nl_splits/eval.jsonl`
+
+**Generate** (if needed):
+```bash
+cd ~/git/nl-fine-tuning/nl/pre_pretrain
+python scripts/generate_eval.py --max_lookahead 32 --size 2000
+```
+
+### C4 Dataset
+
+Tokenized C4 data packed into fixed-length blocks.
+
+**Location**: `/scratch/gautschi/mnickel/data/c4_tokenized/`
+
+**Prepare** (if needed):
+```bash
+cd ~/git/nl-fine-tuning/nl/pre_pretrain
+python scripts/prepare_c4.py
+```
+
+---
+
+## Key Constraints
+
+1. **max_input_size = 6 × max_lookahead** (enforced everywhere)
+2. **Synthetic seed differs from pptrain seed** (99999 vs 1337) to ensure novel examples
+3. **eval.jsonl used for data leakage prevention** — prompts excluded from training generation
+
+---
+
+## Output Locations
+
+```
+/scratch/gautschi/mnickel/
 ├── data/
-│   ├── nl_splits/                  # From build_data_splits.py
-│   │   └── mis384_look64_seed12345/
-│   │       ├── eval.jsonl          # Periodic evaluation
-│   │       ├── test.jsonl          # Final evaluation only
-│   │       ├── mixin.jsonl         # Mixed into C4 pretraining
-│   │       └── meta.json
-│   └── c4_packed/                  # From build_pretrain.py
-│       ├── shard_00000.bin
-│       ├── shard_00001.bin
-│       ├── ...
-│       └── meta.json
-├── pptrain/                        # Pre-pretraining outputs
+│   ├── nl_splits/eval.jsonl    # Eval examples
+│   └── c4_tokenized/           # Packed C4 blocks
+├── pptrain/                    # Phase 1 outputs
 │   ├── checkpoints/
-│   │   └── step_00000200/
 │   └── logs/
-│       ├── train.jsonl
-│       └── eval.jsonl
-└── pretrain/                       # Pretraining outputs
-    ├── checkpoints/
-    └── logs/
+├── pretrain_fresh/             # Condition B
+├── pretrain_mix/               # Condition C
+└── pretrain_from_pptrain/      # Condition A
 ```
 
-## Workflow
+---
+
+## Monitoring
 
 ```bash
-# 1. Generate NL data splits (eval, test, mixin)
-python scripts/build_data_splits.py \
-  --scratch_dir /scratch/user \
-  --max_input_size 384 \
-  --max_lookahead 64
-
-# 2. Pack C4 data for pretraining (320k blocks for 10k steps)
-python scripts/build_pretrain.py \
-  --scratch_dir /scratch/user \
-  --total_steps 10000 \
-  --effective_batch 128
-
-# 3. Run pre-pretraining (curriculum learning on synthetic data)
-accelerate launch --num_processes 8 pptrain.py \
-  --scratch_dir /scratch/user \
-  --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
-  --max_steps 100000
-
-# 4. Run pretraining (C4 + mixin, starting from pre-pretrained checkpoint)
-accelerate launch --num_processes 8 pretrain.py \
-  --scratch_dir /scratch/user \
-  --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
-  --pptrain_checkpoint latest \
-  --total_steps 10000 \
-  --mixin_percent 0.02
+squeue -u $USER                    # Job status
+tail -f slurm/<jobid>_*.out        # Watch output
+scancel <jobid>                    # Cancel job
 ```
 
-## What's Implemented
+---
 
-### Training (`pptrain.py`)
+## Scaling Laws Reference
 
-- **Model**: Loads any HuggingFace causal LM (default: Pythia-160m)
-- **Data Parallelism**: Uses Accelerate for multi-GPU training
-- **Checkpointing**: Saves model, optimizer, RNG state, and training state; supports resume via `--resume_from`
-- **Resume**: On resume, data iterator starts from saved `consumed_index` (tracks actual examples consumed, accounting for any filtered). Checkpoint validates `micro_batch`, `grad_accum`, and `world_size` haven't changed.
-- **Step counting**: Both pptrain.py and pretrain.py count optimizer steps. With `grad_accum=1`, `max_steps=10000` means 10000 optimizer steps (10000 micro-batches).
+Based on Kaplan (2020) and Chinchilla (2022):
 
-**Prediction-Only Loss**:
-- Computes loss only on prediction (answer) tokens where labels != -100
-- Prompt tokens are ignored in loss calculation (standard fine-tuning approach)
-
-**Curriculum Learning**:
-- Starts at stage=4 (alpha=4/max_lookahead), advances by 4 each stage: 4, 8, 12, ..., up to max_lookahead
-- Tracks full-word prediction accuracy over last `curr_window` training examples (default: 200)
-- Every `curr_check_every` steps, if accuracy >= `curr_threshold` (default: 98%), advances to next stage
-- Training ends when stage > max_lookahead
-
-**Multi-GPU curriculum tracking**: Correctness flags are gathered from all GPUs each micro-batch, so `curr_window` tracks `micro_batch × grad_accum × world_size` examples per optimizer step. With 8 GPUs, micro_batch=16, and grad_accum=1, the window fills with 128 examples per step.
-
-### Synthetic Data (`synthetic.py`)
-
-- Wraps `NaturalLanguageGraphGenerator` (external, do not modify)
-- Generates infinite stream of (prompt, answer) pairs
-- Stage/alpha controls complexity: alpha=0.1 means lookahead up to 10% of max
-- Excludes reserved inputs (eval/test/mixin prompts) from training
-- Multi-process safe stage and index tracking via `multiprocessing.Value`
-- `current_index` property tracks consumed examples for accurate resume
-
-### Scripts
-
-- `scripts/build_data_splits.py`: Generates NL data splits (eval, test, mixin) at alpha=1.0
-- `scripts/build_pretrain.py`: Packs C4 into binary shards for pretraining
-
-### Data Splits
-
-Generated by `build_data_splits.py` — three non-overlapping sets at full difficulty (alpha=1.0):
-
-| Split | Default Size | Purpose |
-|-------|--------------|---------|
-| `eval.jsonl` | 2,000 | Periodic evaluation during both phases |
-| `test.jsonl` | 5,000 | Final evaluation only |
-| `mixin.jsonl` | 50,000 | Mixed into C4 during pretraining (2-5%) |
-
-**Mix-in sizing:**
-- 10,000 pretraining steps × 32 effective batch × 2048 seq_len ≈ 665M tokens
-- At 5% mix-in: ~33M synthetic tokens needed
-- 50,000 examples provides headroom for varying example lengths
-
-### C4 Packing
-
-Generated by `build_pretrain.py` — binary shards of packed token sequences:
-
-- Each block is `seq_len + 1` = 2049 tokens (extra token for label shifting)
-- Default: 1,280,000 blocks (enough for 10k steps at effective batch 128)
-- Stored as uint16 (vocab size < 65535)
-- Documents separated by EOS token, packed contiguously
-
-**Runtime mixing** (in pretrain.py):
-- With probability `mixin_percent`: sample from mixin.jsonl (tokenize on-the-fly)
-- Otherwise: read a pre-packed C4 block
-
-### Logging and Evaluation
-
-**Training logs** (`pptrain/logs/train.jsonl`) — every 10 steps:
-- `step`, `loss`, `lr`, `curr_acc`, `stage`, `alpha`, `timestamp`
-
-**Evaluation logs** (`pptrain/logs/eval.jsonl`) — at start + after each stage advance:
-- `step`, `stage`, `alpha`, `heldout_acc`, `heldout_loss`, `num_examples`, `timestamp`
-- Uses random subset of eval examples (`--eval_subset_size`, default: 500)
-
-## Hyperparameters
-
-### Pre-Pretraining (synthetic data, curriculum learning)
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| Batch size | 64 | `--micro_batch` (per GPU) |
-| Gradient accumulation | 1 | `--grad_accum` |
-| Effective batch size | 512 | micro_batch × grad_accum × 8 GPUs |
-| Sequence length | 2048 | `--seq_len` |
-| Learning rate | 3×10⁻⁴ | `--lr` |
-| LR schedule | **Warmup only** | Linear warmup, then constant |
-| Warmup steps | 1000 | `--warmup_steps` |
-| Weight decay | 0.1 | `--weight_decay` |
-| Gradient clipping | 1.0 | `--grad_clip` |
-| Optimizer | AdamW | β₁=0.9, β₂=0.999, ε=1e-6 |
-| Mixed precision | bf16 | `--mixed_precision` |
-| Initialization | Random | Model trained from scratch, not from pretrained weights |
-
-**Why warmup-only (no cosine decay)?**
-- Training length is unknown — ends when curriculum completes, not at fixed step count
-- Later curriculum stages are harder — may need sustained LR to adapt
-- Cosine decay assumes you know total steps upfront
-
-### Pretraining (C4 + mixin)
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| Total steps | 10,000 | Fixed |
-| Learning rate | 3×10⁻⁴ | `--lr` (same as pre-pretraining) |
-| LR schedule | Cosine w/ warmup | Decay to min_lr |
-| Min LR | 3×10⁻⁵ | 10% of base LR |
-| Warmup steps | 1000 | Same as pre-pretraining |
-| Mixin percent | 2-5% | Synthetic examples mixed into C4 |
-| Other params | Same as above | |
-
-**Why full cosine for pretraining?**
-- Fixed number of training steps (known upfront)
-- Standard practice for language model pretraining
-- Helps convergence in later stages
-
-## Sequence Length Constraints
-
-With `seq_len=2048`, use `max_lookahead=64` and `max_input_size=384` (6× lookahead). Testing shows 0% overflow with these settings.
-
-**Overflow handling**: Examples exceeding `seq_len` are automatically filtered out before training (with warnings logged). This ensures no truncated answer tokens. A warning is printed at end of training if any examples were filtered, as this can affect resume reproducibility.
-
-**To train with larger lookahead (e.g., 128):**
-- Increase `seq_len` to 4096 (Pythia supports this via RoPE, just pass `max_position_embeddings=4096` when loading)
-- This ~doubles memory per batch; reduce `micro_batch` to compensate
-- With `max_lookahead=128` and `seq_len=2048`, ~74% of examples would be filtered (use larger seq_len instead)
-
-### Pretraining (`pretrain.py`)
-
-Standard pretraining on C4 with synthetic data mixed in:
-
-- **Loads pre-pretrained checkpoint**: Auto-finds latest from `pptrain/checkpoints/` or specify path
-- **Runtime mixing**: Each batch has `mixin_percent` chance of being synthetic data
-- **Cosine LR schedule**: Linear warmup + cosine decay to `min_lr_ratio` of base LR
-- **Fixed steps**: Runs for exactly `--total_steps` (default: 10,000)
-- **Resume support**: Saves c4_block_idx, mixin_idx, and RNG state for deterministic resume
-
-**Data sources:**
-- C4: Memory-mapped binary shards from `{scratch_dir}/data/c4_packed/`
-- Mixin: JSONL from `{data_dir}/mixin.jsonl`, tokenized on-the-fly
-
-**Usage:**
-```bash
-accelerate launch --num_processes 8 pretrain.py \
-  --scratch_dir /scratch/user \
-  --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
-  --pptrain_checkpoint latest \
-  --total_steps 10000 \
-  --mixin_percent 0.02
-```
-
-**Resume from pretrain checkpoint:**
-```bash
-accelerate launch --num_processes 8 pretrain.py \
-  --scratch_dir /scratch/user \
-  --data_dir /scratch/user/data/nl_splits/mis384_look64_seed12345 \
-  --resume_from /scratch/user/pretrain/checkpoints/step_00005000
-```
-
-## Potential Problems
-
-1. **Single answer per example**: Currently uses only the first valid answer from `output_texts`. Other valid answers are ignored.
-
-## SLURM Job Scripts
-
-Two job scripts are provided for cluster submission:
-
-- `pptrain_job.sh` - Pre-pretraining with curriculum learning
-- `pretrain_job.sh` - Pretraining on C4 with mixin
-
-**Features:**
-- Auto-resume: Finds latest checkpoint and passes `--resume_from`
-- Preemption handling: `--signal=B:USR1@180` triggers graceful requeue
-- Email notifications: BEGIN, END, FAIL, REQUEUE
-
-**Usage:**
-```bash
-cd /path/to/nl-fine-tuning/nl
-sbatch pre_pretrain/pptrain_job.sh   # Submit pre-pretraining
-sbatch pre_pretrain/pretrain_job.sh  # Submit pretraining (after pptrain completes)
-```
-
-**Monitoring:**
-```bash
-squeue -u $USER                       # Check job status
-tail -f slurm/<jobid>_pptrain.out     # Watch output
-scancel <jobid>                       # Cancel job
-```
+| Parameter | Source | Value for 160M |
+|-----------|--------|----------------|
+| Optimal tokens | Chinchilla (D = 20N) | 3.2B |
+| Minimum tokens | Kaplan (D = 5000×N^0.74) | 4B |
+| **Training config** | User decision | **4B tokens** |
+| Learning rate | Empirical | 6×10⁻⁴ |
+| Batch size | Match LR | 2M tokens |
