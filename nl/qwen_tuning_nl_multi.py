@@ -251,8 +251,8 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
                 })
                 rank_print(f"[CURRICULUM] Marked resume point at step {last_entry.get('step', 0)}")
 
-            # Set _last_persist_step so we don't re-persist old steps on resume
-            curriculum._last_persist_step = last_entry.get("step", 0)
+                # Set _last_persist_step so we don't re-persist old steps on resume
+                curriculum._last_persist_step = last_entry.get("step", 0)
         except Exception as e:
             rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
 
@@ -422,999 +422,23 @@ def build_redacted_eval_set(
     return red_inputs, red_labels
 
 
-def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 50, skip_initial_spike: bool = True) -> \
-Optional[Dict[str, float]]:
-    """
-    Fit exponential decay: L(t) = a * exp(-b * t) + c
-
-    Args:
-        skip_initial_spike: If True, start fitting from the peak loss (skips initial rise)
-
-    Returns dict with:
-        - a: initial amplitude above asymptote
-        - b: decay rate
-        - c: asymptote (estimated minimum loss)
-        - r_squared: goodness of fit
-        - half_life: steps to decay halfway to asymptote
-    Returns None if fit fails.
-    """
-    try:
-        from scipy.optimize import curve_fit
-    except ImportError:
-        rank_print("[FIT] scipy not installed, skipping exponential fit")
-        return None
-
-    if len(losses) < 20:
-        return None
-
-    fit_steps = list(steps)
-    fit_losses = list(losses)
-
-    # Skip initial spike - find peak and start from there
-    if skip_initial_spike and len(fit_losses) > 30:
-        # Look for peak in first 30% of stage
-        search_range = max(10, len(fit_losses) // 3)
-        peak_idx = np.argmax(fit_losses[:search_range])
-
-        # Only skip if peak isn't at the very start (i.e., there was a spike)
-        if peak_idx > 2:
-            fit_steps = fit_steps[peak_idx:]
-            fit_losses = fit_losses[peak_idx:]
-
-    if len(fit_losses) < 15:
-        return None
-
-    # Smooth the data
-    smooth_window = min(window, len(fit_losses) // 3) or 1
-    if len(fit_losses) >= smooth_window:
-        smoothed = np.convolve(fit_losses, np.ones(smooth_window) / smooth_window, mode='valid')
-        smooth_steps = fit_steps[smooth_window - 1:]
-    else:
-        smoothed = np.array(fit_losses)
-        smooth_steps = fit_steps
-
-    if len(smoothed) < 10:
-        return None
-
-    # Normalize steps to start at 0
-    t = np.array(smooth_steps, dtype=float) - smooth_steps[0]
-    y = np.array(smoothed, dtype=float)
-
-    def exp_decay(t, a, b, c):
-        return a * np.exp(-b * t) + c
-
-    # Initial guesses
-    a0 = max(y[0] - y[-1], 0.01)
-    c0 = max(y[-1], 0.001)
-    b0 = 1.0 / max(len(t) / 3, 1)
-
-    try:
-        popt, _ = curve_fit(
-            exp_decay, t, y,
-            p0=[a0, b0, c0],
-            bounds=([0, 1e-10, 0], [np.inf, 1.0, np.inf]),
-            maxfev=5000
-        )
-        a, b, c = popt
-
-        # Calculate R-squared
-        y_pred = exp_decay(t, a, b, c)
-        ss_res = np.sum((y - y_pred) ** 2)
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-
-        # Half-life: time to decay halfway to asymptote
-        half_life = np.log(2) / b if b > 0 else float('inf')
-
-        return {
-            "a": a,
-            "b": b,
-            "c": c,
-            "r_squared": r_squared,
-            "half_life": half_life,
-            "fit_start_step": smooth_steps[0],  # Where fit starts (after spike)
-            "fit_steps": smooth_steps,
-            "fit_values": exp_decay(t, a, b, c).tolist(),
-        }
-    except Exception as e:
-        rank_print(f"[FIT] Exponential fit failed: {e}")
-        return None
-
-
-def _draw_resume_markers(ax, loss_history: List[Dict], x_key: str = "step", x_values=None):
-    """Draw vertical dashed red lines at resume points in loss_history.
-
-    Args:
-        ax: matplotlib axes
-        loss_history: list of dicts, entries with "resume": True mark resume points
-        x_key: which key to use for x position ("step", "wall_time", or None if x_values provided)
-        x_values: pre-computed x values (e.g. cumulative FLOPs) aligned with loss_history
-    """
-    for i, h in enumerate(loss_history):
-        if h.get("resume"):
-            if x_values is not None:
-                x = x_values[i]
-            else:
-                x = h.get(x_key, 0)
-            ax.axvline(x=x, color='red', linestyle=':', alpha=0.5, linewidth=1.5, zorder=5)
-
-
-def _build_plot_subtitle(metadata: Dict) -> str:
-    """Build a subtitle string from plot metadata."""
-    parts = []
-
-    if metadata.get("model_name"):
-        parts.append(f"Model: {metadata['model_name']}")
-
-    if metadata.get("model_params_b"):
-        parts.append(f"{metadata['model_params_b']:.2f}B params")
-
-    if metadata.get("use_packing"):
-        parts.append(f"Packed (target={metadata.get('target_samples', '?')})")
-    else:
-        parts.append(f"BS={metadata.get('batch_size', '?')}")
-
-    if metadata.get("learning_rate"):
-        parts.append(f"LR={metadata['learning_rate']:.1e}")
-
-    if metadata.get("accuracy_threshold"):
-        parts.append(f"Acc≥{metadata['accuracy_threshold']:.0%}")
-
-    return " | ".join(parts)
-
-
-def plot_stage_loss(loss_history: List[Dict], stage: int, output_dir: str, metadata: Dict = None):
-    """Plot loss curve for a single completed stage with exponential fit."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        rank_print("[PLOT] matplotlib not installed, skipping plot")
-        return
-
-    stage_data = [h for h in loss_history if h["stage"] == stage]
-    if not stage_data:
-        return
-
-    steps = [h["step"] for h in stage_data]
-    losses = [h["loss"] for h in stage_data]
-
-    alpha = stage_data[0].get("alpha", None)
-    effective_L = stage_data[0].get("effective_L", None)
-
-    start_step = steps[0]
-    rel_steps = [s - start_step for s in steps]
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(rel_steps, losses, alpha=0.3, linewidth=0.5, color='blue', label='Raw')
-
-    # Smoothed line
-    window = min(200, len(losses) // 3) or 1
-    if len(losses) >= window:
-        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
-        ax.plot(range(window - 1, len(losses)), smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
-
-    # Exponential fit
-    fit_result = fit_exponential_decay(rel_steps, losses, window=window)
-    fit_text = ""
-    if fit_result and fit_result["r_squared"] > 0.8:
-        # Show where fit starts (after spike)
-        fit_start = fit_result["fit_start_step"]  # Already relative since we passed rel_steps
-        ax.axvline(x=fit_start, color='orange', linestyle=':', alpha=0.5, label='Fit start')
-
-        # Draw fit curve
-        ax.plot(fit_result["fit_steps"], fit_result["fit_values"], '--', linewidth=2, color='red',
-                label=f'Exp fit (R²={fit_result["r_squared"]:.3f})')
-
-        # Asymptote line
-        ax.axhline(y=fit_result["c"], color='green', linestyle=':', alpha=0.7,
-                   label=f'Asymptote={fit_result["c"]:.4f}')
-
-        fit_text = (f'Fit: L(t) = {fit_result["a"]:.3f}·e^(-{fit_result["b"]:.2e}·t) + {fit_result["c"]:.4f}\n'
-                    f'Est. minimum: {fit_result["c"]:.4f} | Half-life: {fit_result["half_life"]:.0f} steps | R²={fit_result["r_squared"]:.3f}')
-    elif fit_result:
-        fit_text = f'Exp fit poor (R²={fit_result["r_squared"]:.3f})'
-
-    ax.set_xlabel('Steps in Stage')
-    ax.set_ylabel('Loss')
-    ax.set_yscale('log')
-
-    title = f'Stage {stage} Loss ({len(stage_data)} steps, final={losses[-1]:.4f})'
-    if effective_L is not None:
-        title += f' | L={effective_L}'
-    if alpha is not None:
-        title += f' | α={alpha:.3f}'
-    ax.set_title(title)
-
-    if fit_text:
-        ax.text(0.02, 0.02, fit_text, transform=ax.transAxes, fontsize=8,
-                verticalalignment='bottom', fontfamily='monospace',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.15)
-    plt.savefig(os.path.join(output_dir, f"loss_stage_{stage}.png"), dpi=150)
-    plt.close()
-
-    if fit_result and fit_result["r_squared"] > 0.8:
-        rank_print(
-            f"[PLOT] Saved loss_stage_{stage}.png | Est. min={fit_result['c']:.4f}, half-life={fit_result['half_life']:.0f} steps")
-    else:
-        rank_print(f"[PLOT] Saved loss_stage_{stage}.png")
-
-
-def plot_overall_loss(loss_history: List[Dict], output_dir: str, n_stages: int, metadata: Dict = None):
-    """Plot full training loss with stage markers and exponential fits."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-
-    if not loss_history:
-        return
-
-    steps = [h["step"] for h in loss_history]
-    losses = [h["loss"] for h in loss_history]
-    stages = [h["stage"] for h in loss_history]
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(steps, losses, alpha=0.3, linewidth=0.5, color='blue')
-
-    # Smoothed
-    window = min(100, len(losses) // 10) or 1
-    if len(losses) >= window:
-        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
-        ax.plot(steps[window - 1:], smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
-
-    # Find stage transitions and their effective_L values
-    stage_info = {}  # stage -> (first_step, effective_L, alpha)
-    for h in loss_history:
-        s = h["stage"]
-        if s not in stage_info:
-            stage_info[s] = (h["step"], h.get("effective_L"), h.get("alpha"))
-
-    # Stage transitions with lookahead labels
-    max_stage = max(stages)
-    colors = plt.cm.tab10(np.linspace(0, 1, max(max_stage, n_stages)))
-
-    prev_stage = stages[0]
-    for i, (step, stage) in enumerate(zip(steps, stages)):
-        if stage != prev_stage:
-            ax.axvline(x=step, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
-
-            # Get effective_L for this stage
-            effective_L = stage_info.get(stage, (None, None, None))[1]
-            if effective_L is not None:
-                label = f'S{stage}\nL={effective_L}'
-            else:
-                label = f'S{stage}'
-
-            ax.text(step, ax.get_ylim()[1] * 0.95, label, fontsize=8, ha='left', va='top')
-            prev_stage = stage
-
-    # Fit exponential to each stage and collect asymptotes
-    stage_fits = {}
-    stages_seen = sorted(set(stages))
-    for stg in stages_seen:
-        stage_data = [h for h in loss_history if h["stage"] == stg]
-        if len(stage_data) < 20:
-            continue
-        stg_steps = [h["step"] for h in stage_data]
-        stg_losses = [h["loss"] for h in stage_data]
-        fit = fit_exponential_decay(stg_steps, stg_losses, window=min(50, len(stg_losses) // 5) or 1)
-        if fit and fit["r_squared"] > 0.8:
-            stage_fits[stg] = fit
-            # Draw asymptote segment for this stage
-            start_step = stg_steps[0]
-            end_step = stg_steps[-1]
-            ax.hlines(y=fit["c"], xmin=start_step, xmax=end_step,
-                      colors='green', linestyles=':', alpha=0.6, linewidth=1.5)
-
-    ax.set_xlabel('Step')
-    ax.set_ylabel('Loss')
-    ax.set_yscale('log')
-    ax.set_title('Training Loss (Overall)')
-
-    # Build fit summary text
-    if stage_fits:
-        fit_lines = ["Stage asymptotes:"]
-        for stg in sorted(stage_fits.keys()):
-            f = stage_fits[stg]
-            L = stage_info.get(stg, (None, None))[1]
-            L_str = f"L={L}" if L else ""
-            fit_lines.append(f"  S{stg} {L_str}: min≈{f['c']:.4f}")
-        fit_text = "\n".join(fit_lines)
-        ax.text(0.98, 0.98, fit_text, transform=ax.transAxes, fontsize=7,
-                verticalalignment='top', horizontalalignment='right', fontfamily='monospace',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-
-    # Add subtitle with metadata
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    ax.legend(loc='upper left')
-    ax.grid(True, alpha=0.3)
-    _draw_resume_markers(ax, loss_history, x_key="step")
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)
-    plt.savefig(os.path.join(output_dir, "loss_overall.png"), dpi=150)
-    plt.close()
-
-    rank_print(f"[PLOT] Saved loss_overall.png ({len(stage_fits)} stages with exp fits)")
-
-
-def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_token: int, n_stages: int,
-                       metadata: Dict = None):
-    """Plot loss vs cumulative FLOPs."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-
-    if not loss_history or flops_per_token is None:
-        return
-
-    # Calculate cumulative FLOPs
-    cumulative_flops = []
-    total_flops = 0
-    for h in loss_history:
-        tokens = h.get("tokens", 0)
-        total_flops += tokens * flops_per_token
-        cumulative_flops.append(total_flops)
-
-    losses = [h["loss"] for h in loss_history]
-    stages = [h["stage"] for h in loss_history]
-
-    # Convert to PetaFLOPs for readability
-    cumulative_pflops = [f / 1e15 for f in cumulative_flops]
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(cumulative_pflops, losses, alpha=0.3, linewidth=0.5, color='blue')
-
-    # Smoothed
-    window = min(100, len(losses) // 10) or 1
-    if len(losses) >= window:
-        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
-        ax.plot(cumulative_pflops[window - 1:], smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
-
-    # Stage transitions
-    stage_info = {}
-    for i, h in enumerate(loss_history):
-        s = h["stage"]
-        if s not in stage_info:
-            stage_info[s] = (cumulative_pflops[i], h.get("effective_L"))
-
-    prev_stage = stages[0]
-    colors = plt.cm.tab10(np.linspace(0, 1, max(max(stages), n_stages)))
-
-    for i, (pflops, stage) in enumerate(zip(cumulative_pflops, stages)):
-        if stage != prev_stage:
-            ax.axvline(x=pflops, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
-            effective_L = stage_info.get(stage, (None, None))[1]
-            label = f'S{stage}\nL={effective_L}' if effective_L else f'S{stage}'
-            ax.text(pflops, ax.get_ylim()[1] * 0.95 if ax.get_ylim()[1] > 0 else losses[0],
-                    label, fontsize=8, ha='left', va='top')
-            prev_stage = stage
-
-    ax.set_xlabel('Cumulative PFLOPs')
-    ax.set_ylabel('Loss')
-    ax.set_yscale('log')
-    ax.set_title(f'Training Loss vs Compute (6N approx, {flops_per_token / 1e9:.1f}B FLOPs/token)')
-
-    # Add subtitle with metadata
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    _draw_resume_markers(ax, loss_history, x_values=cumulative_pflops)
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)
-    plt.savefig(os.path.join(output_dir, "loss_vs_flops.png"), dpi=150)
-    plt.close()
-
-    rank_print(f"[PLOT] Saved loss_vs_flops.png")
-
-
-def plot_loss_vs_walltime(loss_history: List[Dict], output_dir: str, n_stages: int, metadata: Dict = None):
-    """Plot loss vs wall clock time."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-
-    if not loss_history:
-        return
-
-    # Check if wall_time field exists
-    if not any(h.get("wall_time", 0) > 0 for h in loss_history):
-        rank_print("[PLOT] No wall_time data available, skipping wall clock plot")
-        return
-
-    wall_times = [h.get("wall_time", 0) / 3600 for h in loss_history]  # Convert to hours
-    losses = [h["loss"] for h in loss_history]
-    stages = [h["stage"] for h in loss_history]
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(wall_times, losses, alpha=0.3, linewidth=0.5, color='blue')
-
-    # Smoothed
-    window = min(100, len(losses) // 10) or 1
-    if len(losses) >= window:
-        smoothed = np.convolve(losses, np.ones(window) / window, mode='valid')
-        ax.plot(wall_times[window - 1:], smoothed, linewidth=2, color='blue', label=f'Smoothed (w={window})')
-
-    # Stage transitions
-    stage_info = {}
-    for i, h in enumerate(loss_history):
-        s = h["stage"]
-        if s not in stage_info:
-            stage_info[s] = (wall_times[i], h.get("effective_L"))
-
-    prev_stage = stages[0]
-    colors = plt.cm.tab10(np.linspace(0, 1, max(max(stages), n_stages)))
-
-    for i, (wt, stage) in enumerate(zip(wall_times, stages)):
-        if stage != prev_stage:
-            ax.axvline(x=wt, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
-            effective_L = stage_info.get(stage, (None, None))[1]
-            label = f'S{stage}\nL={effective_L}' if effective_L else f'S{stage}'
-            ax.text(wt, ax.get_ylim()[1] * 0.95 if ax.get_ylim()[1] > 0 else losses[0],
-                    label, fontsize=8, ha='left', va='top')
-            prev_stage = stage
-
-    ax.set_xlabel('Wall Clock Time (hours)')
-    ax.set_ylabel('Loss')
-    ax.set_yscale('log')
-    ax.set_title('Training Loss vs Wall Time')
-
-    # Add subtitle with metadata
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    _draw_resume_markers(ax, loss_history, x_key="wall_time")
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)
-    plt.savefig(os.path.join(output_dir, "loss_vs_walltime.png"), dpi=150)
-    plt.close()
-
-    rank_print(f"[PLOT] Saved loss_vs_walltime.png")
-
-
-def plot_achieved_tflops(loss_history: List[Dict], output_dir: str, n_stages: int, metadata: Dict = None):
-    """Plot achieved TFLOPs/s over training."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-
-    if not loss_history:
-        return
-
-    # Check if achieved_tflops field exists
-    if not any(h.get("achieved_tflops", 0) > 0 for h in loss_history):
-        rank_print("[PLOT] No achieved_tflops data available, skipping TFLOPs plot")
-        return
-
-    steps = [h["step"] for h in loss_history]
-    tflops = [h.get("achieved_tflops", 0) for h in loss_history]
-    stages = [h["stage"] for h in loss_history]
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(steps, tflops, alpha=0.3, linewidth=0.5, color='green')
-
-    # Smoothed
-    window = min(100, len(tflops) // 10) or 1
-    if len(tflops) >= window:
-        smoothed = np.convolve(tflops, np.ones(window) / window, mode='valid')
-        ax.plot(steps[window - 1:], smoothed, linewidth=2, color='green', label=f'Smoothed (w={window})')
-
-    # Stage transitions
-    prev_stage = stages[0]
-    colors = plt.cm.tab10(np.linspace(0, 1, max(max(stages), n_stages)))
-
-    for i, (step, stage) in enumerate(zip(steps, stages)):
-        if stage != prev_stage:
-            ax.axvline(x=step, color=colors[(stage - 1) % 10], linestyle='--', alpha=0.7)
-            prev_stage = stage
-
-    ax.set_xlabel('Step')
-    ax.set_ylabel('Achieved TFLOPs/s')
-    ax.set_title('GPU Compute Throughput Over Training')
-
-    # Add average line
-    avg_tflops = np.mean([t for t in tflops if t > 0])
-    ax.axhline(y=avg_tflops, color='red', linestyle=':', alpha=0.7, label=f'Avg: {avg_tflops:.1f}')
-
-    # Add subtitle with metadata
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    _draw_resume_markers(ax, loss_history, x_key="step")
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)
-    plt.savefig(os.path.join(output_dir, "achieved_tflops.png"), dpi=150)
-    plt.close()
-
-    rank_print(f"[PLOT] Saved achieved_tflops.png (avg: {avg_tflops:.1f} TFLOPs/s)")
-
-
-def plot_stage_eval(stage_eval_history: List[Dict], output_dir: str, metadata: Dict = None):
-    """Plot held-out eval loss and accuracy vs effective L after each stage."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-
-    if not stage_eval_history or len(stage_eval_history) < 2:
-        return
-
-    stages = [h["stage"] for h in stage_eval_history]
-    greedy_first = [h["greedy_first"] for h in stage_eval_history]
-    greedy_full = [h["greedy_full"] for h in stage_eval_history]
-    has_loss = "tf_loss" in stage_eval_history[0]
-    has_L = "effective_L" in stage_eval_history[0]
-
-    # Use effective_L for x-axis if available, else stage number
-    if has_L:
-        x_vals = [h["effective_L"] for h in stage_eval_history]
-        x_label = "Effective Lookahead (L)"
-    else:
-        x_vals = stages
-        x_label = "Stage"
-
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-
-    # Left axis: accuracy
-    color_first = '#2196F3'
-    color_full = '#4CAF50'
-    ax1.plot(x_vals, greedy_first, 'o-', color=color_first, label='Greedy First Token', markersize=5)
-    ax1.plot(x_vals, greedy_full, 's-', color=color_full, label='Greedy Full Word', markersize=5)
-    ax1.set_xlabel(x_label)
-    ax1.set_ylabel('Accuracy')
-    ax1.set_ylim(0, 1.05)
-    ax1.grid(True, alpha=0.3)
-
-    if has_loss:
-        # Right axis: TF loss
-        ax2 = ax1.twinx()
-        tf_losses = [h["tf_loss"] for h in stage_eval_history]
-        color_loss = '#F44336'
-        ax2.plot(x_vals, tf_losses, '^--', color=color_loss, label='TF Loss (alpha=1.0)', markersize=5)
-        ax2.set_ylabel('Teacher-Forced Loss', color=color_loss)
-        ax2.tick_params(axis='y', labelcolor=color_loss)
-
-        # Combined legend
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc='center right')
-    else:
-        ax1.legend(loc='lower right')
-
-    # Annotate each point with stage number
-    for i, h in enumerate(stage_eval_history):
-        ax1.annotate(f'S{h["stage"]}', (x_vals[i], greedy_full[i]),
-                     textcoords="offset points", xytext=(0, 8), fontsize=7, ha='center')
-
-    ax1.set_title('Held-Out Eval (alpha=1.0) After Each Stage')
-
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)
-    plt.savefig(os.path.join(output_dir, "stage_eval.png"), dpi=150)
-    plt.close()
-
-    rank_print(f"[PLOT] Saved stage_eval.png ({len(stage_eval_history)} stages)")
-
-
-def plot_eval_acc_vs_step(stage_eval_history: List[Dict], output_dir: str, metadata: Dict = None,
-                          loss_history: List[Dict] = None):
-    """Plot full-alpha and stage-alpha greedy accuracy vs training step."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-
-    if not stage_eval_history or len(stage_eval_history) < 2:
-        return
-
-    steps = [h["step"] for h in stage_eval_history]
-    greedy_full = [h["greedy_full"] * 100 for h in stage_eval_history]
-    greedy_first = [h["greedy_first"] * 100 for h in stage_eval_history]
-
-    has_stage_alpha = "stage_greedy_full" in stage_eval_history[0]
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    ax.plot(steps, greedy_full, 's-', color='#4CAF50', label='Full Alpha (α=1.0) Full Word', markersize=5)
-    ax.plot(steps, greedy_first, 'o-', color='#2196F3', label='Full Alpha (α=1.0) First Token', markersize=5, alpha=0.6)
-
-    if has_stage_alpha:
-        stage_full = [h.get("stage_greedy_full", 0) * 100 for h in stage_eval_history]
-        stage_first = [h.get("stage_greedy_first", 0) * 100 for h in stage_eval_history]
-        ax.plot(steps, stage_full, 's--', color='#FF9800', label='Stage Alpha Full Word', markersize=5)
-        ax.plot(steps, stage_first, 'o--', color='#F44336', label='Stage Alpha First Token', markersize=5, alpha=0.6)
-
-    # Annotate with L values
-    for i, h in enumerate(stage_eval_history):
-        if "effective_L" in h:
-            ax.annotate(f'L={h["effective_L"]}', (steps[i], greedy_full[i]),
-                        textcoords="offset points", xytext=(0, 8), fontsize=7, ha='center')
-
-    ax.set_xlabel('Training Step', fontsize=12)
-    ax.set_ylabel('Greedy Accuracy (%)', fontsize=12)
-    ax.set_title('Eval Accuracy vs Step')
-    ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
-    if loss_history:
-        _draw_resume_markers(ax, loss_history, x_key="step")
-
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)
-    plt.savefig(os.path.join(output_dir, "eval_acc_vs_step.png"), dpi=150)
-    plt.close()
-
-    rank_print(f"[PLOT] Saved eval_acc_vs_step.png ({len(stage_eval_history)} evals)")
-
-
-def plot_eval_acc_vs_flops(stage_eval_history: List[Dict], loss_history: List[Dict],
-                           output_dir: str, flops_per_token: int, metadata: Dict = None):
-    """Plot full-alpha and stage-alpha greedy accuracy vs cumulative FLOPs."""
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-
-    if not stage_eval_history or len(stage_eval_history) < 2:
-        return
-    if not loss_history or not flops_per_token:
-        return
-
-    # Build step -> cumulative FLOPs mapping from loss_history
-    step_to_flops = {}
-    total_flops = 0
-    for h in loss_history:
-        total_flops += h.get("tokens", 0) * flops_per_token
-        step_to_flops[h["step"]] = total_flops
-
-    # Map eval steps to cumulative FLOPs (find nearest step if exact not found)
-    eval_flops = []
-    for h in stage_eval_history:
-        s = h["step"]
-        if s in step_to_flops:
-            eval_flops.append(step_to_flops[s])
-        else:
-            # Find closest step <= eval step
-            closest = max((k for k in step_to_flops if k <= s), default=None)
-            if closest is not None:
-                eval_flops.append(step_to_flops[closest])
-            else:
-                eval_flops.append(0)
-
-    # Convert to ExaFLOPs
-    eval_exaflops = [f / 1e18 for f in eval_flops]
-
-    greedy_full = [h["greedy_full"] * 100 for h in stage_eval_history]
-    greedy_first = [h["greedy_first"] * 100 for h in stage_eval_history]
-    has_stage_alpha = "stage_greedy_full" in stage_eval_history[0]
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    ax.plot(eval_exaflops, greedy_full, 's-', color='#4CAF50', label='Full Alpha (α=1.0) Full Word', markersize=5)
-    ax.plot(eval_exaflops, greedy_first, 'o-', color='#2196F3', label='Full Alpha (α=1.0) First Token', markersize=5, alpha=0.6)
-
-    if has_stage_alpha:
-        stage_full = [h.get("stage_greedy_full", 0) * 100 for h in stage_eval_history]
-        stage_first = [h.get("stage_greedy_first", 0) * 100 for h in stage_eval_history]
-        ax.plot(eval_exaflops, stage_full, 's--', color='#FF9800', label='Stage Alpha Full Word', markersize=5)
-        ax.plot(eval_exaflops, stage_first, 'o--', color='#F44336', label='Stage Alpha First Token', markersize=5, alpha=0.6)
-
-    # Annotate with L values
-    for i, h in enumerate(stage_eval_history):
-        if "effective_L" in h:
-            ax.annotate(f'L={h["effective_L"]}', (eval_exaflops[i], greedy_full[i]),
-                        textcoords="offset points", xytext=(0, 8), fontsize=7, ha='center')
-
-    ax.set_xlabel('Cumulative FLOPs (ExaFLOPs)', fontsize=12)
-    ax.set_ylabel('Greedy Accuracy (%)', fontsize=12)
-    ax.set_title('Eval Accuracy vs Compute')
-    ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
-
-    # Resume markers using FLOPs x-values
-    if loss_history:
-        cum_flops_all = []
-        total = 0
-        for h in loss_history:
-            total += h.get("tokens", 0) * flops_per_token
-            cum_flops_all.append(total / 1e18)
-        _draw_resume_markers(ax, loss_history, x_values=cum_flops_all)
-
-    if metadata:
-        subtitle = _build_plot_subtitle(metadata)
-        fig.suptitle(subtitle, fontsize=9, color='gray', y=0.02)
-
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.12)
-    plt.savefig(os.path.join(output_dir, "eval_acc_vs_flops.png"), dpi=150)
-    plt.close()
-
-    rank_print(f"[PLOT] Saved eval_acc_vs_flops.png ({len(stage_eval_history)} evals)")
-
-
-class SinglePathARDataset(Dataset):
-    def __init__(
-            self,
-            task: str,
-            tokenizer,
-            stage: int = 1,
-            n_stages: int = 10,
-            base_alpha: float = 0.1,
-            max_alpha: float = 1.0,
-            max_input_size: int = 256,
-            linear_lookahead: bool = False,
-            base_lookahead: int = 1,
-            lookahead_step: int = 1,
-            reserved_inputs: Optional[Set[str]] = None,
-            num_shots: int = 0,
-            seed: Optional[int] = None,
-            store_examples: bool = False,
-            store_cap: int = 1000,
-            resume_step: int = 0,
-            **task_kwargs,
-    ):
-        self.task = task
-        self.tokenizer = tokenizer
-        # self.stage = stage
-        self._stage = multiprocessing.Value('i', stage)
-        self.n_stages = n_stages
-        self.base_alpha = base_alpha
-        self.max_alpha = max_alpha
-        self.linear_lookahead = linear_lookahead
-        self.base_lookahead = base_lookahead
-        self.lookahead_step = lookahead_step
-        self.max_input_size = max_input_size
-        self.reserved_inputs = reserved_inputs or set()
-        self.num_shots = num_shots
-        self.seed = seed
-        self.task_kwargs = task_kwargs
-
-        self.resume_step = resume_step
-
-        self._store = bool(store_examples)
-        self._store_cap = int(store_cap)
-        self._seen_inputs: deque = deque(maxlen=self._store_cap)
-        self._seen_labels: deque = deque(maxlen=self._store_cap)
-
-        self.few_shot_examples = self._build_few_shots(num_shots, seed)
-
-        # Epoch size - number of samples per "epoch"
-        self.epoch_size = 50000
-
-        # Per-worker state (initialized lazily)
-        self._worker_generator: Optional[NaturalLanguageGraphGenerator] = None
-        self._worker_rng: Optional[random.Random] = None
-        self._worker_id: Optional[int] = None
-
-        rank_print(
-            f"[DATASET] Map-style dataset | epoch_size={self.epoch_size} | store_seen={self._store} cap={self._store_cap}")
-
-    @property
-    def stage(self):
-        return self._stage.value
-
-    @stage.setter
-    def stage(self, value):
-        self._stage.value = value
-
-    def __len__(self):
-        """Return epoch size for PyTorch DataLoader"""
-        return self.epoch_size
-
-    def get_seen_samples(self) -> Tuple[List[str], List[List[str]]]:
-        """Return stored training samples"""
-        return list(self._seen_inputs), list(self._seen_labels)
-
-    def _build_few_shots(self, k: int, seed: Optional[int]):
-        """Build few-shot examples for prompting"""
-        if k <= 0:
-            return []
-        fs_seed = (seed or 0) + 12345
-        g = NaturalLanguageGraphGenerator(self.max_input_size, seed=fs_seed)
-        batch = g.generate_batch(self.task, batch_size=max(k, 3), alpha=0.5, **self.task_kwargs)
-        out = []
-        for ex in batch:
-            if ex and ex.output_texts:
-                out.append({"input": ex.input_text, "output": ex.output_texts[0]})
-                if len(out) >= k:
-                    break
-        return out[:k]
-
-    def _stage_target_lookahead(self) -> Optional[int]:
-        """Get target lookahead for current stage (search task with linear_lookahead only)."""
-        if not (self.linear_lookahead and self.task == "search"):
-            return None
-
-        max_L = self.task_kwargs.get("max_lookahead", 12)
-        target_L = self.base_lookahead + (self.stage - 1) * self.lookahead_step
-        return min(target_L, max_L)
-
-    def _stage_alpha(self) -> float:
-        """Calculate alpha for current curriculum stage."""
-        if self.linear_lookahead and self.task == "search":
-            target_L = self._stage_target_lookahead()
-            return alpha_for_lookahead(target_L, self.max_input_size)
-        else:
-            # Original alpha-based curriculum
-            if self.stage >= self.n_stages:
-                return self.max_alpha
-            return self.base_alpha + (self.max_alpha - self.base_alpha) * (self.stage - 1) / max(self.n_stages - 1, 1)
-
-    def _is_final_stage(self) -> bool:
-        """Check if current stage is the final stage."""
-        if self.linear_lookahead and self.task == "search":
-            max_L = self.task_kwargs.get("max_lookahead", 12)
-            current_L = self._stage_target_lookahead()
-            return current_L >= max_L
-        else:
-            return self.stage >= self.n_stages
-
-    def _shots_prefix(self) -> str:
-        """Build few-shot prefix for prompts (cached after first call)."""
-        if not hasattr(self, '_cached_shots_prefix'):
-            if not self.few_shot_examples:
-                self._cached_shots_prefix = ""
-            else:
-                parts = []
-                for ex in self.few_shot_examples:
-                    tt = _determine_task_type(self.task, ex["input"])
-                    parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
-                self._cached_shots_prefix = "\n\n".join(parts) + ("\n\n" if parts else "")
-        return self._cached_shots_prefix
-
-    def _get_worker_state(self, idx: int) -> Tuple[NaturalLanguageGraphGenerator, random.Random]:
-        worker_info = torch.utils.data.get_worker_info()
-        current_worker_id = worker_info.id if worker_info else 0
-
-        if self._worker_generator is None or self._worker_id != current_worker_id:
-            rank = get_rank()
-            worker_seed = (self.seed or 0) + rank * 9973 + current_worker_id * 7919
-
-            self._worker_generator = NaturalLanguageGraphGenerator(
-                self.max_input_size,
-                seed=worker_seed
-            )
-            self._worker_rng = random.Random(worker_seed)
-            self._worker_id = current_worker_id
-
-        # Reseed ALL RNGs per batch so data is deterministic by index, not call order.
-        # This prevents data cycling on resume (where workers are recreated with fresh RNG state).
-        batch_seed = ((self.seed or 0) +
-                      idx * 104729 +
-                      self._worker_id * 7919 +
-                      get_rank() * 999983)
-        self._worker_rng.seed(batch_seed)
-        import generator as _gen_module
-        _gen_module.set_seed(batch_seed & 0x7FFFFFFF)  # C++ minstd_rand uses unsigned 31-bit seed
-        random.seed(batch_seed)  # NL text generation uses global random
-
-        return self._worker_generator, self._worker_rng
-
-    def __getitem__(self, idx):
-        """
-        Generate sample on-demand for given index.
-        Index is used to vary the seed for diversity across samples.
-        """
-
-        effective_idx = idx + self.resume_step
-        gen, rng = self._get_worker_state(effective_idx)
-
-        alpha = self._stage_alpha()
-
-        # Try to generate a valid sample (up to 500 attempts)
-        max_attempts = 500
-        attempts = 0
-        ex = None
-        while ex is None and attempts < max_attempts:
-            attempts += 1
-
-            batch = gen.generate_batch(
-                self.task,
-                batch_size=1,
-                reserved_inputs=self.reserved_inputs,
-                alpha=alpha,
-                **self.task_kwargs
-            )
-
-            if batch and batch[0] and batch[0].output_texts:
-                candidate = batch[0]
-                if candidate.input_text not in self.reserved_inputs:
-                    ex = candidate
-
-        if ex is None:
-            raise RuntimeError(
-                f"[DATASET] Failed to generate valid sample after {max_attempts} attempts. "
-                f"Stage {self.stage}, alpha={alpha:.2f}, idx={idx}."
-            )
-
-        # Build prompt with few-shot examples
-        shots = self._shots_prefix()
-        prompt_text = (shots + ex.input_text) if shots else ex.input_text
-
-        # Choose random answer from valid outputs
-        chosen = rng.choice(ex.output_texts)
-        task_type = _determine_task_type(self.task, ex.input_text)
-
-        # Tokenize
-        prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
-        ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
-        end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
-
-        # Build final sequences
-        input_ids = prompt_ids + ans_ids + end_ids
-        labels = [-100] * len(prompt_ids) + ans_ids + end_ids
-        attention_mask = [1] * len(input_ids)
-
-        # Store if tracking seen samples
-        if self._store and len(self._seen_inputs) < self._store_cap:
-            self._seen_inputs.append(ex.input_text)
-            self._seen_labels.append(list(ex.output_texts))
-
-        # Build valid first token targets (tokenize each alternative once)
-        first_union = sorted({
-            tokens[0]
-            for tokens in (_tokenize_leading_space(self.tokenizer, a) for a in ex.output_texts)
-            if tokens
-        })
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-            "prompt_len": len(prompt_ids),
-            "valid_first_targets": first_union,
-        }
+# --------------- Plotting (extracted to plot_training.py) ---------------
+from plot_training import (
+    fit_exponential_decay,
+    plot_stage_loss,
+    plot_overall_loss,
+    plot_loss_vs_flops,
+    plot_loss_vs_walltime,
+    plot_achieved_tflops,
+    plot_stage_eval,
+    plot_eval_acc_vs_step,
+    plot_eval_acc_vs_flops,
+    generate_all_plots,
+    save_plot_data,
+)
+# Wire up rank_print so plot functions use it during training
+import plot_training as _plot_mod
+_plot_mod._print = rank_print
 
 
 class PackedSequenceDataset(Dataset):
@@ -1797,9 +821,10 @@ class PackedSequenceTrainer(Trainer):
     Properly handles Qwen3's RoPE implementation.
     """
 
-    def __init__(self, *args, first_token_soft_weight=0.3, accuracy_window=200, **kwargs):
+    def __init__(self, *args, first_token_soft_weight=0.3, accuracy_window=200, ce_chunk_size=4096, **kwargs):
         super().__init__(*args, **kwargs)
         self.first_token_soft_weight = first_token_soft_weight
+        self.ce_chunk_size = ce_chunk_size
         self.recent_losses = deque(maxlen=100)
         self.first_token_correct = deque(maxlen=accuracy_window)
         self.full_word_correct = deque(maxlen=accuracy_window)
@@ -1808,14 +833,18 @@ class PackedSequenceTrainer(Trainer):
         self._last_batch_tokens = 0
         self._last_efficiency = None
 
+        # Accumulate across micro-batches within one optimizer step (for grad_acc > 1)
+        self._step_samples = 0
+        self._step_tokens = 0
+
         # Training timing
         self._train_timing = {
             "data_wait": 0.0,
-            "forward": 0.0,
             "total_step": 0.0,
             "steps": 0,
         }
         self._step_start_time: Optional[float] = None
+        self._step_end_time: Optional[float] = None
 
         # Import Qwen3's RoPE implementation
         try:
@@ -1826,25 +855,30 @@ class PackedSequenceTrainer(Trainer):
             self._qwen_apply_rope = None
 
     def get_train_dataloader(self):
-        """Bypass Accelerate's dataloader wrapping."""
+        """Bypass Accelerate's dataloader wrapping — use TrainingArguments settings."""
         from torch.utils.data import DataLoader
+        nw = self.args.dataloader_num_workers
         return DataLoader(
             self.train_dataset,
             batch_size=1,
             shuffle=False,  # idx provides randomness via seeding
             collate_fn=lambda x: x[0],  # Unwrap single-item batch
-            num_workers=4,
-            prefetch_factor=2,
-            pin_memory=True,
-            persistent_workers=True,
+            num_workers=nw,
+            prefetch_factor=self.args.dataloader_prefetch_factor if nw > 0 else None,
+            pin_memory=self.args.dataloader_pin_memory,
+            persistent_workers=nw > 0,
         )
 
     def training_step(self, model, inputs, num_items_in_batch=None):
         t0 = time.perf_counter()
+        # Measure data wait: time between end of last step and start of this one
+        if self._step_end_time is not None:
+            self._train_timing["data_wait"] += t0 - self._step_end_time
         loss = super().training_step(model, inputs, num_items_in_batch)
-        dt = time.perf_counter() - t0
-        self._train_timing["total_step"] += dt
+        t1 = time.perf_counter()
+        self._train_timing["total_step"] += t1 - t0
         self._train_timing["steps"] += 1
+        self._step_end_time = t1
         return loss
 
     def _report_train_timing(self):
@@ -1852,28 +886,28 @@ class PackedSequenceTrainer(Trainer):
         if n == 0 or not is_main_process():
             return
 
-        data_ms = (self._train_timing["data_wait"] / n) * 1000
-        fwd_ms = (self._train_timing["forward"] / n) * 1000
-        total_ms = (self._train_timing["total_step"] / n) * 1000
+        data_ms = (self._train_timing["data_wait"] / n) * 1000   # Idle: waiting for dataloader
+        compute_ms = (self._train_timing["total_step"] / n) * 1000  # Active: fwd + bwd + optim
+        wall_ms = data_ms + compute_ms  # Total wall time per step
 
-        data_pct = (data_ms / (data_ms + total_ms)) * 100 if (data_ms + total_ms) > 0 else 0
+        data_pct = (data_ms / wall_ms) * 100 if wall_ms > 0 else 0
 
         print(
             f"\n[TRAIN-TIMING] Steps={n} | "
             f"DataWait={data_ms:.1f}ms ({data_pct:.1f}%) | "
-            f"Forward+Loss={fwd_ms:.1f}ms | "
-            f"StepTotal={total_ms:.1f}ms | "
-            f"Throughput={1000 / total_ms:.1f} steps/s\n"
+            f"Compute={compute_ms:.1f}ms | "
+            f"Wall={wall_ms:.1f}ms | "
+            f"Throughput={1000 / wall_ms:.1f} steps/s\n"
         )
 
     def reset_timing(self):
         self._train_timing = {
             "data_wait": 0.0,
-            "forward": 0.0,
             "total_step": 0.0,
             "steps": 0,
         }
         self._step_start_time = None
+        self._step_end_time = None
 
     def _forward_layer_varlen(self, layer, hidden_states, cu_seqlens, max_seqlen,
                               num_heads, num_kv_heads, head_dim, position_ids, rotary_emb):
@@ -1964,6 +998,10 @@ class PackedSequenceTrainer(Trainer):
         self._last_batch_samples = num_sequences
         self._last_batch_tokens = sum(cu[-1] for cu in cu_seqlens_list)
 
+        # Accumulate across micro-batches for gradient accumulation
+        self._step_samples += self._last_batch_samples
+        self._step_tokens += self._last_batch_tokens
+
         input_ids = inputs["input_ids"]  # [B, pack_length]
         labels = inputs["labels"]  # [B, pack_length]
         position_ids = inputs["position_ids"]  # [B, pack_length]
@@ -1977,7 +1015,6 @@ class PackedSequenceTrainer(Trainer):
         unwrapped = model
         while hasattr(unwrapped, "module"):
             unwrapped = unwrapped.module
-        # Unwrap PEFT wrapper if present (check class name, not base_model attr which all nn.Module have)
         try:
             from peft import PeftModel
             is_peft = isinstance(unwrapped, PeftModel)
@@ -1985,144 +1022,174 @@ class PackedSequenceTrainer(Trainer):
             is_peft = False
         if is_peft:
             unwrapped = unwrapped.base_model.model  # PeftModel -> LoraModel -> CausalLM
-        # unwrapped is now the CausalLM; .model is the inner transformer
         inner = unwrapped.model
         lm_head = unwrapped.lm_head
 
-        # Get model components
+        # Robustly navigate to inner transformer (Qwen3Model) with embed_tokens
+        if not hasattr(inner, 'embed_tokens') and hasattr(inner, 'model'):
+            inner = inner.model
+
+        if not hasattr(self, '_debug_unwrap_printed'):
+            self._debug_unwrap_printed = True
+            print(f"[DEBUG-UNWRAP] model={type(model).__name__} unwrapped={type(unwrapped).__name__} inner={type(inner).__name__} is_peft={is_peft}")
+
         embed_tokens = inner.embed_tokens
         layers = inner.layers
         norm = inner.norm
-        rotary_emb = inner.rotary_emb  # Model-level RoPE
+        rotary_emb = inner.rotary_emb
 
-        # Get config
         config = unwrapped.config
         num_heads = config.num_attention_heads
         num_kv_heads = getattr(config, "num_key_value_heads", num_heads)
         head_dim = getattr(config, "head_dim", config.hidden_size // num_heads)
 
         # Embed all tokens
-        hidden_states = embed_tokens(input_ids)  # [B, T, H]
+        all_embeds = embed_tokens(input_ids)  # [B, T, H]
 
-        # Process each row with its own cu_seqlens
-        all_row_losses = []
-        all_row_valid = []
+        # Concatenate actual (non-pad) tokens from all rows and merge cu_seqlens
+        row_hidden_parts = []
+        row_labels_parts = []
+        row_pos_parts = []
+        merged_cu_seqlens = [0]
+        global_max_seqlen = 0
+        row_offsets = []  # global offset for each row
 
-        # Pre-group sequence_info by row_idx (avoid repeated linear scans)
-        seqs_by_row = defaultdict(list)
-        for s in sequence_info:
-            seqs_by_row[s["row_idx"]].append(s)
-
+        offset = 0
         for row_idx in range(B):
-            cu_seqlens = torch.tensor(cu_seqlens_list[row_idx], dtype=torch.int32, device=device)
-            max_seqlen = max_seqlen_list[row_idx]
-            actual_len = cu_seqlens[-1].item()
+            cu = cu_seqlens_list[row_idx]
+            actual_len = cu[-1]
+            row_offsets.append(offset)
 
             if actual_len == 0:
                 continue
 
-            # Trim to actual length
-            row_hidden = hidden_states[row_idx, :actual_len, :]  # [actual_len, H]
-            row_labels = labels[row_idx, :actual_len]  # [actual_len]
-            row_pos = position_ids[row_idx:row_idx + 1, :actual_len]  # [1, actual_len]
+            row_hidden_parts.append(all_embeds[row_idx, :actual_len, :])
+            row_labels_parts.append(labels[row_idx, :actual_len])
+            row_pos_parts.append(position_ids[row_idx, :actual_len])
 
-            h = row_hidden  # [actual_len, H]
+            for i in range(1, len(cu)):
+                merged_cu_seqlens.append(cu[i] + offset)
 
-            # Forward through layers
-            for layer in layers:
-                if use_checkpoint and model.training:
-                    h = checkpoint.checkpoint(
-                        self._forward_layer_varlen,
-                        layer, h, cu_seqlens, max_seqlen,
-                        num_heads, num_kv_heads, head_dim,
-                        row_pos, rotary_emb,
-                        use_reentrant=False,
-                    )
-                else:
-                    h = self._forward_layer_varlen(
-                        layer, h, cu_seqlens, max_seqlen,
-                        num_heads, num_kv_heads, head_dim,
-                        row_pos, rotary_emb,
-                    )
+            global_max_seqlen = max(global_max_seqlen, max_seqlen_list[row_idx])
+            offset += actual_len
 
-            h = norm(h)  # [actual_len, H]
-            logits = lm_head(h)  # [actual_len, V]
+        if not row_hidden_parts:
+            loss = torch.tensor(0.0, device=device, requires_grad=True)
+            self.recent_losses.append(loss.item())
+            return loss
 
-            # Compute loss for this row
-            shift_logits = logits[:-1, :]  # [actual_len-1, V]
-            shift_labels = row_labels[1:]  # [actual_len-1]
+        # Single concatenated tensor for the entire batch
+        h = torch.cat(row_hidden_parts, dim=0)          # [total_actual, H]
+        all_labels = torch.cat(row_labels_parts, dim=0)  # [total_actual]
+        all_pos = torch.cat(row_pos_parts, dim=0).unsqueeze(0)  # [1, total_actual]
+        merged_cu = torch.tensor(merged_cu_seqlens, dtype=torch.int32, device=device)
 
-            valid_mask = (shift_labels != -100)
-            n_valid = valid_mask.sum().item()
-
-            if n_valid > 0:
-                ce = F.cross_entropy(
-                    shift_logits[valid_mask],
-                    shift_labels[valid_mask],
-                    reduction='none'
+        # Forward through all layers ONCE (instead of per-row loop)
+        for layer in layers:
+            if use_checkpoint and model.training:
+                h = checkpoint.checkpoint(
+                    self._forward_layer_varlen,
+                    layer, h, merged_cu, global_max_seqlen,
+                    num_heads, num_kv_heads, head_dim,
+                    all_pos, rotary_emb,
+                    use_reentrant=False,
+                )
+            else:
+                h = self._forward_layer_varlen(
+                    layer, h, merged_cu, global_max_seqlen,
+                    num_heads, num_kv_heads, head_dim,
+                    all_pos, rotary_emb,
                 )
 
-                # Apply soft first-token CE for sequences in this row
-                row_seqs = seqs_by_row[row_idx]
+        h = norm(h)          # [total_actual, H]
 
-                # Cache valid_positions and build position->ce_idx lookup once per row
-                valid_positions = torch.nonzero(valid_mask, as_tuple=True)[0]
-                pos_to_ce_idx = {}
-                for ci, pos in enumerate(valid_positions.tolist()):
-                    pos_to_ce_idx[pos] = ci
+        # Shift for autoregressive loss (per-sequence boundaries are masked by -100 labels)
+        shift_h = h[:-1, :]           # [Tm1, H]
+        shift_labels = all_labels[1:]  # [Tm1]
+        Tm1 = shift_h.size(0)
 
-                for seq in row_seqs:
-                    first_idx = seq["start_idx"] + seq["prompt_len"] - 1
-                    if first_idx < 0 or first_idx >= shift_logits.size(0):
+        valid_mask = (shift_labels != -100)
+        n_valid = valid_mask.sum().item()
+
+        if n_valid > 0:
+            # Chunked lm_head to avoid OOM (full [Tm1, V] logits would be ~65 GiB)
+            chunk_size = self.ce_chunk_size or 4096
+            ce_parts = []
+            preds = torch.empty(Tm1, dtype=torch.long, device=device)
+
+            for cs in range(0, Tm1, chunk_size):
+                ce_end = min(cs + chunk_size, Tm1)
+                chunk_logits = lm_head(shift_h[cs:ce_end])  # [chunk, V]
+                preds[cs:ce_end] = chunk_logits.detach().argmax(dim=-1)
+                chunk_vm = valid_mask[cs:ce_end]
+                if chunk_vm.any():
+                    ce_parts.append(F.cross_entropy(
+                        chunk_logits[chunk_vm],
+                        shift_labels[cs:ce_end][chunk_vm],
+                        reduction='none'
+                    ))
+                del chunk_logits
+
+            ce = torch.cat(ce_parts)
+
+            # Pre-compute global first_idx and answer spans for all sequences
+            S = len(sequence_info)
+            first_indices = torch.zeros(S, dtype=torch.long, device=device)
+            seq_starts = torch.zeros(S, dtype=torch.long, device=device)
+            seq_ends = torch.zeros(S, dtype=torch.long, device=device)
+            for si, seq in enumerate(sequence_info):
+                gs = row_offsets[seq["row_idx"]] + seq["start_idx"]
+                first_indices[si] = gs + seq["prompt_len"] - 1
+                seq_starts[si] = gs + seq["prompt_len"] - 1
+                seq_ends[si] = min(row_offsets[seq["row_idx"]] + seq["end_idx"] - 1, Tm1)
+
+            # Mask: which sequences have a valid first_idx in range with valid label
+            first_in_range = (first_indices >= 0) & (first_indices < Tm1)
+            first_valid = first_in_range & valid_mask[first_indices.clamp(0, Tm1 - 1)]
+
+            # Apply soft first-token CE adjustments
+            if self.first_token_soft_weight > 0 and first_valid.any():
+                ce_indices = torch.cumsum(valid_mask.int(), dim=0) - 1  # [Tm1]
+                valid_fi = first_indices[first_valid]
+                valid_ce = ce_indices[valid_fi]
+                # Compute lm_head only at first-token positions (small batch)
+                fi_logits = lm_head(shift_h[valid_fi])  # [N_first, V]
+                batch_logp = F.log_softmax(fi_logits, dim=-1)
+                del fi_logits
+
+                w = self.first_token_soft_weight
+                ce_list = valid_ce.tolist()
+                valid_seq_indices = torch.nonzero(first_valid, as_tuple=True)[0].tolist()
+                for j, si in enumerate(valid_seq_indices):
+                    vf = sequence_info[si]["valid_first_targets"]
+                    if not vf:
                         continue
-                    if not valid_mask[first_idx]:
-                        continue
-                    valid_first = seq["valid_first_targets"]
-                    if not valid_first:
-                        continue
+                    ids = torch.tensor(vf, device=device, dtype=torch.long)
+                    soft_ce = -batch_logp[j, ids].mean()
+                    ci = ce_list[j]
+                    ce[ci] = w * soft_ce + (1.0 - w) * ce[ci]
 
-                    ce_idx = pos_to_ce_idx.get(first_idx)
-                    if ce_idx is None:
-                        continue
+            loss = ce.sum() / n_valid
 
-                    # Soft CE (valid_first is already sorted unique from __getitem__)
-                    logp = F.log_softmax(shift_logits[first_idx], dim=-1)
-                    ids = torch.tensor(valid_first, device=device, dtype=torch.long)
-                    soft_ce = -logp[ids].mean()
+            # Track accuracy
+            with torch.no_grad():
+                # First-token accuracy
+                valid_first_preds = preds[first_indices[first_valid].clamp(0, Tm1 - 1)]
+                valid_first_si = torch.nonzero(first_valid, as_tuple=True)[0].tolist()
+                for j, si in enumerate(valid_first_si):
+                    pred_tok = valid_first_preds[j].item()
+                    self.first_token_correct.append(pred_tok in sequence_info[si]["valid_first_targets"])
 
-                    # Blend
-                    ce[ce_idx] = (
-                            self.first_token_soft_weight * soft_ce +
-                            (1.0 - self.first_token_soft_weight) * ce[ce_idx]
-                    )
-
-                all_row_losses.append(ce.sum())
-                all_row_valid.append(n_valid)
-
-                # Track accuracy (vectorized)
-                with torch.no_grad():
-                    preds = shift_logits.argmax(dim=-1)  # [actual_len-1]
-                    for seq in row_seqs:
-                        first_idx = seq["start_idx"] + seq["prompt_len"] - 1
-                        if 0 <= first_idx < shift_logits.size(0) and valid_mask[first_idx]:
-                            self.first_token_correct.append(preds[first_idx].item() in seq["valid_first_targets"])
-
-                        # Full word accuracy
-                        seq_start = seq["start_idx"] + seq["prompt_len"] - 1
-                        seq_end = min(seq["end_idx"] - 1, shift_logits.size(0))
-                        seq_valid = valid_mask[seq_start:seq_end]
-                        if seq_valid.any():
-                            ok = (preds[seq_start:seq_end][seq_valid] == shift_labels[seq_start:seq_end][
-                                seq_valid]).all().item()
-                        else:
-                            ok = True
-                        self.full_word_correct.append(ok)
-
-        # Aggregate loss
-        if all_row_losses:
-            total_loss = sum(all_row_losses)
-            total_valid = sum(all_row_valid)
-            loss = total_loss / max(total_valid, 1)
+                # Full-word accuracy
+                pred_matches = (preds == shift_labels)
+                for si in range(S):
+                    s, e = seq_starts[si].item(), seq_ends[si].item()
+                    if s >= e:
+                        continue  # Truncated by shift — skip, don't count as correct or wrong
+                    span_valid = valid_mask[s:e]
+                    if span_valid.any():
+                        self.full_word_correct.append(pred_matches[s:e][span_valid].all().item())
+                    # If no valid labels in span, skip (don't inflate accuracy)
         else:
             loss = torch.tensor(0.0, device=device, requires_grad=True)
 
@@ -2135,392 +1202,6 @@ class PackedSequenceTrainer(Trainer):
 
     def get_full_word_acc(self):
         return (sum(self.full_word_correct) / len(self.full_word_correct)) if self.full_word_correct else 0.0
-
-
-# ================== Collator ==================
-def make_collate(tokenizer, pad_to_multiple_of=64):
-    def collate(features):
-        pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
-        raw_max_len = max(len(f["input_ids"]) for f in features)
-
-        # Round up to the nearest multiple of 64 to stabilize shapes for torch.compile
-        # e.g., 100 -> 128, 129 -> 192
-        if pad_to_multiple_of is not None and pad_to_multiple_of > 0:
-            remainder = raw_max_len % pad_to_multiple_of
-            if remainder == 0:
-                target_len = raw_max_len
-            else:
-                target_len = raw_max_len + (pad_to_multiple_of - remainder)
-        else:
-            target_len = raw_max_len
-
-        # 2. Determine Max Candidates (Bucketing optional, but usually small enough to ignore)
-        dyn_max_k = max(len(f["valid_first_targets"]) for f in features)
-        max_k = max(dyn_max_k, 16)  # Minimum 16 safety
-
-        input_ids, attn, labels, prompt_lens = [], [], [], []
-        vtargets, vmask = [], []
-
-        for f in features:
-            # Pad Input Sequences to target_len
-            curr_len = len(f["input_ids"])
-            pad = target_len - curr_len
-
-            input_ids.append(f["input_ids"] + [pad_id] * pad)
-            attn.append(f["attention_mask"] + [0] * pad)
-            labels.append(f["labels"] + [-100] * pad)
-            prompt_lens.append(f["prompt_len"])
-
-            # Pad Candidate Targets to max_k
-            k_len = len(f["valid_first_targets"])
-            pad_k = max_k - k_len
-
-            vtargets.append(f["valid_first_targets"] + [pad_id] * pad_k)
-            vmask.append([1] * k_len + [0] * pad_k)
-
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "attention_mask": torch.tensor(attn, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-            "prompt_len": torch.tensor(prompt_lens, dtype=torch.long),
-            "valid_first_targets": torch.tensor(vtargets, dtype=torch.long),
-            "valid_first_mask": torch.tensor(vmask, dtype=torch.bool),
-        }
-
-    return collate
-
-
-# ================== Trainer (soft first-token CE) ==================
-class SinglePathARTrainer(Trainer):
-    def __init__(self, *args, first_token_soft_weight=0.3, use_chunked_ce=False, ce_chunk_size=1024, use_packing=False,
-                 accuracy_window=200, **kwargs):
-        self.use_packing = use_packing
-        super().__init__(*args, **kwargs)
-        self.first_token_soft_weight = first_token_soft_weight
-        self.recent_losses = deque(maxlen=100)
-        self.first_token_correct = deque(maxlen=accuracy_window)
-        self.full_word_correct = deque(maxlen=accuracy_window)
-
-        self.use_chunked_ce = use_chunked_ce
-        self.ce_chunk_size = ce_chunk_size
-
-        if self.use_chunked_ce:
-            print(f"[TRAINER] Using chunked cross-entropy (chunk_size={ce_chunk_size})")
-
-        # Training timing
-        self._train_timing = {
-            "data_wait": 0.0,  # Time waiting for DataLoader
-            "forward": 0.0,  # Forward pass
-            "total_step": 0.0,  # Total step time
-            "steps": 0,
-        }
-        self._step_start_time: Optional[float] = None
-        self._data_ready_time: Optional[float] = None
-
-        # Track actual batch sizes for token budget mode
-        self._last_batch_samples = 0
-        self._last_batch_tokens = 0
-
-    def training_step(self, model, inputs, num_items_in_batch=None):
-        t0 = time.perf_counter()
-        loss = super().training_step(model, inputs, num_items_in_batch)
-        dt = time.perf_counter() - t0
-        self._train_timing["total_step"] += dt
-        self._train_timing["steps"] += 1
-        return loss
-
-    def _report_train_timing(self):
-        """Print training timing breakdown"""
-        n = self._train_timing["steps"]
-        if n == 0 or not is_main_process():
-            return
-
-        data_ms = (self._train_timing["data_wait"] / n) * 1000
-        fwd_ms = (self._train_timing["forward"] / n) * 1000
-        total_ms = (self._train_timing["total_step"] / n) * 1000
-
-        # Calculate percentages
-        if total_ms > 0:
-            data_pct = (data_ms / (data_ms + total_ms)) * 100
-            fwd_pct = (fwd_ms / total_ms) * 100
-        else:
-            data_pct = fwd_pct = 0
-
-        print(
-            f"\n[TRAIN-TIMING] Steps={n} | "
-            f"DataWait={data_ms:.1f}ms ({data_pct:.1f}%) | "
-            f"Forward+Loss={fwd_ms:.1f}ms ({fwd_pct:.1f}%) | "
-            f"StepTotal={total_ms:.1f}ms | "
-            f"Throughput={1000 / total_ms:.1f} steps/s (excl. data)\n"
-        )
-
-    def reset_timing(self):
-        """Reset timing stats (call on stage change)"""
-        self._train_timing = {
-            "data_wait": 0.0,
-            "forward": 0.0,
-            "total_step": 0.0,
-            "steps": 0,
-        }
-        self._step_start_time = None
-        self._data_ready_time = None
-
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        # Track batch size from inputs (for token budget mode)
-        if "_batch_size" in inputs:
-            self._last_batch_samples = inputs.pop("_batch_size")
-        else:
-            self._last_batch_samples = inputs["input_ids"].shape[0]
-
-        if "_tokens_actual" in inputs:
-            self._last_batch_tokens = inputs.pop("_tokens_actual")
-        else:
-            self._last_batch_tokens = inputs["input_ids"].numel()
-
-        # Remove other metadata fields
-        if "_tokens_padded" in inputs:
-            inputs.pop("_tokens_padded")
-
-        prompt_len = inputs.pop("prompt_len")
-        valid_first = inputs.pop("valid_first_targets")
-        valid_first_mask = inputs.pop("valid_first_mask")
-        labels = inputs["labels"]
-
-        if self.use_chunked_ce:
-            return self._compute_loss_chunked(
-                model, inputs, labels, prompt_len,
-                valid_first, valid_first_mask, return_outputs
-            )
-        else:
-            return self._compute_loss_standard(
-                model, inputs, labels, prompt_len,
-                valid_first, valid_first_mask, return_outputs
-            )
-
-    def _compute_loss_standard(self, model, inputs, labels, prompt_len,
-                               valid_first, valid_first_mask, return_outputs):
-        """Original implementation using full logits tensor."""
-        outputs = model(**inputs)
-        logits = outputs.logits
-
-        shift_logits = logits[:, :-1, :].contiguous()
-        shift_labels = labels[:, 1:].contiguous()
-
-        ce_all = F.cross_entropy(
-            shift_logits.permute(0, 2, 1),
-            torch.clamp(shift_labels, min=0),
-            reduction="none",
-        )
-        valid_mask = (shift_labels != -100)
-        ce_all = ce_all * valid_mask.float()
-        B, Tm1, _ = shift_logits.shape
-
-        # Soft-CE at first answer position
-        for i in range(B):
-            first_idx = prompt_len[i].item() - 1
-            if first_idx < 0 or first_idx >= Tm1:
-                continue
-            if not valid_mask[i, first_idx]:
-                continue
-            mask = valid_first_mask[i]
-            if mask.any():
-                ids = valid_first[i][mask]
-                logp = F.log_softmax(shift_logits[i, first_idx, :], dim=-1)
-                soft_ce = -logp[ids].mean()
-
-                ce_all[i, first_idx] = (
-                        self.first_token_soft_weight * soft_ce +
-                        (1.0 - self.first_token_soft_weight) * ce_all[i, first_idx]
-                )
-
-        denom = valid_mask.sum().clamp_min(1)
-        loss = ce_all.sum() / denom
-        self.recent_losses.append(loss.item())
-
-        # Training-time tracking (vectorized)
-        with torch.no_grad():
-            preds = shift_logits.argmax(dim=-1)  # [B, Tm1]
-            for i in range(B):
-                first_idx = prompt_len[i].item() - 1
-                if 0 <= first_idx < Tm1 and valid_mask[i, first_idx]:
-                    valid_ids = set(valid_first[i][valid_first_mask[i]].tolist())
-                    self.first_token_correct.append(preds[i, first_idx].item() in valid_ids)
-
-                row_valid = valid_mask[i]
-                if row_valid.any():
-                    ok = (preds[i][row_valid] == shift_labels[i][row_valid]).all().item()
-                else:
-                    ok = True
-                self.full_word_correct.append(ok)
-
-        return (loss, outputs) if return_outputs else loss
-
-    def _compute_loss_chunked(self, model, inputs, labels, prompt_len,
-                              valid_first, valid_first_mask, return_outputs):
-        """
-        Memory-efficient loss using chunked cross-entropy.
-        Bypasses Accelerate's fp32 conversion by accessing transformer directly.
-        """
-        # Unwrap model to get the actual transformer (avoids Accelerate fp32 conversion)
-        unwrapped = model
-        while hasattr(unwrapped, "module"):
-            unwrapped = unwrapped.module
-        try:
-            from peft import PeftModel
-            is_peft = isinstance(unwrapped, PeftModel)
-        except ImportError:
-            is_peft = False
-        if is_peft:
-            unwrapped = unwrapped.base_model.model  # PeftModel -> LoraModel -> CausalLM
-        transformer = unwrapped.model
-        lm_head_weight = unwrapped.lm_head.weight
-
-        # Forward through transformer only - returns last_hidden_state directly
-        # This avoids storing all 36 layers of hidden states
-        transformer_outputs = transformer(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            return_dict=True,
-        )
-        hidden_states = transformer_outputs.last_hidden_state  # [B, T, H] - only last layer!
-
-        # Match dtype with lm_head
-        hidden_states = hidden_states.to(lm_head_weight.dtype)
-
-        # Shift for autoregressive loss
-        shift_hidden = hidden_states[:, :-1, :].contiguous()
-        shift_labels = labels[:, 1:].contiguous()
-
-        B, Tm1, H = shift_hidden.shape
-        valid_mask = (shift_labels != -100)
-
-        # === CHUNKED MAIN LOSS ===
-        flat_hidden = shift_hidden.view(-1, H)
-        flat_labels = shift_labels.view(-1)
-        total_tokens = flat_hidden.shape[0]
-
-        total_loss = flat_hidden.new_zeros(())
-        total_valid = 0
-
-        for start in range(0, total_tokens, self.ce_chunk_size):
-            end = min(start + self.ce_chunk_size, total_tokens)
-
-            chunk_hidden = flat_hidden[start:end]
-            chunk_labels = flat_labels[start:end]
-            chunk_logits = F.linear(chunk_hidden, lm_head_weight)
-
-            chunk_valid = (chunk_labels != -100)
-            n_valid = chunk_valid.sum().item()
-
-            if n_valid > 0:
-                chunk_loss = F.cross_entropy(
-                    chunk_logits[chunk_valid],
-                    chunk_labels[chunk_valid],
-                    reduction='sum'
-                )
-                total_loss = total_loss + chunk_loss
-                total_valid += n_valid
-
-        main_loss = total_loss / max(total_valid, 1)
-
-        # === SOFT-CE ADJUSTMENT AT FIRST POSITION ===
-        total_adjustment = hidden_states.new_zeros(())
-
-        for i in range(B):
-            first_idx = prompt_len[i].item() - 1
-            if first_idx < 0 or first_idx >= Tm1:
-                continue
-            if not valid_mask[i, first_idx]:
-                continue
-
-            mask = valid_first_mask[i]
-            if not mask.any():
-                continue
-
-            ids = valid_first[i][mask]
-            first_hidden = shift_hidden[i, first_idx, :]
-            first_logits = F.linear(first_hidden, lm_head_weight)
-
-            gold_label = shift_labels[i, first_idx]
-            hard_ce = F.cross_entropy(
-                first_logits.unsqueeze(0),
-                gold_label.unsqueeze(0)
-            )
-
-            logp = F.log_softmax(first_logits, dim=-1)
-            soft_ce = -logp[ids].mean()
-
-            delta = self.first_token_soft_weight * (soft_ce - hard_ce)
-            total_adjustment = total_adjustment + delta
-
-        loss = main_loss + total_adjustment / max(total_valid, 1)
-
-        # === TRACKING ===
-        with torch.no_grad():
-            # Batch first-token accuracy
-            first_indices = (prompt_len - 1).clamp(0, Tm1 - 1)
-            first_valid = (first_indices >= 0) & (first_indices < Tm1)
-            for i in range(B):
-                if first_valid[i] and valid_mask[i, first_indices[i]]:
-                    first_logits = F.linear(shift_hidden[i, first_indices[i]], lm_head_weight)
-                    pred_first = torch.argmax(first_logits).item()
-                    valid_ids = set(valid_first[i][valid_first_mask[i]].tolist())
-                    self.first_token_correct.append(pred_first in valid_ids)
-
-            # Full word accuracy
-            for i in range(B):
-                idxs = torch.nonzero(valid_mask[i], as_tuple=False).squeeze(-1)
-                if idxs.numel() > 0:
-                    if idxs.dim() == 0:
-                        idxs = idxs.unsqueeze(0)
-                    valid_hidden = shift_hidden[i, idxs]
-                    valid_logits = F.linear(valid_hidden, lm_head_weight)
-                    preds = torch.argmax(valid_logits, dim=-1)
-                    golds = shift_labels[i, idxs]
-                    ok = (preds == golds).all().item()
-                else:
-                    ok = True
-                self.full_word_correct.append(ok)
-
-        self.recent_losses.append(loss.item())
-
-        # Create a mock outputs object for return_outputs
-        if return_outputs:
-            class MockOutputs:
-                def __init__(self, loss):
-                    self.loss = loss
-
-            return (loss, MockOutputs(loss))
-
-        return loss
-
-    def get_first_token_acc(self):
-        return (sum(self.first_token_correct) / len(self.first_token_correct)) if self.first_token_correct else 0.0
-
-    def get_full_word_acc(self):
-        return (sum(self.full_word_correct) / len(self.full_word_correct)) if self.full_word_correct else 0.0
-
-    def get_train_dataloader(self):
-        """Override to bypass Accelerate's dataloader wrapping for token budget mode."""
-        if self.use_packing:
-            from torch.utils.data import DataLoader
-
-            # Return a simple DataLoader that Accelerate won't mess with
-            dataloader = DataLoader(
-                self.train_dataset,
-                batch_size=1,  # Dataset yields pre-batched data
-                collate_fn=self.data_collator,
-                num_workers=0,
-                pin_memory=True,
-            )
-
-            # Skip Accelerate's prepare() - just move batches to device manually
-            return dataloader
-        else:
-            return super().get_train_dataloader()
-
-
-# ================== Eval helpers ==================
 @torch.no_grad()
 def run_eval_tf_loss(
         model,
@@ -2738,7 +1419,7 @@ class FirstTokenCurriculum(TrainerCallback):
         self.min_steps = min_steps_per_stage
         self.check_every = check_every
         self.use_packing = use_packing
-        self.trainer: Optional[SinglePathARTrainer] = None
+        self.trainer: Optional[PackedSequenceTrainer] = None
         self.stage_start_step = 0
         self._last_log = -1
         self.finished = False
@@ -2785,11 +1466,11 @@ class FirstTokenCurriculum(TrainerCallback):
         return control
 
     def on_train_begin(self, args, state, control, **kwargs):
-        """Initialize stage timing at training start"""
+        """Initialize stage timing at training start.
+        Note: samples_this_stage/tokens_this_stage are NOT reset here —
+        they may have been restored from checkpoint by _try_restore_curriculum_state."""
         if self.stage_start_time is None:
             self.stage_start_time = datetime.datetime.now()
-            self.samples_this_stage = 0
-            self.tokens_this_stage = 0
 
         # Track wall time
         if self.training_start_time is None:
@@ -3018,9 +1699,9 @@ class FirstTokenCurriculum(TrainerCallback):
             if self.training_start_time is not None:
                 current_wall_time += (time.time() - self.training_start_time)
 
-            # Calculate achieved TFLOPs/s
-            tokens_this_step = self.trainer._last_batch_tokens * get_world_size() if hasattr(self.trainer,
-                                                                                             '_last_batch_tokens') else 0
+            # Calculate achieved TFLOPs/s (use accumulated tokens for full optimizer step)
+            tokens_this_step = self.trainer._step_tokens * get_world_size() if hasattr(self.trainer,
+                                                                                       '_step_tokens') else 0
             achieved_tflops = 0.0
             if hasattr(self.trainer, '_train_timing') and self.trainer._train_timing["steps"] > 0:
                 recent_step_time = self.trainer._train_timing["total_step"] / self.trainer._train_timing["steps"]
@@ -3042,11 +1723,15 @@ class FirstTokenCurriculum(TrainerCallback):
         current_time = datetime.datetime.now()
 
         # ==================== Track Samples for Packing mode
+        # Use accumulated values (correct with gradient_accumulation_steps > 1)
         if self.use_packing:
-            if hasattr(self.trainer, '_last_batch_samples'):
-                self.samples_this_stage += self.trainer._last_batch_samples * get_world_size()
-            if hasattr(self.trainer, '_last_batch_tokens'):
-                self.tokens_this_stage += self.trainer._last_batch_tokens * get_world_size()
+            if hasattr(self.trainer, '_step_samples'):
+                self.samples_this_stage += self.trainer._step_samples * get_world_size()
+            if hasattr(self.trainer, '_step_tokens'):
+                self.tokens_this_stage += self.trainer._step_tokens * get_world_size()
+            # Reset accumulators for next optimizer step
+            self.trainer._step_samples = 0
+            self.trainer._step_tokens = 0
 
         # ==================== Logging (every 10 steps) ====================
         if state.global_step % 10 == 0 and state.global_step != self._last_log and is_main_process():
@@ -3119,7 +1804,7 @@ class FirstTokenCurriculum(TrainerCallback):
             self._last_log = state.global_step
 
         # ==================== Periodic Eval (independent of stage advancement) ====================
-        if self.eval_every_steps > 0 and state.global_step % self.eval_every_steps == 0:
+        if self.eval_every_steps > 0 and state.global_step % self.eval_every_steps == 0 and not getattr(args, 'benchmark_steps', 0):
             self._run_stage_eval(self.dataset.stage, state.global_step, is_periodic=True)
             if is_main_process():
                 plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages, self.plot_metadata)
@@ -3130,6 +1815,8 @@ class FirstTokenCurriculum(TrainerCallback):
                 plot_achieved_tflops(self.loss_history, self.trainer.args.output_dir, self.n_stages, self.plot_metadata)
 
         # ==================== Stage Advancement Check ====================
+        if getattr(args, 'benchmark_steps', 0):
+            return control  # Skip stage advancement in benchmark mode
         if state.global_step % self.check_every == 0 and (state.global_step - self.stage_start_step) >= self.min_steps:
 
             m = self._current_metric()
@@ -3220,7 +1907,9 @@ class FirstTokenCurriculum(TrainerCallback):
                     self.trainer.first_token_correct.clear()
                     self.trainer.full_word_correct.clear()
 
-                    # Reset timing for new stage
+                    # Report and reset timing for new stage
+                    if hasattr(self.trainer, '_report_train_timing'):
+                        self.trainer._report_train_timing()
                     if hasattr(self.trainer, 'reset_timing'):
                         self.trainer.reset_timing()
 
@@ -3291,64 +1980,6 @@ class BaselineEvalCallback(TrainerCallback):
             trainer.model.train()
 
         return control
-
-
-# out-of-memory auto-scaling batch size and gradient accumulation training loop
-def train_with_oom_autoscale(trainer, init_bs, init_gas, resume_from_checkpoint, actual_batch_size=None):
-    # This function now acts as a wrapper that simply runs training,
-    # but handles the OOM by saving state and CRASHING all ranks.
-
-    # Save the initial config as "stable" when we start.
-    # Use actual_batch_size (from --batch_size CLI arg) if provided,
-    # since per_device_train_batch_size is 1 in packing mode.
-    bs_to_save = actual_batch_size if actual_batch_size is not None else trainer.args.per_device_train_batch_size
-    if is_main_process():
-        _save_run_config(
-            trainer.args.output_dir,
-            bs_to_save,
-            trainer.args.gradient_accumulation_steps
-        )
-
-    try:
-        trainer.train(resume_from_checkpoint=resume_from_checkpoint)
-
-    except RuntimeError as e:
-        if "out of memory" in str(e).lower() or "CUDA out of memory" in str(e):
-            print(f"[RANK {get_rank()}] OOM Detected! Preparing to restart...")
-
-            # Calculate new parameters
-            current_bs = trainer.args.per_device_train_batch_size
-            current_gas = trainer.args.gradient_accumulation_steps
-
-            new_bs = max(1, current_bs // 2)
-            new_gas = current_gas * 2
-
-            if new_bs == current_bs:
-                print(f"[RANK {get_rank()}] Already at BS=1. Cannot reduce further. Exiting.")
-                raise e
-
-            # Write state for future resumes
-            _save_run_config(trainer.args.output_dir, new_bs, new_gas)
-
-            # Create a restart flag
-            try:
-                flag_path = os.path.join(trainer.args.output_dir, "RESTART_FLAG")
-                with open(flag_path, "w") as f:
-                    f.write(f"oom_{datetime.datetime.now().isoformat()}")
-                print(f"[RANK {get_rank()}] Created restart flag at {flag_path}")
-            except Exception as e:
-                print(f"[RANK {get_rank()}] WARNING: Failed to create restart flag: {e}")
-
-            # Exit with non-zero code to trigger torchrun restart
-            print(f"[RANK {get_rank()}] Exiting process to trigger torchrun restart with new params.")
-            sys.stdout.flush()
-            os._exit(42)
-        else:
-            # Not an OOM, re-raise normal errors
-            raise e
-
-
-# Generate eval set in a similar way to the training data
 @torch.no_grad()
 def generate_eval_like_training(
         n_samples: int,
@@ -3509,7 +2140,6 @@ def main():
 
     # Memory control
     p.add_argument("--gradient_checkpointing", action="store_true")
-    p.add_argument("--oom_autoscale", action="store_true")
     p.add_argument("--torch_compile", action="store_true", help="Enable torch.compile for the model")
 
     # Scratch / resume
@@ -3533,6 +2163,10 @@ def main():
                    help="Fixed length for packed rows")
     p.add_argument("--target_samples_per_batch", type=int, default=64,
                    help="Fixed number of samples per training step")
+
+    # Benchmarking
+    p.add_argument("--benchmark_steps", type=int, default=0,
+                   help="Run exactly N training steps then exit (0=disabled). Skips evals and checkpointing.")
 
     global args
     args = p.parse_args()
@@ -3589,29 +2223,6 @@ def main():
     rank_print("[CKPT] This run dir      :", args.output_dir, "\n")
 
     # --- CONFIGURATION OVERRIDE LOGIC (OOM / RESUME) ---
-    if not args.use_packing:
-        cfg_candidate = None
-        if os.path.isfile(os.path.join(args.output_dir, "run_config.json")):
-            cfg_candidate = os.path.join(args.output_dir, "run_config.json")
-        elif args.resume_from_job:
-            prev_dir = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}")
-            if os.path.isfile(os.path.join(prev_dir, "run_config.json")):
-                cfg_candidate = os.path.join(prev_dir, "run_config.json")
-
-        if cfg_candidate:
-            try:
-                with open(cfg_candidate, "r") as f:
-                    rc = json.load(f)
-                    if is_main_process():
-                        print(f"[RESUME-CFG] Found config at {cfg_candidate}")
-                        print(
-                            f"[RESUME-CFG] Overriding CLI args: BS {args.batch_size}->{rc['batch_size']}, GAS {args.gradient_accumulation_steps}->{rc['grad_acc']}")
-                    args.batch_size = int(rc["batch_size"])
-                    args.gradient_accumulation_steps = int(rc["grad_acc"])
-            except Exception as e:
-                if is_main_process():
-                    print(f"[RESUME-CFG][WARN] Failed to load config from {cfg_candidate}: {e}")
-
     # Resume from checkpoint logic
     resume_ckpt = None
 
@@ -3734,7 +2345,7 @@ def main():
     eval_inputs_easy, eval_labels_easy = None, None  # alpha=base_alpha (easiest)
     eval_fingerprint_hard, eval_fingerprint_easy = None, None
 
-    need_eval_data = args.do_baseline or args.do_final_eval or args.do_redacted_eval or args.do_stage_eval
+    need_eval_data = (args.do_baseline or args.do_final_eval or args.do_redacted_eval or args.do_stage_eval) and not args.benchmark_steps
 
     if need_eval_data:
         rank_print("[EVAL-DATA] Generating eval sets (once for all evals)...")
@@ -3785,63 +2396,37 @@ def main():
         if eval_inputs_easy: reserved_inputs.update(eval_inputs_easy)
 
     # ---------------- Training dataset ----------------
-    if args.use_packing:
-        rank_print(
-            f"[DATASET] Using PackedSequenceDataset (pack_length={args.pack_length}, target_samples={args.target_samples_per_batch})")
-        if args.do_seen_eval:
-            rank_print("[WARN] --do_seen_eval disabled for packed dataset (incompatible with multi-worker)")
-            args.do_seen_eval = False
+    rank_print(
+        f"[DATASET] Using PackedSequenceDataset (pack_length={args.pack_length}, target_samples={args.target_samples_per_batch})")
+    if args.do_seen_eval:
+        rank_print("[WARN] --do_seen_eval disabled for packed dataset (incompatible with multi-worker)")
+        args.do_seen_eval = False
 
-        dataset = PackedSequenceDataset(
-            task=args.task,
-            tokenizer=tokenizer,
-            pack_length=args.pack_length,
-            target_samples_per_batch=args.target_samples_per_batch,
-            stage=1,
-            n_stages=args.n_stages,
-            base_alpha=args.base_alpha,
-            max_alpha=args.max_alpha,
-            max_input_size=args.max_input_size,
-            reserved_inputs=reserved_inputs,
-            num_shots=args.num_shots,
-            seed=args.seed,
-            resume_step=resume_step,
-            store_examples=args.do_seen_eval,
-            store_cap=1000,
-            linear_lookahead=args.linear_lookahead,
-            base_lookahead=args.base_lookahead,
-            lookahead_step=args.lookahead_step,
-            epoch_size=100_000_000,
-            **task_kwargs,
-        )
-        data_collator = lambda x: x[0]  # Identity
-        effective_batch_size = 1
-        num_workers = 4
-    else:
-        rank_print(f"[DATASET] Using SinglePathARDataset (batch_size={args.batch_size})")
-        dataset = SinglePathARDataset(
-            task=args.task,
-            tokenizer=tokenizer,
-            stage=1,
-            n_stages=args.n_stages,
-            base_alpha=args.base_alpha,
-            max_alpha=args.max_alpha,
-            max_input_size=args.max_input_size,
-            reserved_inputs=reserved_inputs,
-            num_shots=args.num_shots,
-            seed=args.seed,
-            store_examples=args.do_seen_eval,
-            store_cap=1000,
-            resume_step=resume_step,
-            linear_lookahead=args.linear_lookahead,
-            base_lookahead=args.base_lookahead,
-            lookahead_step=args.lookahead_step,
-            **task_kwargs,
-        )
-        data_collator = make_collate(tokenizer, pad_to_multiple_of=None)
-        effective_batch_size = args.batch_size
-        num_workers = 8
-
+    dataset = PackedSequenceDataset(
+        task=args.task,
+        tokenizer=tokenizer,
+        pack_length=args.pack_length,
+        target_samples_per_batch=args.target_samples_per_batch,
+        stage=1,
+        n_stages=args.n_stages,
+        base_alpha=args.base_alpha,
+        max_alpha=args.max_alpha,
+        max_input_size=args.max_input_size,
+        reserved_inputs=reserved_inputs,
+        num_shots=args.num_shots,
+        seed=args.seed,
+        resume_step=resume_step,
+        store_examples=args.do_seen_eval,
+        store_cap=1000,
+        linear_lookahead=args.linear_lookahead,
+        base_lookahead=args.base_lookahead,
+        lookahead_step=args.lookahead_step,
+        epoch_size=100_000_000,
+        **task_kwargs,
+    )
+    data_collator = lambda x: x[0]  # Identity
+    effective_batch_size = 1
+    num_workers = int(os.environ.get("BENCH_NUM_WORKERS", 4))
     curriculum = FirstTokenCurriculum(
         dataset=dataset,
         n_stages=args.n_stages,
@@ -3940,6 +2525,7 @@ def main():
 
             if is_main_process():
                 rank_print("[RETROACTIVE] Generating plots for completed job...")
+                save_plot_data(args.output_dir, plot_metadata, flops_per_token, args.n_stages)
 
                 plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages, plot_metadata)
                 plot_loss_vs_flops(curriculum.loss_history, args.output_dir, flops_per_token, args.n_stages,
@@ -3967,10 +2553,9 @@ def main():
             return 0
 
     # Disable Accelerate batch dispatching for token-budget training
-    if args.use_packing:
-        os.environ["ACCELERATE_DISPATCH_BATCHES"] = "false"
-        os.environ["ACCELERATE_SPLIT_BATCHES"] = "false"
-        os.environ["ACCELERATE_EVEN_BATCHES"] = "false"
+    os.environ["ACCELERATE_DISPATCH_BATCHES"] = "false"
+    os.environ["ACCELERATE_SPLIT_BATCHES"] = "false"
+    os.environ["ACCELERATE_EVEN_BATCHES"] = "false"
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -3978,22 +2563,20 @@ def main():
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
         warmup_steps=args.warmup_steps,
-        max_steps=100000000 if args.use_packing else -1,
+        max_steps=args.benchmark_steps if args.benchmark_steps > 0 else 100000000,
         num_train_epochs=1000,
         logging_steps=10,
         logging_first_step=False,
         report_to="none",
-        save_strategy="steps",
+        save_strategy="no" if args.benchmark_steps > 0 else "steps",
         save_steps=500,
         save_total_limit=5,
         save_safetensors=True,
         bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
         optim="adamw_torch_fused",
-        # dataloader_num_workers=0,
-
         dataloader_num_workers=num_workers,
-        dataloader_prefetch_factor=4 if num_workers > 0 else None,
+        dataloader_prefetch_factor=2 if num_workers > 0 else None,
         dataloader_persistent_workers=num_workers > 0,
         dataloader_pin_memory=True,
 
@@ -4052,31 +2635,17 @@ def main():
         skip_baseline=(not args.do_baseline) or (resume_ckpt is not None)
     )
 
-    if args.use_packing:
-        trainer = PackedSequenceTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=dataset,
-            tokenizer=tokenizer,
-            data_collator=data_collator,
-            callbacks=[curriculum, baseline_cb],
-            first_token_soft_weight=args.first_token_soft_weight,
-            accuracy_window=args.accuracy_window,
-        )
-    else:
-        trainer = SinglePathARTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=dataset,
-            tokenizer=tokenizer,
-            data_collator=data_collator,
-            callbacks=[curriculum, baseline_cb],
-            first_token_soft_weight=args.first_token_soft_weight,
-            use_chunked_ce=args.use_chunked_ce,
-            ce_chunk_size=args.ce_chunk_size,
-            use_packing=False,
-            accuracy_window=args.accuracy_window,
-        )
+    trainer = PackedSequenceTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+        callbacks=[curriculum, baseline_cb],
+        first_token_soft_weight=args.first_token_soft_weight,
+        accuracy_window=args.accuracy_window,
+        ce_chunk_size=args.ce_chunk_size,
+    )
     curriculum.trainer = trainer
     baseline_cb.trainer = trainer
 
@@ -4108,6 +2677,10 @@ def main():
         "target_samples": args.target_samples_per_batch,
         "accuracy_threshold": args.accuracy_threshold,
     }
+
+    if is_main_process():
+        save_plot_data(args.output_dir, curriculum.plot_metadata,
+                       curriculum.flops_per_token, args.n_stages)
 
     if not resume_ckpt:
         if is_main_process():
@@ -4145,16 +2718,46 @@ def main():
             resume_step = int(match.group(1))
             rank_print(f"[CURRICULUM] Resuming from step {resume_step}")
 
-    if args.oom_autoscale:
-        train_with_oom_autoscale(
-            trainer,
-            init_bs=trainer.args.per_device_train_batch_size,
-            init_gas=trainer.args.gradient_accumulation_steps,
-            resume_from_checkpoint=resume_ckpt,
-            actual_batch_size=args.batch_size,
-        )
-    else:
-        trainer.train(resume_from_checkpoint=resume_ckpt)
+    _bench_t0 = time.time()
+    trainer.train(resume_from_checkpoint=resume_ckpt)
+    _bench_elapsed = time.time() - _bench_t0
+
+    if args.benchmark_steps > 0 and is_main_process():
+        steps = args.benchmark_steps
+        # With packing, effective_batch_size=1 but real batch is args.batch_size rows per GPU
+        real_batch = args.batch_size
+        toks_per_step = args.pack_length * real_batch * get_world_size()
+        total_toks = toks_per_step * steps
+        toks_sec = total_toks / _bench_elapsed
+        steps_sec = steps / _bench_elapsed
+        rank_print(f"\n[BENCHMARK] {steps} steps in {_bench_elapsed:.1f}s")
+        rank_print(f"[BENCHMARK] {steps_sec:.3f} steps/sec | {toks_sec:,.0f} tokens/sec ({toks_sec/1e6:.3f} Mtok/s)")
+        rank_print(f"[BENCHMARK] pack_length={args.pack_length} batch={real_batch} gpus={get_world_size()}")
+        rank_print(f"[BENCHMARK] compile={args.torch_compile} base_L={args.base_lookahead}")
+        # Report timing breakdown
+        timing = trainer._train_timing
+        n_timing = timing["steps"]
+        data_wait_ms = (timing["data_wait"] / n_timing * 1000) if n_timing > 0 else 0
+        compute_ms = (timing["total_step"] / n_timing * 1000) if n_timing > 0 else 0
+        wall_ms = data_wait_ms + compute_ms
+        data_pct = (data_wait_ms / wall_ms * 100) if wall_ms > 0 else 0
+        rank_print(f"[BENCHMARK] DataWait={data_wait_ms:.1f}ms ({data_pct:.1f}%) | Compute={compute_ms:.1f}ms | Wall={wall_ms:.1f}ms")
+        # Write benchmark result to file
+        import json as _json
+        bench_result = {
+            "steps": steps, "elapsed_s": _bench_elapsed,
+            "steps_sec": steps_sec, "tokens_sec": toks_sec,
+            "pack_length": args.pack_length, "batch_size": real_batch,
+            "gpus": get_world_size(), "compile": args.torch_compile,
+            "base_lookahead": args.base_lookahead, "lookahead_step": args.lookahead_step,
+            "data_wait_ms": data_wait_ms, "compute_ms": compute_ms,
+            "data_wait_pct": data_pct,
+        }
+        bench_path = os.path.join(args.output_dir, "benchmark_result.json")
+        with open(bench_path, "w") as f:
+            _json.dump(bench_result, f, indent=2)
+        rank_print(f"[BENCHMARK] Result saved to {bench_path}")
+        sys.exit(0)
 
     rank_print("\n[TRAIN] Training complete.\n")
 
