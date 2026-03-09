@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J nl_speed_bench2
+#SBATCH -J nl_fused_ce
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:2
@@ -8,7 +8,7 @@
 #SBATCH --time=4:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
-#SBATCH -q normal
+#SBATCH -q preemptible
 #SBATCH -o ./slurm/%j_%x.out
 #SBATCH -e ./slurm/%j_%x.out
 #SBATCH --open-mode=append
@@ -17,8 +17,8 @@ set -euo pipefail
 mkdir -p ./slurm
 
 echo "========================================"
-echo "SPEED BENCHMARK (part 2) — $(date)"
-echo "  New configs: 32k pack_length, L=128, workers=0"
+echo "FUSED CE BENCHMARK -- Liger fused linear CE vs chunked CE"
+echo "$(date)"
 echo "========================================"
 
 # ========== Environment ==========
@@ -76,37 +76,36 @@ print('[OK] Model cached')
 "
 
 # ========== Benchmark configs ==========
-# Part 2: L=128 configs (missing from part 1), 32k pack_length, workers=0 test
-# Format: "label compile pack_length base_lookahead lookahead_step num_workers"
+# Format: "label fused_ce pack_length base_lookahead lookahead_step"
+# Compare chunked CE vs Liger fused CE on varlen path at key pack lengths
 CONFIGS=(
-    # --- L=128 at 8k and 16k (missed from part 1) ---
-    "nocompile_pack8k_L128        0  8192 128 0 4"
-    "compile_pack8k_L128          1  8192 128 0 4"
-    "nocompile_pack16k_L128       0 16384 128 0 4"
-    "compile_pack16k_L128         1 16384 128 0 4"
-    # --- 32k pack_length ---
-    "nocompile_pack32k_L16        0 32768  16 8 4"
-    "compile_pack32k_L16          1 32768  16 8 4"
-    "nocompile_pack32k_L128       0 32768 128 0 4"
-    "compile_pack32k_L128         1 32768 128 0 4"
-    # --- Dataloader impact: workers=0 (serial data loading) ---
-    "nocompile_pack16k_L16_w0     0 16384  16 8 0"
-    "nocompile_pack16k_L128_w0    0 16384 128 0 0"
+    # --- L=16: chunked CE (baseline from bench3) ---
+    "chunked_pack32k_L16      0 32768  16 8"
+    "chunked_pack64k_L16      0 65536  16 8"
+
+    # --- L=16: Liger fused CE ---
+    "fused_pack32k_L16        1 32768  16 8"
+    "fused_pack64k_L16        1 65536  16 8"
+
+    # --- L=128: chunked CE ---
+    "chunked_pack32k_L128     0 32768 128 0"
+    "chunked_pack64k_L128     0 65536 128 0"
+
+    # --- L=128: Liger fused CE ---
+    "fused_pack32k_L128       1 32768 128 0"
+    "fused_pack64k_L128       1 65536 128 0"
 )
 
 BENCH_STEPS=150
-BENCH_DIR="$SCRATCH/nl_output/benchmark2_${SLURM_JOB_ID}"
-mkdir -p "$BENCH_DIR"
-
 PORT=$BASE_PORT
 
 for cfg in "${CONFIGS[@]}"; do
-    read -r LABEL COMPILE PACK_LEN BASE_L L_STEP NUM_WORKERS <<< "$cfg"
+    read -r LABEL FUSED_CE PACK_LEN BASE_L L_STEP <<< "$cfg"
 
     echo ""
     echo "========================================"
     echo "CONFIG: $LABEL"
-    echo "  compile=$COMPILE pack_length=$PACK_LEN base_L=$BASE_L step=$L_STEP workers=$NUM_WORKERS"
+    echo "  fused_ce=$FUSED_CE pack_length=$PACK_LEN base_L=$BASE_L step=$L_STEP"
     echo "========================================"
 
     COMMON_ARGS=(
@@ -143,20 +142,19 @@ for cfg in "${CONFIGS[@]}"; do
         --use_liger
         --use_chunked_ce --ce_chunk_size 4096
         --benchmark_steps "$BENCH_STEPS"
-        --output_dir "$BENCH_DIR"
+        --output_dir "$SCRATCH/nl_output"
         --job_id "$LABEL"
         --base_lookahead "$BASE_L"
         --lookahead_step "$L_STEP"
     )
 
-    if [ "$COMPILE" -eq 1 ]; then
-        COMMON_ARGS+=(--torch_compile)
+    if [ "$FUSED_CE" -eq 1 ]; then
+        COMMON_ARGS+=(--use_liger_fused_ce)
     fi
 
     PORT=$((PORT + 1))
 
-    # Override dataloader workers via env var — training script reads from TrainingArguments
-    export BENCH_NUM_WORKERS=$NUM_WORKERS
+    export BENCH_NUM_WORKERS=4
 
     set +e
     torchrun --nproc_per_node=$GPUS_PER_NODE \
@@ -173,56 +171,5 @@ for cfg in "${CONFIGS[@]}"; do
     echo ""
 done
 
-# ========== Combined Summary (merge part 1 + part 2) ==========
 echo ""
-echo "========================================"
-echo "COMBINED BENCHMARK SUMMARY (part 1 + part 2)"
-echo "========================================"
-
-# Find part 1 results directory
-PART1_DIR=$(ls -d "$SCRATCH/nl_output/benchmark_"* 2>/dev/null | head -1)
-
-python3 -c "
-import json, os, glob
-
-results = []
-
-# Part 1 results
-for p1 in glob.glob('$SCRATCH/nl_output/benchmark_*/search/*/benchmark_result.json'):
-    label = p1.split('/')[-2]
-    with open(p1) as f:
-        r = json.load(f)
-    results.append((label, r))
-
-# Part 2 results
-for p2 in glob.glob('$BENCH_DIR/search/*/benchmark_result.json'):
-    label = p2.split('/')[-2]
-    with open(p2) as f:
-        r = json.load(f)
-    results.append((label, r))
-
-if not results:
-    print('No benchmark results found!')
-    exit(0)
-
-# Header
-print(f'{\"Config\":<30} {\"Steps/s\":>8} {\"Tok/s\":>12} {\"Mtok/s\":>8} {\"DataWait\":>10} {\"Compute\":>10} {\"DW%\":>5} {\"Compile\":>8} {\"PackLen\":>8} {\"Base_L\":>7}')
-print('-' * 125)
-
-# Sort by tokens/sec descending
-results.sort(key=lambda x: x[1]['tokens_sec'], reverse=True)
-best = results[0][1]['tokens_sec']
-
-for label, r in results:
-    pct = r['tokens_sec'] / best * 100
-    dw = r.get('data_wait_ms', 0)
-    cm = r.get('compute_ms', 0)
-    dp = r.get('data_wait_pct', 0)
-    print(f'{label:<30} {r[\"steps_sec\"]:>8.3f} {r[\"tokens_sec\"]:>12,.0f} {r[\"tokens_sec\"]/1e6:>8.3f} {dw:>8.1f}ms {cm:>8.1f}ms {dp:>4.1f}% {str(r[\"compile\"]):>8} {r[\"pack_length\"]:>8} {r[\"base_lookahead\"]:>7}  ({pct:.0f}%)')
-
-print()
-print('Fastest config:', results[0][0])
-"
-
-echo ""
-echo "BENCHMARK COMPLETE — $(date)"
+echo "FUSED CE BENCHMARK COMPLETE -- $(date)"

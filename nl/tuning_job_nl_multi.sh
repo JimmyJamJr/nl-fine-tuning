@@ -37,6 +37,7 @@ export HF_HOME="$SCRATCH/model_cache"
 if [ -f "$(dirname "$0")/.env" ]; then
     source "$(dirname "$0")/.env"
 fi
+export HF_HUB_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
@@ -70,7 +71,7 @@ TASK="search"                    # si | dfs | search
 MODEL_NAME="Qwen/Qwen3-0.6B"
 
 # Training
-BATCH_SIZE=16
+BATCH_SIZE=96
 GRADIENT_ACCUMULATION_STEPS=1
 LEARNING_RATE=1e-4
 WARMUP_STEPS=100
@@ -90,12 +91,12 @@ ACCURACY_THRESHOLD=0.98
 MIN_STEPS_PER_STAGE=200
 CHECK_EVERY=25
 ACCURACY_WINDOW=200
-EVAL_EVERY_STEPS=0
+EVAL_EVERY_STEPS=1000
 FIRST_TOKEN_SOFT_WEIGHT=0.0
 
 # Task parameters
 MAX_INPUT_SIZE=1536
-MAX_LOOKAHEAD=256                # search
+MAX_LOOKAHEAD=96                 # search
 MAX_FRONTIER_SIZE=12             # si
 MAX_BRANCH_SIZE=12               # si
 REQUESTED_BACKTRACK=3            # dfs
@@ -119,7 +120,7 @@ DO_SEEN_EVAL=true                # Seen-samples sanity check (should be ~100%)
 DO_STAGE_EVAL=true              # Eval at α=1.0 after each stage advancement
 
 # Resume from previous job (leave empty for fresh start)
-PREV_JOB_ID="7735383"
+PREV_JOB_ID="8184167"
 
 # ==========================================================
 
@@ -188,12 +189,10 @@ ARGS=(
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
 
     --use_packing
-    --pack_length 16384
-    --target_samples_per_batch 128
 
     --linear_lookahead
-    --base_lookahead 16
-    --lookahead_step 8
+    --base_lookahead 96
+    --lookahead_step 0
 )
 
 # Conditional flags
@@ -245,4 +244,4 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
 done
 
 echo "Max retries ($MAX_RETRIES) reached"
-exit 1
+exit 

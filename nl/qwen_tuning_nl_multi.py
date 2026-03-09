@@ -422,6 +422,70 @@ def build_redacted_eval_set(
     return red_inputs, red_labels
 
 
+def build_scrambled_eval_set(
+        inputs: List[str],
+        labels: List[List[str]],
+        max_n: Optional[int] = None,
+        seed: int = 12345,
+) -> Tuple[List[str], List[List[str]]]:
+    """Scramble rule consequents to destroy graph structure.
+
+    For each eval example, randomly permutes the successor words across all
+    rules while keeping the exact same format, vocabulary, and question.
+    The graph edges become nonsensical so no valid path from given -> target
+    exists. Expected accuracy should be near baseline (~3%) if the model is
+    truly doing graph traversal rather than pattern matching.
+    """
+    rng = random.Random(seed)
+    # Regex: matches a rule sentence and captures (prefix, consequent_word)
+    # Handles: "If X is A, then X/they are B" / "Everyone that is A is B"
+    #          "If someone is A, then they are B" / "If a person is A, they are B"
+    _rule_re = re.compile(
+        r'('
+        r'(?:If\s+(?:[A-Z][a-z]+|someone|a person)\s+is\s+[a-z]+,?\s*then\s+(?:[A-Z][a-z]+|they)\s+are\s+)'
+        r'|(?:Everyone\s+that\s+is\s+[a-z]+\s+is\s+)'
+        r')'
+        r'([a-z]+)'
+        r'(\.\s*)'
+    )
+
+    scr_inputs, scr_labels = [], []
+    for x, y in zip(inputs, labels):
+        # Only scramble the rules section (before "Given that")
+        given_idx = x.find("Given that")
+        if given_idx == -1:
+            continue
+
+        rules_part = x[:given_idx]
+        question_part = x[given_idx:]
+
+        matches = list(_rule_re.finditer(rules_part))
+        if len(matches) < 3:
+            continue
+
+        # Extract and shuffle consequents
+        consequents = [m.group(2) for m in matches]
+        shuffled = consequents[:]
+        for _ in range(20):
+            rng.shuffle(shuffled)
+            if shuffled != consequents:
+                break
+
+        # Rebuild rules_part with shuffled consequents (replace from end)
+        new_rules = list(rules_part)
+        for m, new_word in reversed(list(zip(matches, shuffled))):
+            s, e = m.start(2), m.end(2)
+            new_rules[s:e] = list(new_word)
+        new_rules = ''.join(new_rules)
+
+        scr_inputs.append(new_rules + question_part)
+        scr_labels.append(y)
+        if max_n is not None and len(scr_inputs) >= max_n:
+            break
+
+    return scr_inputs, scr_labels
+
+
 # --------------- Plotting (extracted to plot_training.py) ---------------
 from plot_training import (
     fit_exponential_decay,
@@ -452,8 +516,7 @@ class PackedSequenceDataset(Dataset):
             self,
             task: str,
             tokenizer,
-            pack_length: int = 4096,
-            target_samples_per_batch: int = 64,
+            batch_size: int = 64,
             stage: int = 1,
             n_stages: int = 10,
             base_alpha: float = 0.1,
@@ -479,8 +542,7 @@ class PackedSequenceDataset(Dataset):
 
         self.task = task
         self.tokenizer = tokenizer
-        self.pack_length = pack_length
-        self.target_samples_per_batch = target_samples_per_batch
+        self.target_samples_per_batch = batch_size
         self._stage = multiprocessing.Value('i', stage)
         self.n_stages = n_stages
         self.base_alpha = base_alpha
@@ -513,8 +575,7 @@ class PackedSequenceDataset(Dataset):
 
         self.few_shot_examples = self._build_few_shots(num_shots, seed)
 
-        rank_print(f"[DATASET] Packed Map-style | pack_length={pack_length} | "
-                   f"target_samples={target_samples_per_batch} | epoch_size={epoch_size}")
+        rank_print(f"[DATASET] Packed Map-style | batch_size={batch_size} | epoch_size={epoch_size}")
 
     @property
     def stage(self):
@@ -677,83 +738,50 @@ class PackedSequenceDataset(Dataset):
             "seq_len": len(input_ids),
         }
 
-    def _pack_batch(self, all_samples: List[List[Dict]]) -> Dict[str, Any]:
+    def _pack_batch(self, samples: List[Dict]) -> Dict[str, Any]:
         """
-        Pack samples into batch format for flash_attn_varlen_func.
-
-        Args:
-            all_samples: List of rows, each row is a list of samples to pack
-
-        Returns:
-            Batch dict with concatenated tokens and cu_seqlens
+        Pack all samples into a single flat sequence for flash_attn_varlen_func.
+        No padding, no fixed pack_length — size is determined by actual content.
         """
-        batch_input_ids = []
-        batch_labels = []
-        batch_position_ids = []
-        batch_cu_seqlens = []
-        batch_max_seqlen = []
+        all_input_ids = []
+        all_labels = []
+        all_position_ids = []
+        cu_seqlens = [0]
+        max_seqlen = 0
         all_sequence_info = []
 
-        total_actual_tokens = 0
-        total_tokens = 0
+        offset = 0
+        for sample in samples:
+            seq_len = sample["seq_len"]
 
-        for row_idx, row_samples in enumerate(all_samples):
-            row_input_ids = []
-            row_labels = []
-            row_position_ids = []
-            cu_seqlens = [0]
+            all_input_ids.extend(sample["input_ids"])
+            all_labels.extend(sample["labels"])
+            all_position_ids.extend(range(seq_len))
 
-            current_pos = 0
-            for sample in row_samples:
-                seq_len = sample["seq_len"]
+            offset += seq_len
+            cu_seqlens.append(offset)
 
-                row_input_ids.extend(sample["input_ids"])
-                row_labels.extend(sample["labels"])
-                row_position_ids.extend(range(seq_len))
+            max_seqlen = max(max_seqlen, seq_len)
 
-                current_pos += seq_len
-                cu_seqlens.append(current_pos)
+            all_sequence_info.append({
+                "row_idx": 0,
+                "start_idx": cu_seqlens[-2],
+                "end_idx": cu_seqlens[-1],
+                "prompt_len": sample["prompt_len"],
+                "valid_first_targets": sample["valid_first_targets"],
+            })
 
-                all_sequence_info.append({
-                    "row_idx": row_idx,
-                    "start_idx": cu_seqlens[-2],
-                    "end_idx": cu_seqlens[-1],
-                    "prompt_len": sample["prompt_len"],
-                    "valid_first_targets": sample["valid_first_targets"],
-                })
-
-            actual_len = len(row_input_ids)
-            total_actual_tokens += actual_len
-
-            # Pad row to pack_length
-            pad_len = self.pack_length - actual_len
-            if pad_len > 0:
-                row_input_ids.extend([self.pad_token_id] * pad_len)
-                row_labels.extend([-100] * pad_len)
-                row_position_ids.extend([0] * pad_len)
-            elif pad_len < 0:
-                # Truncate if somehow too long
-                row_input_ids = row_input_ids[:self.pack_length]
-                row_labels = row_labels[:self.pack_length]
-                row_position_ids = row_position_ids[:self.pack_length]
-
-            total_tokens += self.pack_length
-
-            batch_input_ids.append(row_input_ids)
-            batch_labels.append(row_labels)
-            batch_position_ids.append(row_position_ids)
-            batch_cu_seqlens.append(cu_seqlens)
-            batch_max_seqlen.append(max(s["seq_len"] for s in row_samples) if row_samples else 0)
+        total_tokens = len(all_input_ids)
 
         return {
-            "input_ids": torch.tensor(batch_input_ids, dtype=torch.long),
-            "labels": torch.tensor(batch_labels, dtype=torch.long),
-            "position_ids": torch.tensor(batch_position_ids, dtype=torch.long),
-            "cu_seqlens_list": batch_cu_seqlens,
-            "max_seqlen_list": batch_max_seqlen,
+            "input_ids": torch.tensor([all_input_ids], dtype=torch.long),       # [1, total_tokens]
+            "labels": torch.tensor([all_labels], dtype=torch.long),             # [1, total_tokens]
+            "position_ids": torch.tensor([all_position_ids], dtype=torch.long), # [1, total_tokens]
+            "cu_seqlens_list": [cu_seqlens],
+            "max_seqlen_list": [max_seqlen],
             "sequence_info": all_sequence_info,
-            "num_sequences": sum(len(row) for row in all_samples),
-            "_efficiency": (total_actual_tokens / total_tokens * 100) if total_tokens > 0 else 100,
+            "num_sequences": len(samples),
+            "_efficiency": 100.0,
         }
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
@@ -761,58 +789,36 @@ class PackedSequenceDataset(Dataset):
         Generate one fully packed batch.
 
         Each call generates target_samples_per_batch samples and packs them
-        into rows of pack_length tokens.
+        into a single flat sequence.
         """
         effective_idx = idx + self.resume_step
         gen, rng = self._get_worker_state(effective_idx)
 
         target_samples = self.target_samples_per_batch
 
-        all_rows = []
-        total_samples = 0
-        row_samples = []
-        row_len = 0
+        all_samples = []
 
         # Generate samples until we hit target count
         max_attempts = target_samples * 10
         attempts = 0
 
-        while total_samples < target_samples and attempts < max_attempts:
+        while len(all_samples) < target_samples and attempts < max_attempts:
             attempts += 1
             sample = self._generate_one_sample(rng)
 
             if sample is None:
                 continue
 
-            # Skip sequences too long for pack_length
-            if sample["seq_len"] > self.pack_length:
-                continue
-
-            # Check if sample fits in current row
-            if row_len + sample["seq_len"] > self.pack_length:
-                # Finalize current row
-                if row_samples:
-                    all_rows.append(row_samples)
-                    row_samples = []
-                    row_len = 0
-
-            # Add sample to current row
-            row_samples.append(sample)
-            row_len += sample["seq_len"]
-            total_samples += 1
-
-        # Finalize last row
-        if row_samples:
-            all_rows.append(row_samples)
+            all_samples.append(sample)
 
         # Handle edge case: no samples generated
-        if not all_rows:
+        if not all_samples:
             raise RuntimeError(
                 f"[DATASET] Failed to generate any samples for idx={idx}. "
                 f"Stage={self.stage}, alpha={self._stage_alpha():.3f}"
             )
 
-        return self._pack_batch(all_rows)
+        return self._pack_batch(all_samples)
 
 
 class PackedSequenceTrainer(Trainer):
@@ -851,11 +857,13 @@ class PackedSequenceTrainer(Trainer):
             from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb as qwen_apply_rope
             self._qwen_apply_rope = qwen_apply_rope
         except ImportError:
-            # Fallback for older transformers versions
             self._qwen_apply_rope = None
 
+        # Cached model internals (populated on first compute_loss call)
+        self._cached_model_parts = None
+
     def get_train_dataloader(self):
-        """Bypass Accelerate's dataloader wrapping — use TrainingArguments settings."""
+        """Bypass Accelerate's dataloader wrapping --use TrainingArguments settings."""
         from torch.utils.data import DataLoader
         nw = self.args.dataloader_num_workers
         return DataLoader(
@@ -910,26 +918,25 @@ class PackedSequenceTrainer(Trainer):
         self._step_end_time = None
 
     def _forward_layer_varlen(self, layer, hidden_states, cu_seqlens, max_seqlen,
-                              num_heads, num_kv_heads, head_dim, position_ids, rotary_emb):
+                              num_heads, num_kv_heads, head_dim, cos, sin):
         """Forward one layer using flash_attn_varlen_func with Qwen3 compatibility."""
 
-        seq_len, hidden_dim = hidden_states.shape
-        device = hidden_states.device
+        seq_len = hidden_states.shape[0]
 
         residual = hidden_states
         hidden_states = layer.input_layernorm(hidden_states)
 
         # QKV projection - hidden_states is [seq_len, H]
-        q = layer.self_attn.q_proj(hidden_states)  # [seq_len, num_heads * head_dim]
-        k = layer.self_attn.k_proj(hidden_states)  # [seq_len, num_kv_heads * head_dim]
-        v = layer.self_attn.v_proj(hidden_states)  # [seq_len, num_kv_heads * head_dim]
+        q = layer.self_attn.q_proj(hidden_states)
+        k = layer.self_attn.k_proj(hidden_states)
+        v = layer.self_attn.v_proj(hidden_states)
 
         # Reshape: [seq_len, num_heads, head_dim]
         q = q.view(seq_len, num_heads, head_dim)
         k = k.view(seq_len, num_kv_heads, head_dim)
         v = v.view(seq_len, num_kv_heads, head_dim)
 
-        # === QK Normalization (Qwen3 specific) ===
+        # QK Normalization (Qwen3 specific)
         if hasattr(layer.self_attn, 'q_norm') and layer.self_attn.q_norm is not None:
             q = layer.self_attn.q_norm(q)
             k = layer.self_attn.k_norm(k)
@@ -938,22 +945,18 @@ class PackedSequenceTrainer(Trainer):
         q = q.unsqueeze(0).transpose(1, 2)
         k = k.unsqueeze(0).transpose(1, 2)
 
-        # Get cos/sin from rotary_emb (uses first arg only for dtype/device inference)
-        cos, sin = rotary_emb(v, position_ids)
-
-        # Apply RoPE (only to Q and K)
+        # Apply pre-computed RoPE cos/sin
         if self._qwen_apply_rope is not None:
             q, k = self._qwen_apply_rope(q, k, cos, sin)
         else:
-            cos = cos.unsqueeze(1)  # [1, 1, seq_len, head_dim]
-            sin = sin.unsqueeze(1)
-            q = (q * cos) + (self._rotate_half(q) * sin)
-            k = (k * cos) + (self._rotate_half(k) * sin)
+            cos_u = cos.unsqueeze(1)
+            sin_u = sin.unsqueeze(1)
+            q = (q * cos_u) + (self._rotate_half(q) * sin_u)
+            k = (k * cos_u) + (self._rotate_half(k) * sin_u)
 
         # Reshape for flash_attn_varlen: [seq_len, num_heads, head_dim]
         q = q.squeeze(0).transpose(0, 1).contiguous()
         k = k.squeeze(0).transpose(0, 1).contiguous()
-        # V is already [seq_len, num_kv_heads, head_dim] from the view() above
         v = v.contiguous()
 
         # Flash attention
@@ -986,6 +989,35 @@ class PackedSequenceTrainer(Trainer):
         x2 = x[..., x.shape[-1] // 2:]
         return torch.cat((-x2, x1), dim=-1)
 
+    def _get_model_parts(self, model):
+        """Cache model internals on first call to avoid repeated unwrapping."""
+        if self._cached_model_parts is not None:
+            return self._cached_model_parts
+        unwrapped = model
+        while hasattr(unwrapped, "module"):
+            unwrapped = unwrapped.module
+        try:
+            from peft import PeftModel
+            if isinstance(unwrapped, PeftModel):
+                unwrapped = unwrapped.base_model.model
+        except ImportError:
+            pass
+        inner = unwrapped.model
+        if not hasattr(inner, 'embed_tokens') and hasattr(inner, 'model'):
+            inner = inner.model
+        config = unwrapped.config
+        self._cached_model_parts = {
+            'embed_tokens': inner.embed_tokens,
+            'layers': inner.layers,
+            'norm': inner.norm,
+            'rotary_emb': inner.rotary_emb,
+            'lm_head': unwrapped.lm_head,
+            'num_heads': config.num_attention_heads,
+            'num_kv_heads': getattr(config, "num_key_value_heads", config.num_attention_heads),
+            'head_dim': getattr(config, "head_dim", config.hidden_size // config.num_attention_heads),
+        }
+        return self._cached_model_parts
+
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         # Extract metadata
         sequence_info = inputs.pop("sequence_info")
@@ -998,110 +1030,59 @@ class PackedSequenceTrainer(Trainer):
         self._last_batch_samples = num_sequences
         self._last_batch_tokens = sum(cu[-1] for cu in cu_seqlens_list)
 
-        # Accumulate across micro-batches for gradient accumulation
         self._step_samples += self._last_batch_samples
         self._step_tokens += self._last_batch_tokens
 
-        input_ids = inputs["input_ids"]  # [B, pack_length]
-        labels = inputs["labels"]  # [B, pack_length]
-        position_ids = inputs["position_ids"]  # [B, pack_length]
+        input_ids = inputs["input_ids"]   # [1, total_tokens]
+        labels_pad = inputs["labels"]     # [1, total_tokens]
+        position_ids = inputs["position_ids"]  # [1, total_tokens]
 
         B, T = input_ids.shape
         device = input_ids.device
 
         use_checkpoint = getattr(self.args, 'gradient_checkpointing', False)
 
-        # Unwrap model to get CausalLM (e.g. Qwen3ForCausalLM)
-        unwrapped = model
-        while hasattr(unwrapped, "module"):
-            unwrapped = unwrapped.module
-        try:
-            from peft import PeftModel
-            is_peft = isinstance(unwrapped, PeftModel)
-        except ImportError:
-            is_peft = False
-        if is_peft:
-            unwrapped = unwrapped.base_model.model  # PeftModel -> LoraModel -> CausalLM
-        inner = unwrapped.model
-        lm_head = unwrapped.lm_head
+        # Cached model internals (avoids unwrapping every step)
+        mp = self._get_model_parts(model)
+        embed_tokens = mp['embed_tokens']
+        layers = mp['layers']
+        norm = mp['norm']
+        rotary_emb = mp['rotary_emb']
+        lm_head = mp['lm_head']
+        num_heads = mp['num_heads']
+        num_kv_heads = mp['num_kv_heads']
+        head_dim = mp['head_dim']
 
-        # Robustly navigate to inner transformer (Qwen3Model) with embed_tokens
-        if not hasattr(inner, 'embed_tokens') and hasattr(inner, 'model'):
-            inner = inner.model
+        # Single row, no padding — directly use the tensors
+        flat_ids = input_ids[0]           # [total_tokens]
+        all_labels = labels_pad[0]        # [total_tokens]
+        all_pos = position_ids[0:1]       # [1, total_tokens]
+        merged_cu = torch.tensor(cu_seqlens_list[0], dtype=torch.int32, device=device)
+        global_max_seqlen = max_seqlen_list[0]
 
-        if not hasattr(self, '_debug_unwrap_printed'):
-            self._debug_unwrap_printed = True
-            print(f"[DEBUG-UNWRAP] model={type(model).__name__} unwrapped={type(unwrapped).__name__} inner={type(inner).__name__} is_peft={is_peft}")
+        # Embed tokens
+        h = embed_tokens(flat_ids)  # [total_tokens, H]
 
-        embed_tokens = inner.embed_tokens
-        layers = inner.layers
-        norm = inner.norm
-        rotary_emb = inner.rotary_emb
+        # Compute RoPE cos/sin once (same for all layers)
+        cos, sin = rotary_emb(h, all_pos)
 
-        config = unwrapped.config
-        num_heads = config.num_attention_heads
-        num_kv_heads = getattr(config, "num_key_value_heads", num_heads)
-        head_dim = getattr(config, "head_dim", config.hidden_size // num_heads)
-
-        # Embed all tokens
-        all_embeds = embed_tokens(input_ids)  # [B, T, H]
-
-        # Concatenate actual (non-pad) tokens from all rows and merge cu_seqlens
-        row_hidden_parts = []
-        row_labels_parts = []
-        row_pos_parts = []
-        merged_cu_seqlens = [0]
-        global_max_seqlen = 0
-        row_offsets = []  # global offset for each row
-
-        offset = 0
-        for row_idx in range(B):
-            cu = cu_seqlens_list[row_idx]
-            actual_len = cu[-1]
-            row_offsets.append(offset)
-
-            if actual_len == 0:
-                continue
-
-            row_hidden_parts.append(all_embeds[row_idx, :actual_len, :])
-            row_labels_parts.append(labels[row_idx, :actual_len])
-            row_pos_parts.append(position_ids[row_idx, :actual_len])
-
-            for i in range(1, len(cu)):
-                merged_cu_seqlens.append(cu[i] + offset)
-
-            global_max_seqlen = max(global_max_seqlen, max_seqlen_list[row_idx])
-            offset += actual_len
-
-        if not row_hidden_parts:
-            loss = torch.tensor(0.0, device=device, requires_grad=True)
-            self.recent_losses.append(loss.item())
-            return loss
-
-        # Single concatenated tensor for the entire batch
-        h = torch.cat(row_hidden_parts, dim=0)          # [total_actual, H]
-        all_labels = torch.cat(row_labels_parts, dim=0)  # [total_actual]
-        all_pos = torch.cat(row_pos_parts, dim=0).unsqueeze(0)  # [1, total_actual]
-        merged_cu = torch.tensor(merged_cu_seqlens, dtype=torch.int32, device=device)
-
-        # Forward through all layers ONCE (instead of per-row loop)
         for layer in layers:
             if use_checkpoint and model.training:
                 h = checkpoint.checkpoint(
                     self._forward_layer_varlen,
                     layer, h, merged_cu, global_max_seqlen,
                     num_heads, num_kv_heads, head_dim,
-                    all_pos, rotary_emb,
+                    cos, sin,
                     use_reentrant=False,
                 )
             else:
                 h = self._forward_layer_varlen(
                     layer, h, merged_cu, global_max_seqlen,
                     num_heads, num_kv_heads, head_dim,
-                    all_pos, rotary_emb,
+                    cos, sin,
                 )
 
-        h = norm(h)          # [total_actual, H]
+        h = norm(h)          # [total_tokens, H]
 
         # Shift for autoregressive loss (per-sequence boundaries are masked by -100 labels)
         shift_h = h[:-1, :]           # [Tm1, H]
@@ -1112,6 +1093,19 @@ class PackedSequenceTrainer(Trainer):
         n_valid = valid_mask.sum().item()
 
         if n_valid > 0:
+            # Pre-compute global first_idx and answer spans for all sequences
+            S = len(sequence_info)
+            first_indices = torch.zeros(S, dtype=torch.long, device=device)
+            seq_starts = torch.zeros(S, dtype=torch.long, device=device)
+            seq_ends = torch.zeros(S, dtype=torch.long, device=device)
+            for si, seq in enumerate(sequence_info):
+                first_indices[si] = seq["start_idx"] + seq["prompt_len"] - 1
+                seq_starts[si] = seq["start_idx"] + seq["prompt_len"] - 1
+                seq_ends[si] = min(seq["end_idx"] - 1, Tm1)
+
+            first_in_range = (first_indices >= 0) & (first_indices < Tm1)
+            first_valid = first_in_range & valid_mask[first_indices.clamp(0, Tm1 - 1)]
+
             # Chunked lm_head to avoid OOM (full [Tm1, V] logits would be ~65 GiB)
             chunk_size = self.ce_chunk_size or 4096
             ce_parts = []
@@ -1132,27 +1126,11 @@ class PackedSequenceTrainer(Trainer):
 
             ce = torch.cat(ce_parts)
 
-            # Pre-compute global first_idx and answer spans for all sequences
-            S = len(sequence_info)
-            first_indices = torch.zeros(S, dtype=torch.long, device=device)
-            seq_starts = torch.zeros(S, dtype=torch.long, device=device)
-            seq_ends = torch.zeros(S, dtype=torch.long, device=device)
-            for si, seq in enumerate(sequence_info):
-                gs = row_offsets[seq["row_idx"]] + seq["start_idx"]
-                first_indices[si] = gs + seq["prompt_len"] - 1
-                seq_starts[si] = gs + seq["prompt_len"] - 1
-                seq_ends[si] = min(row_offsets[seq["row_idx"]] + seq["end_idx"] - 1, Tm1)
-
-            # Mask: which sequences have a valid first_idx in range with valid label
-            first_in_range = (first_indices >= 0) & (first_indices < Tm1)
-            first_valid = first_in_range & valid_mask[first_indices.clamp(0, Tm1 - 1)]
-
             # Apply soft first-token CE adjustments
             if self.first_token_soft_weight > 0 and first_valid.any():
                 ce_indices = torch.cumsum(valid_mask.int(), dim=0) - 1  # [Tm1]
                 valid_fi = first_indices[first_valid]
                 valid_ce = ce_indices[valid_fi]
-                # Compute lm_head only at first-token positions (small batch)
                 fi_logits = lm_head(shift_h[valid_fi])  # [N_first, V]
                 batch_logp = F.log_softmax(fi_logits, dim=-1)
                 del fi_logits
@@ -1172,23 +1150,29 @@ class PackedSequenceTrainer(Trainer):
             loss = ce.sum() / n_valid
 
             # Track accuracy
+            # Batch GPU->CPU transfers to minimize sync points
             with torch.no_grad():
-                # First-token accuracy
-                valid_first_preds = preds[first_indices[first_valid].clamp(0, Tm1 - 1)]
-                valid_first_si = torch.nonzero(first_valid, as_tuple=True)[0].tolist()
-                for j, si in enumerate(valid_first_si):
-                    pred_tok = valid_first_preds[j].item()
-                    self.first_token_correct.append(pred_tok in sequence_info[si]["valid_first_targets"])
-
-                # Full-word accuracy
                 pred_matches = (preds == shift_labels)
+                # Single GPU->CPU transfers (4 syncs instead of ~384)
+                first_pred_list = preds[first_indices[first_valid].clamp(0, Tm1 - 1)].tolist()
+                first_si_list = torch.nonzero(first_valid, as_tuple=True)[0].tolist()
+                starts = seq_starts.tolist()
+                ends = seq_ends.tolist()
+                pred_matches_cpu = pred_matches.cpu()
+                valid_mask_cpu = valid_mask.cpu()
+
+                # First-token accuracy (pure Python loop, no GPU sync)
+                for j, si in enumerate(first_si_list):
+                    self.first_token_correct.append(first_pred_list[j] in sequence_info[si]["valid_first_targets"])
+
+                # Full-word accuracy (pure Python loop on CPU tensors)
                 for si in range(S):
-                    s, e = seq_starts[si].item(), seq_ends[si].item()
+                    s, e = starts[si], ends[si]
                     if s >= e:
-                        continue  # Truncated by shift — skip, don't count as correct or wrong
-                    span_valid = valid_mask[s:e]
+                        continue
+                    span_valid = valid_mask_cpu[s:e]
                     if span_valid.any():
-                        self.full_word_correct.append(pred_matches[s:e][span_valid].all().item())
+                        self.full_word_correct.append(pred_matches_cpu[s:e][span_valid].all().item())
                     # If no valid labels in span, skip (don't inflate accuracy)
         else:
             loss = torch.tensor(0.0, device=device, requires_grad=True)
@@ -1467,7 +1451,7 @@ class FirstTokenCurriculum(TrainerCallback):
 
     def on_train_begin(self, args, state, control, **kwargs):
         """Initialize stage timing at training start.
-        Note: samples_this_stage/tokens_this_stage are NOT reset here —
+        Note: samples_this_stage/tokens_this_stage are NOT reset here --
         they may have been restored from checkpoint by _try_restore_curriculum_state."""
         if self.stage_start_time is None:
             self.stage_start_time = datetime.datetime.now()
@@ -2086,7 +2070,8 @@ def main():
                    help="Enable CUDA deterministic algorithms (may be slower)")
 
     # Training hyperparams
-    p.add_argument("--batch_size", type=int, default=16)
+    p.add_argument("--batch_size", type=int, default=16,
+                   help="Samples per training step. With packing: target sequences packed per step. Without: per_device_train_batch_size.")
     p.add_argument("--gradient_accumulation_steps", type=int, default=1)
     p.add_argument("--learning_rate", type=float, default=2e-5)
     p.add_argument("--warmup_steps", type=int, default=500)
@@ -2140,7 +2125,6 @@ def main():
 
     # Memory control
     p.add_argument("--gradient_checkpointing", action="store_true")
-    p.add_argument("--torch_compile", action="store_true", help="Enable torch.compile for the model")
 
     # Scratch / resume
     p.add_argument("--scratch_dir", type=str,
@@ -2159,10 +2143,6 @@ def main():
     # Packing
     p.add_argument("--use_packing", action="store_true",
                    help="Use sequence packing for efficiency")
-    p.add_argument("--pack_length", type=int, default=4096,
-                   help="Fixed length for packed rows")
-    p.add_argument("--target_samples_per_batch", type=int, default=64,
-                   help="Fixed number of samples per training step")
 
     # Benchmarking
     p.add_argument("--benchmark_steps", type=int, default=0,
@@ -2397,7 +2377,7 @@ def main():
 
     # ---------------- Training dataset ----------------
     rank_print(
-        f"[DATASET] Using PackedSequenceDataset (pack_length={args.pack_length}, target_samples={args.target_samples_per_batch})")
+        f"[DATASET] Using PackedSequenceDataset (batch_size={args.batch_size})")
     if args.do_seen_eval:
         rank_print("[WARN] --do_seen_eval disabled for packed dataset (incompatible with multi-worker)")
         args.do_seen_eval = False
@@ -2405,8 +2385,7 @@ def main():
     dataset = PackedSequenceDataset(
         task=args.task,
         tokenizer=tokenizer,
-        pack_length=args.pack_length,
-        target_samples_per_batch=args.target_samples_per_batch,
+        batch_size=args.batch_size,
         stage=1,
         n_stages=args.n_stages,
         base_alpha=args.base_alpha,
@@ -2503,7 +2482,7 @@ def main():
                 rank_print("[RETROACTIVE] Loss history missing 'tokens' field - estimating from steps")
                 if args.use_packing:
                     avg_seq_len = 300
-                    est_tokens_per_step = args.target_samples_per_batch * avg_seq_len * get_world_size()
+                    est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
                 else:
                     avg_seq_len = 300
                     est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
@@ -2519,7 +2498,7 @@ def main():
                 "learning_rate": args.learning_rate,
                 "use_packing": args.use_packing,
                 "batch_size": args.batch_size,
-                "target_samples": args.target_samples_per_batch,
+                "target_samples": args.batch_size,
                 "accuracy_threshold": args.accuracy_threshold,
             }
 
@@ -2581,10 +2560,6 @@ def main():
         dataloader_pin_memory=True,
 
         seed=args.seed if args.seed is not None else 42,
-
-        torch_compile=args.torch_compile,
-        torch_compile_backend="inductor",
-        torch_compile_mode="reduce-overhead",
 
         ddp_find_unused_parameters=False,
         gradient_checkpointing=args.gradient_checkpointing,
@@ -2674,7 +2649,7 @@ def main():
         "learning_rate": args.learning_rate,
         "use_packing": args.use_packing,
         "batch_size": args.batch_size,
-        "target_samples": args.target_samples_per_batch,
+        "target_samples": args.batch_size,
         "accuracy_threshold": args.accuracy_threshold,
     }
 
@@ -2724,16 +2699,15 @@ def main():
 
     if args.benchmark_steps > 0 and is_main_process():
         steps = args.benchmark_steps
-        # With packing, effective_batch_size=1 but real batch is args.batch_size rows per GPU
-        real_batch = args.batch_size
-        toks_per_step = args.pack_length * real_batch * get_world_size()
-        total_toks = toks_per_step * steps
-        toks_sec = total_toks / _bench_elapsed
         steps_sec = steps / _bench_elapsed
+        # Use actual tokens tracked during training (non-padding, across all GPUs)
+        actual_toks = curriculum.tokens_this_stage if hasattr(curriculum, 'tokens_this_stage') else 0
+        actual_toks_sec = actual_toks / _bench_elapsed if actual_toks > 0 else 0
+        actual_toks_per_step = actual_toks / steps if actual_toks > 0 else 0
         rank_print(f"\n[BENCHMARK] {steps} steps in {_bench_elapsed:.1f}s")
-        rank_print(f"[BENCHMARK] {steps_sec:.3f} steps/sec | {toks_sec:,.0f} tokens/sec ({toks_sec/1e6:.3f} Mtok/s)")
-        rank_print(f"[BENCHMARK] pack_length={args.pack_length} batch={real_batch} gpus={get_world_size()}")
-        rank_print(f"[BENCHMARK] compile={args.torch_compile} base_L={args.base_lookahead}")
+        rank_print(f"[BENCHMARK] {steps_sec:.3f} steps/sec | {actual_toks_sec:,.0f} actual_toks/sec ({actual_toks_sec/1e6:.3f} Mtok/s) | {actual_toks_per_step:,.0f} toks/step")
+        rank_print(f"[BENCHMARK] batch_size={args.batch_size} gpus={get_world_size()}")
+        rank_print(f"[BENCHMARK] base_L={args.base_lookahead}")
         # Report timing breakdown
         timing = trainer._train_timing
         n_timing = timing["steps"]
@@ -2742,16 +2716,27 @@ def main():
         wall_ms = data_wait_ms + compute_ms
         data_pct = (data_wait_ms / wall_ms * 100) if wall_ms > 0 else 0
         rank_print(f"[BENCHMARK] DataWait={data_wait_ms:.1f}ms ({data_pct:.1f}%) | Compute={compute_ms:.1f}ms | Wall={wall_ms:.1f}ms")
+        # Report peak VRAM usage
+        peak_alloc = torch.cuda.max_memory_allocated() / (1024**3)
+        peak_reserved = torch.cuda.max_memory_reserved() / (1024**3)
+        total_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        rank_print(f"[BENCHMARK] PeakVRAM: allocated={peak_alloc:.1f}GB reserved={peak_reserved:.1f}GB total={total_vram:.1f}GB headroom={total_vram-peak_reserved:.1f}GB")
         # Write benchmark result to file
         import json as _json
         bench_result = {
             "steps": steps, "elapsed_s": _bench_elapsed,
-            "steps_sec": steps_sec, "tokens_sec": toks_sec,
-            "pack_length": args.pack_length, "batch_size": real_batch,
-            "gpus": get_world_size(), "compile": args.torch_compile,
+            "steps_sec": steps_sec,
+            "actual_toks_sec": actual_toks_sec,
+            "actual_toks_per_step": actual_toks_per_step,
+            "batch_size": args.batch_size,
+            "gpus": get_world_size(),
             "base_lookahead": args.base_lookahead, "lookahead_step": args.lookahead_step,
             "data_wait_ms": data_wait_ms, "compute_ms": compute_ms,
             "data_wait_pct": data_pct,
+            "workers": int(os.environ.get("BENCH_NUM_WORKERS", 4)),
+            "peak_alloc_gb": round(peak_alloc, 2),
+            "peak_reserved_gb": round(peak_reserved, 2),
+            "total_vram_gb": round(total_vram, 2),
         }
         bench_path = os.path.join(args.output_dir, "benchmark_result.json")
         with open(bench_path, "w") as f:
@@ -2829,7 +2814,7 @@ def main():
         rank_print(f"[FINAL-EVAL] Verifying eval data: hard={fp_hard}, easy={fp_easy}")
         assert fp_hard == eval_fingerprint_hard, f"Hard eval fingerprint mismatch! {fp_hard} != {eval_fingerprint_hard}"
         assert fp_easy == eval_fingerprint_easy, f"Easy eval fingerprint mismatch! {fp_easy} != {eval_fingerprint_easy}"
-        rank_print(f"[FINAL-EVAL] Fingerprints verified ✓")
+        rank_print(f"[FINAL-EVAL] Fingerprints verified OK")
 
         greedy_hard = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
@@ -2862,38 +2847,35 @@ def main():
                     "greedy_easy": greedy_easy,
                 }, f, indent=2)
 
-    # ----- Redacted eval: sanity check (should be low) -----
+    # ----- Scrambled eval: sanity check (should be near baseline ~3%) -----
+    # Randomly permutes rule consequents so graph edges are nonsensical.
+    # If model truly does graph traversal, accuracy drops to baseline.
     if args.do_redacted_eval:
         trainer.model.eval()
 
-        # Verify we're using the hard eval data
         fp_hard = _eval_data_fingerprint(eval_inputs_hard, eval_labels_hard)
-        rank_print(f"[REDACTED-EVAL] Verifying source data: hard={fp_hard}")
+        rank_print(f"[SCRAMBLED-EVAL] Verifying source data: hard={fp_hard}")
         assert fp_hard == eval_fingerprint_hard, f"Hard eval fingerprint mismatch! {fp_hard} != {eval_fingerprint_hard}"
-        rank_print(f"[REDACTED-EVAL] Fingerprint verified ✓")
 
         red_n = args.eval_redacted_samples
         if red_n is None or red_n <= 0:
             red_n = args.eval_samples
 
-        # Redact the hard eval set (alpha=1.0)
-        red_inputs, red_labels = build_redacted_eval_set(
-            eval_inputs_hard, eval_labels_hard,
-            token=args.redaction_token,
-            max_n=red_n
+        scr_inputs, scr_labels = build_scrambled_eval_set(
+            eval_inputs_hard, eval_labels_hard, max_n=red_n
         )
 
-        if red_inputs:
-            red_result = run_eval_greedy_readable(
+        if scr_inputs:
+            scr_result = run_eval_greedy_readable(
                 trainer.model, tokenizer, args.task,
-                red_inputs, red_labels,
+                scr_inputs, scr_labels,
                 num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
                 print_examples=min(3, args.print_eval_examples), **task_kwargs
             )
             rank_print(
-                f"[REDACTED] First={red_result['first_token_acc']:.2%} | Full={red_result['full_word_acc']:.2%} | N={red_result['total']}")
+                f"[SCRAMBLED] First={scr_result['first_token_acc']:.2%} | Full={scr_result['full_word_acc']:.2%} | N={scr_result['total']}")
         else:
-            rank_print("[REDACTED-EVAL] Skipped (could not redact any eval items cleanly)")
+            rank_print("[SCRAMBLED-EVAL] Skipped (could not scramble any eval items)")
 
     if is_main_process():
         # Save final loss history

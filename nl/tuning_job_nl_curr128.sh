@@ -71,7 +71,7 @@ TASK="search"                    # si | dfs | search
 MODEL_NAME="Qwen/Qwen3-0.6B"
 
 # Training
-BATCH_SIZE=16
+BATCH_SIZE=96
 GRADIENT_ACCUMULATION_STEPS=1
 LEARNING_RATE=1e-4
 WARMUP_STEPS=100
@@ -117,7 +117,7 @@ DO_SEEN_EVAL=true                # Seen-samples sanity check (should be ~100%)
 DO_STAGE_EVAL=true              # Eval at α=1.0 after each stage advancement
 
 # Resume from previous job (leave empty for fresh start)
-PREV_JOB_ID=""
+PREV_JOB_ID="8265549"
 
 # ==========================================================
 
@@ -186,14 +186,11 @@ ARGS=(
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
 
     --use_packing
-    --pack_length 8192
-    --target_samples_per_batch 96
 
     --linear_lookahead
     --base_lookahead 16
     --lookahead_step 8
 
-    --torch_compile
 )
 
 # Conditional flags

@@ -8,7 +8,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
-#SBATCH -q normal
+#SBATCH -q preemptible
 #SBATCH --mail-user=huan2073@purdue.edu
 #SBATCH --mail-type=END,FAIL
 #SBATCH -o ./slurm/%j_%x.out
@@ -71,7 +71,7 @@ TASK="search"                    # si | dfs | search
 MODEL_NAME="Qwen/Qwen3-0.6B"
 
 # Training
-BATCH_SIZE=16
+BATCH_SIZE=96
 GRADIENT_ACCUMULATION_STEPS=1
 LEARNING_RATE=1e-4
 WARMUP_STEPS=100
@@ -186,14 +186,11 @@ ARGS=(
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
 
     --use_packing
-    --pack_length 8192
-    --target_samples_per_batch 96
 
     --linear_lookahead
     --base_lookahead 128
     --lookahead_step 0
 
-    --torch_compile
 )
 
 # Conditional flags

@@ -154,7 +154,6 @@ python -c "import generator" 2>/dev/null || {
 }
 
 # Set environment variables
-export HF_TOKEN="___HF_TOKEN___"
 
 # GPU optimizations for H100
 export CUDA_LAUNCH_BLOCKING=0

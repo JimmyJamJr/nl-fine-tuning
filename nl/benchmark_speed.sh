@@ -97,7 +97,7 @@ COMMON_ARGS=(
     --model_name "Qwen/Qwen3-0.6B"
     --cache_dir "$HF_HOME"
     --scratch_dir "$SCRATCH"
-    --batch_size 16
+    --batch_size 96
     --gradient_accumulation_steps 1
     --learning_rate 1e-4
     --warmup_steps 100
@@ -120,7 +120,6 @@ COMMON_ARGS=(
     --eval_samples 100
     --print_eval_examples 0
     --use_packing
-    --target_samples_per_batch 96
     --linear_lookahead
     --use_lora --lora_rank 16 --lora_dropout 0.10
     --gradient_checkpointing
@@ -146,7 +145,6 @@ for cfg in "${CONFIGS[@]}"; do
     RUN_ARGS=("${COMMON_ARGS[@]}"
         --output_dir "$BENCH_DIR"
         --job_id "$LABEL"
-        --pack_length "$PACK_LEN"
         --base_lookahead "$BASE_L"
         --lookahead_step "$L_STEP"
     )
