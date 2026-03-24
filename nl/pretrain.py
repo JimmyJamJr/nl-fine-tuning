@@ -183,6 +183,37 @@ def get_cosine_schedule_with_warmup(optimizer, warmup_steps: int, total_steps: i
     return LambdaLR(optimizer, lr_lambda)
 
 
+def get_synthetic_percent(step: int, total_steps: int, start_pct: float, end_pct: float,
+                          decay: str) -> float:
+    """Compute synthetic percentage at a given step based on decay schedule.
+
+    Args:
+        step: Current training step
+        total_steps: Total number of training steps
+        start_pct: Starting synthetic percentage (e.g., 0.50 for 50%)
+        end_pct: Ending synthetic percentage (e.g., 0.01 for 1%)
+        decay: Decay type - "none", "linear", "cosine", or "exponential"
+
+    Returns:
+        Synthetic percentage for this step
+    """
+    if decay == "none":
+        return start_pct
+
+    progress = float(step) / float(max(1, total_steps))
+
+    if decay == "linear":
+        return start_pct - (start_pct - end_pct) * progress
+    elif decay == "cosine":
+        # Cosine decay from start to end (smooth)
+        return end_pct + (start_pct - end_pct) * 0.5 * (1.0 + math.cos(math.pi * progress))
+    elif decay == "exponential":
+        # Exponential decay with rate tuned so we reach ~end_pct at total_steps
+        return end_pct + (start_pct - end_pct) * math.exp(-5.0 * progress)
+    else:
+        return start_pct
+
+
 def compute_lm_loss(logits: torch.Tensor, labels: torch.Tensor,
                     loss_mask: torch.Tensor) -> torch.Tensor:
     """Per-sequence averaged loss. Equivalent to global avg when all seqs equal length.
@@ -256,11 +287,14 @@ def restore_rng_state(rng_state: Dict[str, Any]) -> None:
 
 
 def write_train_log(log_path: Path, step: int, loss: float, lr: float,
-                    synthetic_count: int, c4_count: int) -> None:
+                    synthetic_count: int, c4_count: int,
+                    synthetic_pct: Optional[float] = None) -> None:
     entry = {
         "step": step, "loss": round(loss, 6), "lr": lr,
         "synthetic_count": synthetic_count, "c4_count": c4_count, "timestamp": time.time(),
     }
+    if synthetic_pct is not None:
+        entry["synthetic_pct"] = round(synthetic_pct, 4)
     with log_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -293,7 +327,13 @@ def build_argparser():
     p.add_argument("--synthetic_seed", type=int, default=99999,
                    help="Seed for synthetic generation (must differ from pre-pretraining seed)")
     p.add_argument("--synthetic_percent", type=float, default=0.05,
-                   help="Probability each example is synthetic (default: 5%%)")
+                   help="Fixed probability each example is synthetic (ignored if using decay schedule)")
+    p.add_argument("--synthetic_start_pct", type=float, default=None,
+                   help="Starting synthetic %% for decay schedule (e.g., 0.50 for 50%%)")
+    p.add_argument("--synthetic_end_pct", type=float, default=None,
+                   help="Ending synthetic %% for decay schedule (e.g., 0.01 for 1%%)")
+    p.add_argument("--synthetic_decay", type=str, choices=["none", "linear", "cosine", "exponential"],
+                   default="none", help="Decay schedule type for synthetic percentage")
 
     # Training hyperparameters
     p.add_argument("--total_steps", type=int, default=3100,
@@ -544,16 +584,34 @@ def main():
 
     effective_batch = args.micro_batch * args.grad_accum * world_size
     tokens_per_step = effective_batch * args.seq_len
+
+    # Set up synthetic schedule parameters
+    if args.synthetic_start_pct is not None and args.synthetic_end_pct is not None:
+        synthetic_start = args.synthetic_start_pct
+        synthetic_end = args.synthetic_end_pct
+        synthetic_decay = args.synthetic_decay if args.synthetic_decay != "none" else "linear"
+    else:
+        # Backwards compatibility: use fixed synthetic_percent
+        synthetic_start = args.synthetic_percent
+        synthetic_end = args.synthetic_percent
+        synthetic_decay = "none"
+
     if accelerator.is_main_process:
         print(f"Training from step {start_step} to {args.total_steps}", flush=True)
         print(f"  effective_batch={effective_batch} tokens_per_step={tokens_per_step:,}", flush=True)
         if args.use_synthetic_mix:
-            print(f"  synthetic_percent={args.synthetic_percent*100:.1f}%", flush=True)
+            if synthetic_decay == "none":
+                print(f"  synthetic_percent={synthetic_start*100:.1f}% (fixed)", flush=True)
+            else:
+                print(f"  synthetic_schedule={synthetic_decay} {synthetic_start*100:.1f}% -> {synthetic_end*100:.1f}%", flush=True)
 
     block_len = args.seq_len + 1  # 2049
 
     for step in range(start_step, args.total_steps):
         step_loss = 0.0
+        current_synthetic_pct = get_synthetic_percent(
+            step, args.total_steps, synthetic_start, synthetic_end, synthetic_decay
+        )
 
         for accum_idx in range(args.grad_accum):
             batch_blocks = []
@@ -568,7 +626,7 @@ def main():
                     decision_seed = (args.seed
                                      + step * args.grad_accum * args.micro_batch
                                      + accum_idx * args.micro_batch + b)
-                    use_synthetic = random.Random(decision_seed).random() < args.synthetic_percent
+                    use_synthetic = random.Random(decision_seed).random() < current_synthetic_pct
 
                 if use_synthetic:
                     block, attn_mask, loss_mask = synthetic_gen.get_example()
@@ -612,9 +670,10 @@ def main():
         optimizer.zero_grad()
 
         if accelerator.is_main_process and step % args.log_every == 0:
-            print(f"step={step} loss={step_loss:.4f} lr={scheduler.get_last_lr()[0]:.2e}", flush=True)
+            print(f"step={step} loss={step_loss:.4f} lr={scheduler.get_last_lr()[0]:.2e} syn_pct={current_synthetic_pct*100:.1f}%", flush=True)
             write_train_log(train_log_path, step=step, loss=step_loss, lr=scheduler.get_last_lr()[0],
-                            synthetic_count=synthetic_count, c4_count=c4_count)
+                            synthetic_count=synthetic_count, c4_count=c4_count,
+                            synthetic_pct=current_synthetic_pct)
 
         if args.save_every > 0 and (step + 1) % args.save_every == 0:
             ckpt = checkpoint_dir(run_dir, step + 1)
