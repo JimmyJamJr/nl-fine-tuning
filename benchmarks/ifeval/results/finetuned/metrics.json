@@ -1,0 +1,16 @@
+{
+  "benchmark": "ifeval",
+  "display_name": "IFEval",
+  "metrics": {
+    "inst_level_loose_acc,none": 0.5,
+    "inst_level_strict_acc,none": 0.5,
+    "prompt_level_loose_acc,none": 0.5,
+    "prompt_level_loose_acc_stderr,none": 0.5,
+    "prompt_level_strict_acc,none": 0.5,
+    "prompt_level_strict_acc_stderr,none": 0.5
+  },
+  "primary_metric_name": "prompt_level_loose_acc,none",
+  "primary_metric_value": 0.5,
+  "raw_results_path": "/home/ray/nl-fine-tuning/benchmarks/ifeval/results/finetuned/JimmyJamJr__qwen06b-search-curr-L128/results_2026-03-30T23-24-57.321117.json",
+  "task_name": "ifeval"
+}

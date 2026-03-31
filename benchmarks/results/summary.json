@@ -1,0 +1,52 @@
+{
+  "benchmarks": [
+    {
+      "benchmark": "ifeval",
+      "display_name": "IFEval",
+      "primary_metric_name": "prompt_level_loose_acc,none",
+      "primary_metric_delta": -0.17375231053604437,
+      "base_primary_metric_value": 0.31608133086876156,
+      "base_primary_metric_passed": 171,
+      "base_primary_metric_total": 541,
+      "finetuned_primary_metric_value": 0.1423290203327172,
+      "finetuned_primary_metric_passed": 77,
+      "finetuned_primary_metric_total": 541
+    },
+    {
+      "benchmark": "ifbench",
+      "display_name": "IFBench",
+      "primary_metric_name": "prompt_level_loose_accuracy",
+      "primary_metric_delta": 0.16666666666666669,
+      "base_primary_metric_value": 0.11,
+      "base_primary_metric_passed": 33,
+      "base_primary_metric_total": 300,
+      "finetuned_primary_metric_value": 0.27666666666666667,
+      "finetuned_primary_metric_passed": 83,
+      "finetuned_primary_metric_total": 300
+    },
+    {
+      "benchmark": "bbh",
+      "display_name": "BigBenchHard",
+      "primary_metric_name": "exact_match,get-answer",
+      "primary_metric_delta": -0.001535862386730149,
+      "base_primary_metric_value": 0.001535862386730149,
+      "base_primary_metric_passed": 10,
+      "base_primary_metric_total": 6511,
+      "finetuned_primary_metric_value": 0.0,
+      "finetuned_primary_metric_passed": 0,
+      "finetuned_primary_metric_total": 6511
+    },
+    {
+      "benchmark": "agieval_en",
+      "display_name": "AGI Eval English",
+      "primary_metric_name": "acc,none",
+      "primary_metric_delta": -0.02180685358255451,
+      "base_primary_metric_value": 0.18977154724818276,
+      "base_primary_metric_passed": 731,
+      "base_primary_metric_total": 3852,
+      "finetuned_primary_metric_value": 0.16796469366562825,
+      "finetuned_primary_metric_passed": 647,
+      "finetuned_primary_metric_total": 3852
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+Command:
+/home/ray/anaconda3/envs/qwen-ifbench/bin/python -m run_eval --input_data=/home/ray/nl-fine-tuning/benchmarks/ifbench/results/finetuned/ifbench_test.jsonl --input_response_data=/home/ray/nl-fine-tuning/benchmarks/ifbench/results/finetuned/finetuned-responses.jsonl --output_dir=/home/ray/nl-fine-tuning/benchmarks/ifbench/results/finetuned/eval
+
+/home/ray/anaconda3/envs/qwen-ifbench/lib/python3.11/site-packages/syllapy/data_loader.py:3: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+I0330 23:28:56.319910 136900351301440 run_eval.py:56] Generating eval_results_strict...
+I0330 23:28:56.573778 136900351301440 run_eval.py:62] Accuracy: 0.276667
+I0330 23:28:56.581702 136900351301440 run_eval.py:76] Generated: /home/ray/nl-fine-tuning/benchmarks/ifbench/results/finetuned/eval/finetuned-eval_results_strict.jsonl
+I0330 23:28:56.582421 136900351301440 run_eval.py:56] Generating eval_results_loose...
+I0330 23:28:56.757576 136900351301440 run_eval.py:62] Accuracy: 0.276667
+I0330 23:28:56.765194 136900351301440 run_eval.py:76] Generated: /home/ray/nl-fine-tuning/benchmarks/ifbench/results/finetuned/eval/finetuned-eval_results_loose.jsonl
+================================================================
+/home/ray/nl-fine-tuning/benchmarks/ifbench/results/finetuned/eval/finetuned-eval_results_strict.jsonl Accuracy Scores:
+prompt-level: 0.27666666666666667
+instruction-level: 0.3081395348837209
+
+count 0.06153846153846154
+custom 0.0
+format 0.35714285714285715
+ratio 0.38636363636363635
+repeat 0.0
+sentence 0.42857142857142855
+words 0.42696629213483145
+
+count:conjunctions 0.0
+count:keywords_multiple 0.0
+count:numbers 0.0
+count:person_names 0.0
+count:pronouns 0.0
+count:punctuation 0.0
+count:unique_word_count 0.0
+count:word_count_range 0.0
+count:words_japanese 0.8
+custom:character_reverse 0.0
+custom:csv_city 0.0
+custom:csv_quotes 0.0
+custom:csv_special_character 0.0
+custom:date_format_list 0.0
+custom:european_capitals_sort 0.0
+custom:mcq_count_length 0.0
+custom:multiples 0.0
+custom:reverse_newline 0.0
+custom:sentence_alphabet 0.0
+custom:word_reverse 0.0
+format:emoji 0.0
+format:line_indent 1.0
+format:list 0.1111111111111111
+format:newline 0.8333333333333334
+format:no_bullets_bullets 0.0
+format:no_whitespace 0.0
+format:options 0.0
+format:output_template 0.0
+format:parentheses 0.0
+format:quote_unquote 1.0
+format:quotes 0.0
+format:sub-bullets 1.0
+format:thesis 0.0
+format:title_case 0.75
+ratio:overlap 0.08333333333333333
+ratio:sentence_balance 0.8571428571428571
+ratio:sentence_type 0.3333333333333333
+ratio:sentence_words 0.0
+ratio:stop_words 0.6666666666666666
+repeat:repeat_change 0.0
+repeat:repeat_simple 0.0
+repeat:repeat_span 0.0
+sentence:alliteration_increment 1.0
+sentence:increment 0.875
+sentence:keyword 0.0
+words:alphabet 0.0
+words:consonants 0.0
+words:keywords_specific_position 0.0
+words:last_first 0.8
+words:no_consecutive 1.0
+words:odd_even_syllables 0.7777777777777778
+words:palindrome 0.0
+words:paragraph_last_first 0.5
+words:prime_lengths 0.2
+words:repeats 0.8
+words:start_verb 0.16666666666666666
+words:vowel 1.0
+words:words_position 0.0
+================================================================
+/home/ray/nl-fine-tuning/benchmarks/ifbench/results/finetuned/eval/finetuned-eval_results_loose.jsonl Accuracy Scores:
+prompt-level: 0.27666666666666667
+instruction-level: 0.3081395348837209
+
+count 0.06153846153846154
+custom 0.0
+format 0.35714285714285715
+ratio 0.38636363636363635
+repeat 0.0
+sentence 0.42857142857142855
+words 0.42696629213483145
+
+count:conjunctions 0.0
+count:keywords_multiple 0.0
+count:numbers 0.0
+count:person_names 0.0
+count:pronouns 0.0
+count:punctuation 0.0
+count:unique_word_count 0.0
+count:word_count_range 0.0
+count:words_japanese 0.8
+custom:character_reverse 0.0
+custom:csv_city 0.0
+custom:csv_quotes 0.0
+custom:csv_special_character 0.0
+custom:date_format_list 0.0
+custom:european_capitals_sort 0.0
+custom:mcq_count_length 0.0
+custom:multiples 0.0
+custom:reverse_newline 0.0
+custom:sentence_alphabet 0.0
+custom:word_reverse 0.0
+format:emoji 0.0
+format:line_indent 1.0
+format:list 0.1111111111111111
+format:newline 0.8333333333333334
+format:no_bullets_bullets 0.0
+format:no_whitespace 0.0
+format:options 0.0
+format:output_template 0.0
+format:parentheses 0.0
+format:quote_unquote 1.0
+format:quotes 0.0
+format:sub-bullets 1.0
+format:thesis 0.0
+format:title_case 0.75
+ratio:overlap 0.08333333333333333
+ratio:sentence_balance 0.8571428571428571
+ratio:sentence_type 0.3333333333333333
+ratio:sentence_words 0.0
+ratio:stop_words 0.6666666666666666
+repeat:repeat_change 0.0
+repeat:repeat_simple 0.0
+repeat:repeat_span 0.0
+sentence:alliteration_increment 1.0
+sentence:increment 0.875
+sentence:keyword 0.0
+words:alphabet 0.0
+words:consonants 0.0
+words:keywords_specific_position 0.0
+words:last_first 0.8
+words:no_consecutive 1.0
+words:odd_even_syllables 0.7777777777777778
+words:palindrome 0.0
+words:paragraph_last_first 0.5
+words:prime_lengths 0.2
+words:repeats 0.8
+words:start_verb 0.16666666666666666
+words:vowel 1.0
+words:words_position 0.0
