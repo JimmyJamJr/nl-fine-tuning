@@ -107,7 +107,7 @@ class NameAttributeGenerator:
 
     def __init__(self, seed=None):
         self.fake = Faker()
-        if seed:
+        if seed is not None:
             Faker.seed(seed)
             random.seed(seed)
         self.fake.unique.clear()
@@ -178,7 +178,7 @@ class NaturalLanguageGraphGenerator:
         self.max_input_size = max_input_size
         self.seed = seed
         self.debug = debug
-        if seed:
+        if seed is not None:
             generator.set_seed(seed)
             random.seed(seed)
             np.random.seed(seed)

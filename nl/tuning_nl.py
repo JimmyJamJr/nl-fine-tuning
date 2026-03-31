@@ -142,7 +142,10 @@ def set_all_seeds(seed: int, deterministic: bool = False):
 def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int, wall_time_offset: float = 0.0,
                            first_token_correct=None, full_word_correct=None,
                            recent_losses=None, samples_this_stage: int = 0,
-                           tokens_this_stage: int = 0) -> None:
+                           tokens_this_stage: int = 0,
+                           lr_reset_step: int = None,
+                           batch_increase_count: int = None,
+                           plateau_last_spike_step: int = None) -> None:
     try:
         os.makedirs(dirpath, exist_ok=True)
         fp = os.path.join(dirpath, "curriculum_state.json")
@@ -153,6 +156,12 @@ def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int, wall
             "samples_this_stage": int(samples_this_stage),
             "tokens_this_stage": int(tokens_this_stage),
         }
+        if lr_reset_step is not None:
+            data["lr_reset_step"] = int(lr_reset_step)
+        if batch_increase_count is not None:
+            data["batch_increase_count"] = int(batch_increase_count)
+        if plateau_last_spike_step is not None:
+            data["plateau_last_spike_step"] = int(plateau_last_spike_step)
         if first_token_correct is not None:
             data["first_token_correct"] = list(first_token_correct)
         if full_word_correct is not None:
@@ -196,6 +205,70 @@ def _save_run_config(dirpath: str, bs: int, gas: int, port: int = None) -> None:
         sys.stdout.flush()
 
 
+# ================== Loss history persistence (JSONL) ==================
+
+def _atomic_write_json(path, data):
+    """Write JSON atomically: write to tmp, fsync, rename."""
+    tmp_path = path + f".tmp.{os.getpid()}"
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _append_to_jsonl(dirpath, entries):
+    """Append loss entries to loss_history.jsonl (append-only persistence)."""
+    path = os.path.join(dirpath, "loss_history.jsonl")
+    with open(path, "a") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, separators=(',', ':')) + "\n")
+        f.flush()
+
+
+def _load_from_jsonl(dirpath, max_step=None):
+    """Load loss entries from JSONL file, optionally truncating to max_step.
+
+    Returns list of entries, or None if file doesn't exist.
+    Gracefully handles corrupted lines (from crashes mid-write).
+    """
+    path = os.path.join(dirpath, "loss_history.jsonl")
+    if not os.path.isfile(path):
+        return None
+    entries = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if max_step is None or entry.get("step", 0) <= max_step:
+                    entries.append(entry)
+            except json.JSONDecodeError:
+                continue  # Skip corrupted trailing line from crash
+    return entries if entries else None
+
+
+def _rewrite_jsonl(dirpath, entries):
+    """Rewrite JSONL file with given entries (used after truncation on resume)."""
+    path = os.path.join(dirpath, "loss_history.jsonl")
+    tmp_path = path + f".tmp.{os.getpid()}"
+    with open(tmp_path, "w") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, separators=(',', ':')) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.rename(tmp_path, path)
+
+
 def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> bool:
     if not path:
         return False
@@ -215,46 +288,81 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
         }
         curriculum.samples_this_stage = int(cs.get("samples_this_stage", 0))
         curriculum.tokens_this_stage = int(cs.get("tokens_this_stage", 0))
+        if cs.get("lr_reset_step") is not None:
+            curriculum.lr_reset_step = int(cs["lr_reset_step"])
+        if cs.get("batch_increase_count") is not None:
+            curriculum.batch_increase_count = int(cs["batch_increase_count"])
+        if cs.get("plateau_last_spike_step") is not None:
+            curriculum.plateau_last_spike_step = int(cs["plateau_last_spike_step"])
         rank_print(
             f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step}, wall_time_offset={curriculum.wall_time_offset:.1f}s from {fp}")
     except Exception as e:
         rank_print(f"[CURRICULUM][WARN] Failed to restore from {fp}: {e}")
         return False
 
-    # Restore loss history
-    loss_path = os.path.join(os.path.dirname(path), "loss_history.json")
-    if os.path.isfile(loss_path):
-        try:
-            with open(loss_path) as f:
-                curriculum.loss_history = json.load(f)
-            rank_print(f"[CURRICULUM] Restored {len(curriculum.loss_history)} loss history records")
+    # Restore loss history — prefer JSONL (has entries between checkpoint saves)
+    output_dir = os.path.dirname(path)
+    resume_step_from_ckpt = 0
+    ckpt_match = re.search(r'checkpoint-(\d+)', path)
+    if ckpt_match:
+        resume_step_from_ckpt = int(ckpt_match.group(1))
+    else:
+        # Fallback: try to extract step from trainer_state.json in checkpoint dir
+        ts_path = os.path.join(path, "trainer_state.json")
+        if os.path.isfile(ts_path):
+            try:
+                with open(ts_path) as f:
+                    ts = json.load(f)
+                resume_step_from_ckpt = int(ts.get("global_step", 0))
+                rank_print(f"[CURRICULUM] Extracted step {resume_step_from_ckpt} from trainer_state.json")
+            except Exception:
+                pass
+        if resume_step_from_ckpt == 0:
+            # Last resort: use step from curriculum_state.json that we just loaded
+            resume_step_from_ckpt = curriculum.stage_start_step or 0
+            rank_print(f"[CURRICULUM][WARN] Could not extract step from checkpoint path, using {resume_step_from_ckpt}")
 
-            # Update wall_time_offset from last recorded entry if available
-            if curriculum.loss_history:
-                last_wall_time = curriculum.loss_history[-1].get("wall_time", 0.0)
-                if last_wall_time > curriculum.wall_time_offset:
-                    curriculum.wall_time_offset = last_wall_time
-                    rank_print(f"[CURRICULUM] Updated wall_time_offset to {last_wall_time:.1f}s from loss history")
+    # Load from JSONL first (has entries between checkpoint saves), fall back to JSON
+    # NOTE: We only READ here — JSONL is written to the actual output_dir by the caller
+    jsonl_entries = _load_from_jsonl(output_dir, max_step=resume_step_from_ckpt)
+    if jsonl_entries:
+        # Filter out legacy fake resume entries (tokens=0, resume=True)
+        curriculum.loss_history = [
+            h for h in jsonl_entries
+            if not (h.get("resume") and h.get("tokens", -1) == 0)
+        ]
+        rank_print(f"[CURRICULUM] Restored {len(curriculum.loss_history)} loss records from JSONL (truncated to step {resume_step_from_ckpt})")
+    else:
+        # Fall back to loss_history.json
+        loss_path = os.path.join(output_dir, "loss_history.json")
+        if os.path.isfile(loss_path):
+            try:
+                with open(loss_path) as f:
+                    loaded = json.load(f)
+                # Filter out legacy fake resume entries and entries beyond checkpoint
+                curriculum.loss_history = [
+                    h for h in loaded
+                    if h.get("step", 0) <= resume_step_from_ckpt
+                    and not (h.get("resume") and h.get("tokens", -1) == 0)
+                ]
+                rank_print(f"[CURRICULUM] Restored {len(curriculum.loss_history)} loss records from JSON")
+            except Exception as e:
+                rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
 
-                # Mark resume point in loss history
-                last_entry = curriculum.loss_history[-1]
-                curriculum.loss_history.append({
-                    "step": last_entry.get("step", 0),
-                    "loss": last_entry.get("loss", 0),
-                    "stage": last_entry.get("stage", 1),
-                    "alpha": last_entry.get("alpha", 0),
-                    "effective_L": last_entry.get("effective_L"),
-                    "tokens": 0,
-                    "wall_time": last_wall_time,
-                    "achieved_tflops": 0,
-                    "resume": True,
-                })
-                rank_print(f"[CURRICULUM] Marked resume point at step {last_entry.get('step', 0)}")
+    if curriculum.loss_history:
+        # Update wall_time_offset from last recorded entry
+        last_wall_time = curriculum.loss_history[-1].get("wall_time", 0.0)
+        if last_wall_time > curriculum.wall_time_offset:
+            curriculum.wall_time_offset = last_wall_time
+            rank_print(f"[CURRICULUM] Updated wall_time_offset to {last_wall_time:.1f}s from loss history")
 
-                # Set _last_persist_step so we don't re-persist old steps on resume
-                curriculum._last_persist_step = last_entry.get("step", 0)
-        except Exception as e:
-            rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
+        # Flag to mark the first new entry as a resume point (real data, not fake entry)
+        curriculum._mark_next_as_resume = True
+        curriculum.resume_points.append(resume_step_from_ckpt)
+        rank_print(f"[CURRICULUM] Will mark next entry as resume point (step ~{resume_step_from_ckpt})")
+
+        # Set _last_persist_step so we don't re-persist old steps on resume
+        curriculum._last_persist_step = curriculum.loss_history[-1].get("step", 0)
 
     # Restore stage eval history
     stage_eval_path = os.path.join(os.path.dirname(path), "stage_eval_history.json")
@@ -824,7 +932,7 @@ class PackedSequenceDataset(Dataset):
 class PackedSequenceTrainer(Trainer):
     """
     Trainer for packed sequences using Flash Attention varlen.
-    Properly handles Qwen3's RoPE implementation.
+    Supports Qwen and GPT-NeoX (Pythia) architectures.
     """
 
     def __init__(self, *args, first_token_soft_weight=0.3, accuracy_window=200, ce_chunk_size=4096, **kwargs):
@@ -839,6 +947,27 @@ class PackedSequenceTrainer(Trainer):
         self._last_batch_tokens = 0
         self._last_efficiency = None
 
+    def _load_optimizer_and_scheduler(self, checkpoint):
+        """Override to handle scheduler state mismatches gracefully (e.g. when
+        switching from constant to stage_schedule between runs)."""
+        try:
+            super()._load_optimizer_and_scheduler(checkpoint)
+        except (KeyError, TypeError, ValueError) as e:
+            # Scheduler state from checkpoint is incompatible — load optimizer only
+            if is_main_process():
+                rank_print(f"[WARN] Scheduler state incompatible ({e}), loading optimizer only. "
+                           f"Scheduler will be recreated by stage_schedule.")
+            import os
+            if checkpoint:
+                sched_path = os.path.join(checkpoint, "scheduler.pt")
+                sched_bak = sched_path + ".bak"
+                if os.path.exists(sched_path):
+                    os.rename(sched_path, sched_bak)
+                    try:
+                        super()._load_optimizer_and_scheduler(checkpoint)
+                    finally:
+                        os.rename(sched_bak, sched_path)
+
         # Accumulate across micro-batches within one optimizer step (for grad_acc > 1)
         self._step_samples = 0
         self._step_tokens = 0
@@ -852,12 +981,19 @@ class PackedSequenceTrainer(Trainer):
         self._step_start_time: Optional[float] = None
         self._step_end_time: Optional[float] = None
 
-        # Import Qwen3's RoPE implementation
-        try:
-            from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb as qwen_apply_rope
-            self._qwen_apply_rope = qwen_apply_rope
-        except ImportError:
-            self._qwen_apply_rope = None
+        # Import RoPE implementation (try multiple model backends)
+        self._apply_rope = None
+        for rope_module in [
+            'transformers.models.qwen3.modeling_qwen3',
+            'transformers.models.gpt_neox.modeling_gpt_neox',
+            'transformers.models.llama.modeling_llama',
+        ]:
+            try:
+                mod = __import__(rope_module, fromlist=['apply_rotary_pos_emb'])
+                self._apply_rope = mod.apply_rotary_pos_emb
+                break
+            except (ImportError, AttributeError):
+                continue
 
         # Cached model internals (populated on first compute_loss call)
         self._cached_model_parts = None
@@ -918,41 +1054,64 @@ class PackedSequenceTrainer(Trainer):
         self._step_end_time = None
 
     def _forward_layer_varlen(self, layer, hidden_states, cu_seqlens, max_seqlen,
-                              num_heads, num_kv_heads, head_dim, cos, sin):
-        """Forward one layer using flash_attn_varlen_func with Qwen3 compatibility."""
+                              num_heads, num_kv_heads, head_dim, cos, sin,
+                              arch='qwen', parallel_residual=False, rotary_ndims=None):
+        """Forward one layer using flash_attn_varlen_func. Supports Qwen and GPT-NeoX."""
 
         seq_len = hidden_states.shape[0]
 
         residual = hidden_states
-        hidden_states = layer.input_layernorm(hidden_states)
+        ln1_out = layer.input_layernorm(hidden_states)
 
-        # QKV projection - hidden_states is [seq_len, H]
-        q = layer.self_attn.q_proj(hidden_states)
-        k = layer.self_attn.k_proj(hidden_states)
-        v = layer.self_attn.v_proj(hidden_states)
-
-        # Reshape: [seq_len, num_heads, head_dim]
-        q = q.view(seq_len, num_heads, head_dim)
-        k = k.view(seq_len, num_kv_heads, head_dim)
-        v = v.view(seq_len, num_kv_heads, head_dim)
+        # QKV projection
+        if arch == 'gpt_neox':
+            # GPT-NeoX uses interleaved QKV: [q1|k1|v1 | q2|k2|v2 | ...] per head
+            qkv = layer.attention.query_key_value(ln1_out)  # [seq, 3 * H]
+            qkv = qkv.view(seq_len, num_heads, 3 * head_dim)
+            q = qkv[..., :head_dim]              # [seq, num_heads, head_dim]
+            k = qkv[..., head_dim:2*head_dim]
+            v = qkv[..., 2*head_dim:]
+        else:
+            q = layer.self_attn.q_proj(ln1_out)
+            k = layer.self_attn.k_proj(ln1_out)
+            v = layer.self_attn.v_proj(ln1_out)
+            # Reshape: [seq_len, num_heads, head_dim]
+            q = q.view(seq_len, num_heads, head_dim)
+            k = k.view(seq_len, num_kv_heads, head_dim)
+            v = v.view(seq_len, num_kv_heads, head_dim)
 
         # QK Normalization (Qwen3 specific)
-        if hasattr(layer.self_attn, 'q_norm') and layer.self_attn.q_norm is not None:
-            q = layer.self_attn.q_norm(q)
-            k = layer.self_attn.k_norm(k)
+        if arch == 'qwen':
+            if hasattr(layer.self_attn, 'q_norm') and layer.self_attn.q_norm is not None:
+                q = layer.self_attn.q_norm(q)
+                k = layer.self_attn.k_norm(k)
 
         # Add batch dim and transpose for RoPE: [1, num_heads, seq_len, head_dim]
         q = q.unsqueeze(0).transpose(1, 2)
         k = k.unsqueeze(0).transpose(1, 2)
 
+        # Handle partial RoPE (e.g. Pythia rotary_pct=0.25)
+        partial_rope = rotary_ndims is not None and rotary_ndims < head_dim
+        if partial_rope:
+            q_rot, q_pass = q[..., :rotary_ndims], q[..., rotary_ndims:]
+            k_rot, k_pass = k[..., :rotary_ndims], k[..., rotary_ndims:]
+        else:
+            q_rot, k_rot = q, k
+
         # Apply pre-computed RoPE cos/sin
-        if self._qwen_apply_rope is not None:
-            q, k = self._qwen_apply_rope(q, k, cos, sin)
+        if self._apply_rope is not None:
+            q_rot, k_rot = self._apply_rope(q_rot, k_rot, cos, sin)
         else:
             cos_u = cos.unsqueeze(1)
             sin_u = sin.unsqueeze(1)
-            q = (q * cos_u) + (self._rotate_half(q) * sin_u)
-            k = (k * cos_u) + (self._rotate_half(k) * sin_u)
+            q_rot = (q_rot * cos_u) + (self._rotate_half(q_rot) * sin_u)
+            k_rot = (k_rot * cos_u) + (self._rotate_half(k_rot) * sin_u)
+
+        if partial_rope:
+            q = torch.cat((q_rot, q_pass), dim=-1)
+            k = torch.cat((k_rot, k_pass), dim=-1)
+        else:
+            q, k = q_rot, k_rot
 
         # Reshape for flash_attn_varlen: [seq_len, num_heads, head_dim]
         q = q.squeeze(0).transpose(0, 1).contiguous()
@@ -971,15 +1130,24 @@ class PackedSequenceTrainer(Trainer):
 
         # Output projection
         attn_output = attn_output.reshape(seq_len, num_heads * head_dim)
-        attn_output = layer.self_attn.o_proj(attn_output)
+        if arch == 'gpt_neox':
+            attn_output = layer.attention.dense(attn_output)
+        else:
+            attn_output = layer.self_attn.o_proj(attn_output)
 
-        hidden_states = residual + attn_output
-
-        # MLP
-        residual = hidden_states
-        hidden_states = layer.post_attention_layernorm(hidden_states)
-        hidden_states = layer.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        # Residual + MLP
+        if parallel_residual:
+            # GPT-NeoX parallel: x = x + attn(ln1(x)) + mlp(ln2(x))
+            ln2_out = layer.post_attention_layernorm(residual)
+            mlp_output = layer.mlp(ln2_out)
+            hidden_states = residual + attn_output + mlp_output
+        else:
+            # Sequential (Qwen/Llama): x = x + attn(ln1(x)); x = x + mlp(ln2(x))
+            hidden_states = residual + attn_output
+            residual = hidden_states
+            hidden_states = layer.post_attention_layernorm(hidden_states)
+            hidden_states = layer.mlp(hidden_states)
+            hidden_states = residual + hidden_states
 
         return hidden_states
 
@@ -1002,19 +1170,44 @@ class PackedSequenceTrainer(Trainer):
                 unwrapped = unwrapped.base_model.model
         except ImportError:
             pass
-        inner = unwrapped.model
-        if not hasattr(inner, 'embed_tokens') and hasattr(inner, 'model'):
-            inner = inner.model
         config = unwrapped.config
+
+        # Auto-detect architecture
+        if hasattr(unwrapped, 'gpt_neox'):
+            # GPT-NeoX (Pythia)
+            inner = unwrapped.gpt_neox
+            arch = 'gpt_neox'
+            embed = inner.embed_in
+            norm = inner.final_layer_norm
+            lm_head = unwrapped.embed_out
+            parallel_residual = getattr(config, 'use_parallel_residual', True)
+        else:
+            # Qwen / Llama-style
+            inner = unwrapped.model
+            if not hasattr(inner, 'embed_tokens') and hasattr(inner, 'model'):
+                inner = inner.model
+            arch = 'qwen'
+            embed = inner.embed_tokens
+            norm = inner.norm
+            lm_head = unwrapped.lm_head
+            parallel_residual = False
+
+        head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
+        rotary_pct = getattr(config, 'rotary_pct', 1.0)
+        rotary_ndims = int(head_dim * rotary_pct) if rotary_pct < 1.0 else head_dim
+
         self._cached_model_parts = {
-            'embed_tokens': inner.embed_tokens,
+            'arch': arch,
+            'embed': embed,
             'layers': inner.layers,
-            'norm': inner.norm,
+            'norm': norm,
             'rotary_emb': inner.rotary_emb,
-            'lm_head': unwrapped.lm_head,
+            'lm_head': lm_head,
             'num_heads': config.num_attention_heads,
             'num_kv_heads': getattr(config, "num_key_value_heads", config.num_attention_heads),
-            'head_dim': getattr(config, "head_dim", config.hidden_size // config.num_attention_heads),
+            'head_dim': head_dim,
+            'rotary_ndims': rotary_ndims,
+            'parallel_residual': parallel_residual,
         }
         return self._cached_model_parts
 
@@ -1044,7 +1237,7 @@ class PackedSequenceTrainer(Trainer):
 
         # Cached model internals (avoids unwrapping every step)
         mp = self._get_model_parts(model)
-        embed_tokens = mp['embed_tokens']
+        embed = mp['embed']
         layers = mp['layers']
         norm = mp['norm']
         rotary_emb = mp['rotary_emb']
@@ -1052,6 +1245,9 @@ class PackedSequenceTrainer(Trainer):
         num_heads = mp['num_heads']
         num_kv_heads = mp['num_kv_heads']
         head_dim = mp['head_dim']
+        arch = mp['arch']
+        parallel_residual = mp['parallel_residual']
+        rotary_ndims = mp['rotary_ndims']
 
         # Single row, no padding — directly use the tensors
         flat_ids = input_ids[0]           # [total_tokens]
@@ -1060,8 +1256,9 @@ class PackedSequenceTrainer(Trainer):
         merged_cu = torch.tensor(cu_seqlens_list[0], dtype=torch.int32, device=device)
         global_max_seqlen = max_seqlen_list[0]
 
+        # Custom layer-by-layer forward with flash_attn_varlen_func
         # Embed tokens
-        h = embed_tokens(flat_ids)  # [total_tokens, H]
+        h = embed(flat_ids)  # [total_tokens, H]
 
         # Compute RoPE cos/sin once (same for all layers)
         cos, sin = rotary_emb(h, all_pos)
@@ -1072,14 +1269,14 @@ class PackedSequenceTrainer(Trainer):
                     self._forward_layer_varlen,
                     layer, h, merged_cu, global_max_seqlen,
                     num_heads, num_kv_heads, head_dim,
-                    cos, sin,
+                    cos, sin, arch, parallel_residual, rotary_ndims,
                     use_reentrant=False,
                 )
             else:
                 h = self._forward_layer_varlen(
                     layer, h, merged_cu, global_max_seqlen,
                     num_heads, num_kv_heads, head_dim,
-                    cos, sin,
+                    cos, sin, arch, parallel_residual, rotary_ndims,
                 )
 
         h = norm(h)          # [total_tokens, H]
@@ -1396,6 +1593,23 @@ class FirstTokenCurriculum(TrainerCallback):
             max_input_size: int = 256,
             seed: int = None,
             persist_every: int = 2000,
+            print_examples: int = 0,
+            lr_reset_on_stage: bool = False,
+            lr_reset_warmup: int = 50,
+            peak_lr: float = 1e-4,
+            stage_schedule: str = "none",
+            cosine_t_max: int = 3000,
+            cosine_t0: int = 10000,
+            cosine_t_mult: int = 2,
+            cosine_eta_min_ratio: float = 0.01,
+            batch_increase_factor: float = 2.0,
+            lr_spike_factor: float = 5.0,
+            lr_spike_steps: int = 200,
+            plateau_spike: bool = False,
+            plateau_action: str = "lr_spike",  # "lr_spike" or "batch_increase"
+            plateau_window: int = 5000,
+            plateau_threshold: float = 0.02,
+            plateau_cooldown: int = 10000,
     ):
         self.dataset = dataset
         self.n_stages = n_stages
@@ -1407,6 +1621,32 @@ class FirstTokenCurriculum(TrainerCallback):
         self.stage_start_step = 0
         self._last_log = -1
         self.finished = False
+        # Backward compat: --lr_reset_on_stage maps to stage_schedule=warmup_reset
+        if lr_reset_on_stage and stage_schedule == "none":
+            stage_schedule = "warmup_reset"
+        self.stage_schedule = stage_schedule
+        self.lr_reset_warmup = lr_reset_warmup
+        self.peak_lr = peak_lr
+        self.lr_reset_step = None  # global_step when LR was last reset/changed
+        # Cosine decay params
+        self.cosine_t_max = cosine_t_max
+        self.cosine_t0 = cosine_t0
+        self.cosine_t_mult = cosine_t_mult
+        self.cosine_eta_min_ratio = cosine_eta_min_ratio
+        # Batch increase params
+        self.batch_increase_factor = batch_increase_factor
+        self.batch_increase_count = 0  # how many times we've increased
+        # LR spike params
+        self.lr_spike_factor = lr_spike_factor
+        self.lr_spike_steps = lr_spike_steps
+        # Plateau-triggered params
+        self.plateau_spike = plateau_spike
+        self.plateau_action = plateau_action
+        self.plateau_window = plateau_window
+        self.plateau_threshold = plateau_threshold
+        self.plateau_cooldown = plateau_cooldown
+        self.plateau_last_spike_step = -plateau_cooldown  # allow spike from the start
+        self.plateau_acc_history = []  # list of (step, full_word_acc)
 
         # Speed tracking
         self.stage_start_time = None
@@ -1429,6 +1669,7 @@ class FirstTokenCurriculum(TrainerCallback):
         self.num_shots = num_shots
         self.max_input_size = max_input_size
         self.seed = seed
+        self.print_examples = print_examples
         self.stage_eval_history = []
 
         # Loss tracking
@@ -1441,6 +1682,271 @@ class FirstTokenCurriculum(TrainerCallback):
         self.plot_metadata = None  # Set after trainer creation
         self.persist_every = persist_every
         self._last_persist_step = 0
+
+        # Resume tracking (resume markers are real entries with "resume" flag, not fake data)
+        self.resume_points = []  # List of step numbers where resumes occurred
+        self._mark_next_as_resume = False  # Flag to mark next entry as resume point
+
+        # JSONL incremental persistence (survives preemption between checkpoint saves)
+        self._jsonl_buffer = []
+        self._jsonl_flush_every = 10  # Flush to disk every N entries
+
+    def _check_plateau_spike(self, state):
+        """Check if accuracy has plateaued, and if so spike LR temporarily."""
+        if not self.plateau_spike:
+            return
+        # Don't spike if we're already in a spike (lr_spike schedule active)
+        if self.lr_reset_step is not None and self.stage_schedule == "lr_spike":
+            steps_since = state.global_step - self.lr_reset_step
+            if steps_since < self.lr_spike_steps:
+                return
+        # Cooldown check
+        if state.global_step - self.plateau_last_spike_step < self.plateau_cooldown:
+            return
+        # Record current accuracy
+        fw = self.trainer.get_full_word_acc()
+        self.plateau_acc_history.append((state.global_step, fw))
+        # Need enough history
+        if len(self.plateau_acc_history) < 2:
+            return
+        # Check if we have data spanning plateau_window steps
+        oldest_step = self.plateau_acc_history[0][0]
+        if state.global_step - oldest_step < self.plateau_window:
+            return
+        # Trim history older than plateau_window
+        cutoff = state.global_step - self.plateau_window
+        while self.plateau_acc_history and self.plateau_acc_history[0][0] < cutoff:
+            self.plateau_acc_history.pop(0)
+        if len(self.plateau_acc_history) < 2:
+            return
+        # Compare: best acc in first half vs best acc in second half
+        mid_step = self.plateau_acc_history[0][0] + self.plateau_window // 2
+        first_half = [a for s, a in self.plateau_acc_history if s < mid_step]
+        second_half = [a for s, a in self.plateau_acc_history if s >= mid_step]
+        if not first_half or not second_half:
+            return
+        best_first = max(first_half)
+        best_second = max(second_half)
+        improvement = best_second - best_first
+        if improvement < self.plateau_threshold:
+            # Plateau detected
+            self.plateau_last_spike_step = state.global_step
+            self.plateau_acc_history.clear()  # reset history after action
+
+            if is_main_process():
+                print(f"[PLATEAU] Plateau detected! acc improvement={improvement:.4f} < {self.plateau_threshold} "
+                      f"over {self.plateau_window} steps (best_first={best_first:.2%}, best_second={best_second:.2%})")
+
+            if self.plateau_action == "lr_spike":
+                peak_lr = self.peak_lr
+                spike_factor = self.lr_spike_factor
+                spike_steps = self.lr_spike_steps
+                from torch.optim.lr_scheduler import LambdaLR
+
+                def lr_lambda(current_step):
+                    if current_step < spike_steps // 2:
+                        t = float(current_step) / float(max(1, spike_steps // 2))
+                        return 1.0 + (spike_factor - 1.0) * t
+                    elif current_step < spike_steps:
+                        t = float(current_step - spike_steps // 2) / float(max(1, spike_steps - spike_steps // 2))
+                        return spike_factor - (spike_factor - 1.0) * t
+                    else:
+                        return 1.0
+
+                for pg in self.trainer.optimizer.param_groups:
+                    pg['lr'] = peak_lr
+                    pg['initial_lr'] = peak_lr
+                self.trainer.lr_scheduler = LambdaLR(self.trainer.optimizer, lr_lambda, last_epoch=-1)
+                self.lr_reset_step = state.global_step
+                if is_main_process():
+                    max_lr = peak_lr * spike_factor
+                    print(f"[PLATEAU] Action: LR spike {peak_lr:.2e}→{max_lr:.2e}→{peak_lr:.2e} "
+                          f"over {spike_steps} steps at step {state.global_step}")
+
+            elif self.plateau_action == "batch_increase":
+                old_ga = self.trainer.args.gradient_accumulation_steps
+                new_ga = max(1, int(old_ga * self.batch_increase_factor))
+                if new_ga != old_ga:
+                    self.trainer.args.gradient_accumulation_steps = new_ga
+                    self.batch_increase_count += 1
+                    if is_main_process():
+                        eff_batch = self.trainer.args.per_device_train_batch_size * new_ga * max(1, torch.cuda.device_count())
+                        print(f"[PLATEAU] Action: batch increase grad_acc {old_ga}→{new_ga} "
+                              f"(eff_batch≈{eff_batch}, increase #{self.batch_increase_count}) "
+                              f"at step {state.global_step}")
+                elif is_main_process():
+                    print(f"[PLATEAU] Action: batch_increase requested but grad_acc unchanged at {old_ga}")
+
+    def _apply_stage_schedule(self, state):
+        """Apply LR/batch schedule strategy on stage advance."""
+        strategy = self.stage_schedule
+        peak_lr = self.peak_lr
+
+        if strategy == "warmup_reset":
+            # Warmup from 0 to peak_lr, then hold constant
+            from torch.optim.lr_scheduler import LambdaLR
+            warmup = self.lr_reset_warmup
+
+            def lr_lambda(current_step):
+                if current_step < warmup:
+                    return float(current_step) / float(max(1, warmup))
+                return 1.0
+
+            for pg in self.trainer.optimizer.param_groups:
+                pg['lr'] = peak_lr
+                pg['initial_lr'] = peak_lr
+            self.trainer.lr_scheduler = LambdaLR(self.trainer.optimizer, lr_lambda, last_epoch=-1)
+            self.lr_reset_step = state.global_step
+            if is_main_process():
+                print(f"[STAGE-SCHED] warmup_reset: LR→{peak_lr} with {warmup}-step warmup at step {state.global_step}")
+
+        elif strategy == "cosine_restart":
+            # CosineAnnealingLR — single cosine decay per stage, reset on advance
+            from torch.optim.lr_scheduler import CosineAnnealingLR
+            eta_min = peak_lr * self.cosine_eta_min_ratio
+
+            for pg in self.trainer.optimizer.param_groups:
+                pg['lr'] = peak_lr
+                pg['initial_lr'] = peak_lr
+            self.trainer.lr_scheduler = CosineAnnealingLR(
+                self.trainer.optimizer,
+                T_max=self.cosine_t_max,
+                eta_min=eta_min,
+            )
+            self.lr_reset_step = state.global_step
+            if is_main_process():
+                print(f"[STAGE-SCHED] cosine_decay: T_max={self.cosine_t_max}, "
+                      f"eta_min={eta_min:.2e}, peak={peak_lr:.2e} at step {state.global_step}")
+
+        elif strategy == "cosine_sgdr":
+            # CosineAnnealingWarmRestarts (SGDR) — cyclic cosine with periodic LR resets
+            from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+            eta_min = peak_lr * self.cosine_eta_min_ratio
+
+            for pg in self.trainer.optimizer.param_groups:
+                pg['lr'] = peak_lr
+                pg['initial_lr'] = peak_lr
+            self.trainer.lr_scheduler = CosineAnnealingWarmRestarts(
+                self.trainer.optimizer,
+                T_0=self.cosine_t0,
+                T_mult=self.cosine_t_mult,
+                eta_min=eta_min,
+            )
+            self.lr_reset_step = state.global_step
+            if is_main_process():
+                print(f"[STAGE-SCHED] cosine_sgdr: T_0={self.cosine_t0}, T_mult={self.cosine_t_mult}, "
+                      f"eta_min={eta_min:.2e}, peak={peak_lr:.2e} at step {state.global_step}")
+
+        elif strategy == "batch_increase":
+            # Increase gradient accumulation steps (simulates larger batch)
+            old_ga = self.trainer.args.gradient_accumulation_steps
+            new_ga = max(1, int(old_ga * self.batch_increase_factor))
+            if new_ga != old_ga:
+                self.trainer.args.gradient_accumulation_steps = new_ga
+                self.batch_increase_count += 1
+                if is_main_process():
+                    eff_batch = self.trainer.args.per_device_train_batch_size * new_ga * max(1, torch.cuda.device_count())
+                    print(f"[STAGE-SCHED] batch_increase: grad_acc {old_ga}→{new_ga} "
+                          f"(eff_batch≈{eff_batch}) at step {state.global_step}")
+
+        elif strategy == "lr_spike":
+            # Mini 1-cycle: spike LR up then decay back to peak
+            from torch.optim.lr_scheduler import LambdaLR
+            spike_factor = self.lr_spike_factor
+            spike_steps = self.lr_spike_steps
+
+            def lr_lambda(current_step):
+                if current_step < spike_steps // 2:
+                    # Phase 1: ramp up from 1.0 to spike_factor
+                    t = float(current_step) / float(max(1, spike_steps // 2))
+                    return 1.0 + (spike_factor - 1.0) * t
+                elif current_step < spike_steps:
+                    # Phase 2: ramp down from spike_factor to 1.0
+                    t = float(current_step - spike_steps // 2) / float(max(1, spike_steps - spike_steps // 2))
+                    return spike_factor - (spike_factor - 1.0) * t
+                else:
+                    # After spike: constant at peak
+                    return 1.0
+
+            for pg in self.trainer.optimizer.param_groups:
+                pg['lr'] = peak_lr
+                pg['initial_lr'] = peak_lr
+            self.trainer.lr_scheduler = LambdaLR(self.trainer.optimizer, lr_lambda, last_epoch=-1)
+            self.lr_reset_step = state.global_step
+            if is_main_process():
+                max_lr = peak_lr * spike_factor
+                print(f"[STAGE-SCHED] lr_spike: {peak_lr:.2e}→{max_lr:.2e}→{peak_lr:.2e} "
+                      f"over {spike_steps} steps at step {state.global_step}")
+
+    def _restore_stage_schedule(self, state):
+        """Restore LR scheduler after preemption resume (lambda not serialized)."""
+        strategy = self.stage_schedule
+        if strategy in ("warmup_reset", "cosine_restart", "cosine_sgdr", "lr_spike") and self.lr_reset_step is not None:
+            peak_lr = self.peak_lr
+            steps_since_reset = max(state.global_step - self.lr_reset_step, 0)
+
+            for pg in self.trainer.optimizer.param_groups:
+                pg['initial_lr'] = peak_lr
+
+            if strategy == "warmup_reset":
+                from torch.optim.lr_scheduler import LambdaLR
+                warmup = self.lr_reset_warmup
+
+                def lr_lambda(current_step):
+                    if current_step < warmup:
+                        return float(current_step) / float(max(1, warmup))
+                    return 1.0
+
+                new_sched = LambdaLR(self.trainer.optimizer, lr_lambda,
+                                     last_epoch=max(steps_since_reset - 1, -1))
+                self.trainer.lr_scheduler = new_sched
+
+            elif strategy == "cosine_restart":
+                from torch.optim.lr_scheduler import CosineAnnealingLR
+                eta_min = peak_lr * self.cosine_eta_min_ratio
+                new_sched = CosineAnnealingLR(
+                    self.trainer.optimizer,
+                    T_max=self.cosine_t_max,
+                    eta_min=eta_min,
+                    last_epoch=max(steps_since_reset - 1, -1),
+                )
+                self.trainer.lr_scheduler = new_sched
+
+            elif strategy == "cosine_sgdr":
+                from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+                eta_min = peak_lr * self.cosine_eta_min_ratio
+                new_sched = CosineAnnealingWarmRestarts(
+                    self.trainer.optimizer,
+                    T_0=self.cosine_t0,
+                    T_mult=self.cosine_t_mult,
+                    eta_min=eta_min,
+                    last_epoch=max(steps_since_reset - 1, -1),
+                )
+                self.trainer.lr_scheduler = new_sched
+
+            elif strategy == "lr_spike":
+                from torch.optim.lr_scheduler import LambdaLR
+                spike_factor = self.lr_spike_factor
+                spike_steps = self.lr_spike_steps
+
+                def lr_lambda(current_step):
+                    if current_step < spike_steps // 2:
+                        t = float(current_step) / float(max(1, spike_steps // 2))
+                        return 1.0 + (spike_factor - 1.0) * t
+                    elif current_step < spike_steps:
+                        t = float(current_step - spike_steps // 2) / float(max(1, spike_steps - spike_steps // 2))
+                        return spike_factor - (spike_factor - 1.0) * t
+                    else:
+                        return 1.0
+
+                new_sched = LambdaLR(self.trainer.optimizer, lr_lambda,
+                                     last_epoch=max(steps_since_reset - 1, -1))
+                self.trainer.lr_scheduler = new_sched
+
+            current_lr = self.trainer.optimizer.param_groups[0]['lr']
+            if is_main_process():
+                rank_print(f"[STAGE-SCHED] Restored {strategy} from step {self.lr_reset_step} "
+                          f"({steps_since_reset} steps ago), current lr={current_lr:.6e}")
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
@@ -1459,6 +1965,26 @@ class FirstTokenCurriculum(TrainerCallback):
         # Track wall time
         if self.training_start_time is None:
             self.training_start_time = time.time()
+
+        # Apply or restore stage schedule
+        if self.stage_schedule != "none" and self.trainer.lr_scheduler is not None:
+            if self.lr_reset_step is not None:
+                # Resume: recreate scheduler at correct position
+                self._restore_stage_schedule(state)
+            else:
+                # Fresh start: apply schedule from Stage 1
+                self._apply_stage_schedule(state)
+
+        # Restore batch_increase: reapply accumulated gradient_accumulation increases
+        if self.stage_schedule == "batch_increase" and self.batch_increase_count > 0:
+            base_ga = self.trainer.args.gradient_accumulation_steps
+            new_ga = max(1, int(base_ga * (self.batch_increase_factor ** self.batch_increase_count)))
+            if new_ga != base_ga:
+                self.trainer.args.gradient_accumulation_steps = new_ga
+                if is_main_process():
+                    eff_batch = self.trainer.args.per_device_train_batch_size * new_ga * max(1, torch.cuda.device_count())
+                    rank_print(f"[STAGE-SCHED] Restored batch_increase: grad_acc={new_ga} "
+                              f"(increased {self.batch_increase_count}x, eff_batch≈{eff_batch})")
 
         return control
 
@@ -1489,15 +2015,34 @@ class FirstTokenCurriculum(TrainerCallback):
                                    full_word_correct=self.trainer.full_word_correct,
                                    recent_losses=self.trainer.recent_losses,
                                    samples_this_stage=self.samples_this_stage,
-                                   tokens_this_stage=self.tokens_this_stage)
+                                   tokens_this_stage=self.tokens_this_stage,
+                                   lr_reset_step=self.lr_reset_step,
+                                   batch_increase_count=self.batch_increase_count if self.batch_increase_count else None,
+                                   plateau_last_spike_step=self.plateau_last_spike_step if self.plateau_spike else None)
 
         if is_main_process():
+            # Flush any buffered JSONL entries to disk
+            if self._jsonl_buffer:
+                try:
+                    _append_to_jsonl(args.output_dir, self._jsonl_buffer)
+                    self._jsonl_buffer = []
+                except Exception as e:
+                    rank_print(f"[LOSS][WARN] JSONL flush on save failed: {e}")
+
+            # Atomic write of full loss_history.json (for backward compat / plotting)
             try:
                 loss_path = os.path.join(args.output_dir, "loss_history.json")
-                with open(loss_path, "w") as f:
-                    json.dump(self.loss_history, f)
+                _atomic_write_json(loss_path, self.loss_history)
             except Exception as e:
                 rank_print(f"[LOSS] Warning: Could not save loss history: {e}")
+
+            # Save resume points
+            if self.resume_points:
+                try:
+                    rp_path = os.path.join(args.output_dir, "resume_points.json")
+                    _atomic_write_json(rp_path, self.resume_points)
+                except Exception:
+                    pass
 
         # Persistent checkpoint (not rotated by save_total_limit)
         if (self.persist_every > 0
@@ -1516,7 +2061,10 @@ class FirstTokenCurriculum(TrainerCallback):
                                            full_word_correct=self.trainer.full_word_correct,
                                            recent_losses=self.trainer.recent_losses,
                                            samples_this_stage=self.samples_this_stage,
-                                           tokens_this_stage=self.tokens_this_stage)
+                                           tokens_this_stage=self.tokens_this_stage,
+                                           lr_reset_step=self.lr_reset_step,
+                                   batch_increase_count=self.batch_increase_count if self.batch_increase_count else None,
+                                   plateau_last_spike_step=self.plateau_last_spike_step if self.plateau_spike else None)
                 self._last_persist_step = state.global_step
             except Exception as e:
                 rank_print(f"[PERSIST] Warning: Could not save persistent checkpoint: {e}")
@@ -1571,17 +2119,16 @@ class FirstTokenCurriculum(TrainerCallback):
                 model, self.tokenizer, self.task,
                 self.eval_inputs_hard, self.eval_labels_hard,
                 num_shots=self.num_shots, max_input_size=self.max_input_size,
-                seed=self.seed, print_examples=0,
+                seed=self.seed, print_examples=self.print_examples,
                 **self.task_kwargs
             )
 
             # Stage-alpha eval: generate and evaluate on stage-difficulty data
-            # Skip for periodic evals (no stage transition) and single-stage runs
             stage_greedy_result = None
             stage_alpha = self.dataset._stage_alpha()
             max_alpha_L = self.dataset.task_kwargs.get("max_lookahead")
             is_full_difficulty = (target_L is not None and target_L >= (max_alpha_L or 256))
-            if not is_periodic and not is_full_difficulty and stage_alpha < 1.0:
+            if not is_full_difficulty and stage_alpha < 1.0:
                 rank_print(f"[STAGE-EVAL] Also evaluating at stage alpha={stage_alpha:.4f} (L={effective_L})...")
                 # Generate stage-difficulty eval data on the fly
                 stage_eval_inputs, stage_eval_labels = None, None
@@ -1693,7 +2240,7 @@ class FirstTokenCurriculum(TrainerCallback):
                     flops_this_step = tokens_this_step * self.flops_per_token
                     achieved_tflops = flops_this_step / recent_step_time / 1e12
 
-            self.loss_history.append({
+            entry = {
                 "step": state.global_step,
                 "loss": current_loss,
                 "stage": self.dataset.stage,
@@ -1702,7 +2249,25 @@ class FirstTokenCurriculum(TrainerCallback):
                 "tokens": tokens_this_step,
                 "wall_time": current_wall_time,
                 "achieved_tflops": achieved_tflops,
-            })
+                "n_gpus": get_world_size(),
+            }
+
+            # Mark as resume point if this is the first entry after a resume
+            if self._mark_next_as_resume:
+                entry["resume"] = True
+                self._mark_next_as_resume = False
+
+            self.loss_history.append(entry)
+
+            # JSONL incremental persistence (survives preemption between checkpoints)
+            if is_main_process():
+                self._jsonl_buffer.append(entry)
+                if len(self._jsonl_buffer) >= self._jsonl_flush_every:
+                    try:
+                        _append_to_jsonl(args.output_dir, self._jsonl_buffer)
+                        self._jsonl_buffer = []
+                    except Exception as e:
+                        rank_print(f"[LOSS][WARN] JSONL flush failed: {e}")
 
         current_time = datetime.datetime.now()
 
@@ -1788,7 +2353,7 @@ class FirstTokenCurriculum(TrainerCallback):
             self._last_log = state.global_step
 
         # ==================== Periodic Eval (independent of stage advancement) ====================
-        if self.eval_every_steps > 0 and state.global_step % self.eval_every_steps == 0 and not getattr(args, 'benchmark_steps', 0):
+        if self.eval_every_steps > 0 and state.global_step % self.eval_every_steps == 0:
             self._run_stage_eval(self.dataset.stage, state.global_step, is_periodic=True)
             if is_main_process():
                 plot_overall_loss(self.loss_history, self.trainer.args.output_dir, self.n_stages, self.plot_metadata)
@@ -1798,9 +2363,11 @@ class FirstTokenCurriculum(TrainerCallback):
                                       self.plot_metadata)
                 plot_achieved_tflops(self.loss_history, self.trainer.args.output_dir, self.n_stages, self.plot_metadata)
 
+        # ==================== Plateau Spike Check ====================
+        if self.plateau_spike and state.global_step % self.check_every == 0:
+            self._check_plateau_spike(state)
+
         # ==================== Stage Advancement Check ====================
-        if getattr(args, 'benchmark_steps', 0):
-            return control  # Skip stage advancement in benchmark mode
         if state.global_step % self.check_every == 0 and (state.global_step - self.stage_start_step) >= self.min_steps:
 
             m = self._current_metric()
@@ -1890,12 +2457,18 @@ class FirstTokenCurriculum(TrainerCallback):
                     # Clear accuracy tracking for fresh measurement
                     self.trainer.first_token_correct.clear()
                     self.trainer.full_word_correct.clear()
+                    if self.plateau_spike:
+                        self.plateau_acc_history.clear()
 
                     # Report and reset timing for new stage
                     if hasattr(self.trainer, '_report_train_timing'):
                         self.trainer._report_train_timing()
                     if hasattr(self.trainer, 'reset_timing'):
                         self.trainer.reset_timing()
+
+                    # Apply stage schedule strategy
+                    if self.stage_schedule != "none":
+                        self._apply_stage_schedule(state)
 
                     new_alpha = self.dataset._stage_alpha()
                     if is_main_process():
@@ -1923,7 +2496,10 @@ class FirstTokenCurriculum(TrainerCallback):
                                                full_word_correct=self.trainer.full_word_correct,
                                                recent_losses=self.trainer.recent_losses,
                                                samples_this_stage=self.samples_this_stage,
-                                               tokens_this_stage=self.tokens_this_stage)
+                                               tokens_this_stage=self.tokens_this_stage,
+                                               lr_reset_step=self.lr_reset_step,
+                                   batch_increase_count=self.batch_increase_count if self.batch_increase_count else None,
+                                   plateau_last_spike_step=self.plateau_last_spike_step if self.plateau_spike else None)
 
         return control
 
@@ -2051,7 +2627,7 @@ def main():
 
     # Task/model
     p.add_argument("--task", type=str, choices=["search", "dfs", "si"], default="si")
-    p.add_argument("--model_name", type=str, default="Qwen/Qwen3-4B-Instruct-2507")
+    p.add_argument("--model_name", type=str, default="EleutherAI/pythia-160m")
     p.add_argument("--cache_dir", type=str, default=None)
     p.add_argument("--output_dir", type=str, default="./nl_output")
 
@@ -2075,6 +2651,8 @@ def main():
     p.add_argument("--gradient_accumulation_steps", type=int, default=1)
     p.add_argument("--learning_rate", type=float, default=2e-5)
     p.add_argument("--warmup_steps", type=int, default=500)
+    # LR scheduling is handled by --stage_schedule (per-stage cosine/warmup/SGDR).
+    # Global lr_scheduler_type is always "constant" — do not change.
     p.add_argument("--first_token_soft_weight", type=float, default=0.3)
 
     # Few-shot in prompt
@@ -2118,6 +2696,38 @@ def main():
                    help="Run greedy eval every N steps (0=disabled, useful for no-curriculum runs)")
     p.add_argument("--persist_every", type=int, default=2000,
                    help="Save persistent checkpoint every N steps (not rotated by save_total_limit). 0=disabled.")
+    p.add_argument("--lr_reset_on_stage", action="store_true",
+                   help="[DEPRECATED: use --stage_schedule warmup_reset] Reset LR scheduler on stage advance")
+    p.add_argument("--lr_reset_warmup", type=int, default=50,
+                   help="Warmup steps after LR reset on stage advance (default 50)")
+    p.add_argument("--stage_schedule", type=str, default="none",
+                   choices=["none", "warmup_reset", "cosine_restart", "cosine_sgdr", "batch_increase", "lr_spike"],
+                   help="LR/batch schedule strategy on stage advance")
+    p.add_argument("--cosine_t_max", type=int, default=3000,
+                   help="Steps for cosine decay per stage (cosine_restart)")
+    p.add_argument("--cosine_t0", type=int, default=10000,
+                   help="Initial restart period for SGDR (cosine_sgdr)")
+    p.add_argument("--cosine_t_mult", type=int, default=2,
+                   help="Period multiplier for SGDR warm restarts (cosine_sgdr)")
+    p.add_argument("--cosine_eta_min_ratio", type=float, default=0.01,
+                   help="Min LR as fraction of peak for cosine_restart")
+    p.add_argument("--batch_increase_factor", type=float, default=2.0,
+                   help="Multiply grad_accumulation_steps by this on stage advance (batch_increase)")
+    p.add_argument("--lr_spike_factor", type=float, default=5.0,
+                   help="Spike LR to peak*factor, then decay back (lr_spike/plateau_spike)")
+    p.add_argument("--lr_spike_steps", type=int, default=200,
+                   help="Duration of LR spike cycle in steps (lr_spike/plateau_spike)")
+    p.add_argument("--plateau_spike", action="store_true",
+                   help="Take action when accuracy plateaus (independent of stage_schedule)")
+    p.add_argument("--plateau_action", type=str, default="lr_spike",
+                   choices=["lr_spike", "batch_increase"],
+                   help="Action to take on plateau: spike LR or increase batch size")
+    p.add_argument("--plateau_window", type=int, default=5000,
+                   help="Steps to look back for plateau detection")
+    p.add_argument("--plateau_threshold", type=float, default=0.02,
+                   help="Min accuracy improvement over window to not count as plateau")
+    p.add_argument("--plateau_cooldown", type=int, default=10000,
+                   help="Min steps between plateau spikes")
 
     # Redacted eval config
     p.add_argument("--eval_redacted_samples", type=int, default=None)
@@ -2131,9 +2741,13 @@ def main():
                    default=os.environ.get("SCRATCH") or os.path.join("/scratch", os.environ.get("USER", "user")))
     p.add_argument("--job_id", type=str, default=os.environ.get("SLURM_JOB_ID") or os.environ.get("LSB_JOBID"))
     p.add_argument("--resume_from_job", type=str, default=None)
+    p.add_argument("--resume_weights_path", type=str, default=None,
+                   help="Load model weights from this path (no optimizer/scheduler). Use with --resume_stage.")
+    p.add_argument("--resume_stage", type=int, default=None,
+                   help="Start curriculum at this stage (use with --resume_weights_path)")
 
     # Liger kernels
-    p.add_argument("--use_liger", default=True, action="store_true",
+    p.add_argument("--use_liger", action="store_true",
                    help="Use Liger kernel for memory-efficient training")
 
     # Chunked cross-entropy
@@ -2143,10 +2757,6 @@ def main():
     # Packing
     p.add_argument("--use_packing", action="store_true",
                    help="Use sequence packing for efficiency")
-
-    # Benchmarking
-    p.add_argument("--benchmark_steps", type=int, default=0,
-                   help="Run exactly N training steps then exit (0=disabled). Skips evals and checkpointing.")
 
     global args
     args = p.parse_args()
@@ -2244,20 +2854,22 @@ def main():
         "attn_implementation": "flash_attention_2",
     }
 
-    # Apply Liger fused ops (NOT cross entropy)
+    # Apply Liger fused ops (NOT cross entropy) — architecture-dependent
+    # Only apply to compatible architectures (Qwen uses RMSNorm+SwiGLU; Pythia uses LayerNorm+GELU)
     if getattr(args, 'use_liger', False):
-        try:
-            from liger_kernel.transformers import apply_liger_kernel_to_qwen3
-            apply_liger_kernel_to_qwen3(
-                rope=True,
-                rms_norm=True,
-                swiglu=True,
-                cross_entropy=False,
-                fused_linear_cross_entropy=False,
-            )
-            rank_print("[LIGER] Applied fused RoPE/RMSNorm/SwiGLU kernels")
-        except ImportError:
-            rank_print("[LIGER] liger-kernel not installed, continuing without")
+        is_qwen = 'qwen' in args.model_name.lower()
+        if is_qwen:
+            try:
+                from liger_kernel.transformers import apply_liger_kernel_to_qwen3
+                apply_liger_kernel_to_qwen3(
+                    rope=True, rms_norm=True, swiglu=True,
+                    cross_entropy=False, fused_linear_cross_entropy=False,
+                )
+                rank_print("[LIGER] Applied fused RoPE/RMSNorm/SwiGLU kernels (Qwen3)")
+            except ImportError:
+                rank_print("[LIGER] liger-kernel not installed, continuing without")
+        else:
+            rank_print("[LIGER] Skipping — no compatible Liger kernels for this architecture")
 
     if getattr(args, 'reinit_weights', False):
         from transformers import AutoConfig
@@ -2285,12 +2897,19 @@ def main():
         rank_print("[INIT] Applying LoRA...")
         from peft import PeftModel
 
+        # Auto-detect LoRA target modules based on architecture
+        if hasattr(model, 'gpt_neox'):
+            lora_targets = ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"]
+        else:
+            lora_targets = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        rank_print(f"[INIT] LoRA targets: {lora_targets}")
+
         lora_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
             r=args.lora_rank,
             lora_alpha=args.lora_rank * 2,
             lora_dropout=args.lora_dropout,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+            target_modules=lora_targets,
             bias="none",
         )
         model = get_peft_model(model, lora_config)
@@ -2307,6 +2926,23 @@ def main():
             total = sum(p.numel() for p in model.parameters())
             trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
             rank_print(f"trainable params: {trainable:,} || all params: {total:,} || trainable%: {100*trainable/total:.4f}")
+
+    # Load weights from a specific path (no optimizer state)
+    if getattr(args, 'resume_weights_path', None):
+        from safetensors.torch import load_file as load_safetensors
+        weights_path = args.resume_weights_path
+        sf_path = os.path.join(weights_path, "model.safetensors")
+        if os.path.exists(sf_path):
+            state_dict = load_safetensors(sf_path)
+            missing, unexpected = model.load_state_dict(state_dict, strict=False)
+            rank_print(f"[WEIGHTS] Loaded weights from {weights_path}")
+            if missing:
+                rank_print(f"[WEIGHTS] Missing keys: {len(missing)}")
+            if unexpected:
+                rank_print(f"[WEIGHTS] Unexpected keys: {len(unexpected)}")
+        else:
+            rank_print(f"[WEIGHTS][ERROR] No model.safetensors found at {weights_path}")
+            sys.exit(1)
 
     # Reserved inputs for deduplication
     reserved_inputs: Set[str] = set()
@@ -2325,7 +2961,7 @@ def main():
     eval_inputs_easy, eval_labels_easy = None, None  # alpha=base_alpha (easiest)
     eval_fingerprint_hard, eval_fingerprint_easy = None, None
 
-    need_eval_data = (args.do_baseline or args.do_final_eval or args.do_redacted_eval or args.do_stage_eval) and not args.benchmark_steps
+    need_eval_data = (args.do_baseline or args.do_final_eval or args.do_redacted_eval or args.do_stage_eval)
 
     if need_eval_data:
         rank_print("[EVAL-DATA] Generating eval sets (once for all evals)...")
@@ -2394,13 +3030,13 @@ def main():
         reserved_inputs=reserved_inputs,
         num_shots=args.num_shots,
         seed=args.seed,
-        resume_step=resume_step,
+        resume_step=resume_step * args.gradient_accumulation_steps,
         store_examples=args.do_seen_eval,
         store_cap=1000,
         linear_lookahead=args.linear_lookahead,
         base_lookahead=args.base_lookahead,
         lookahead_step=args.lookahead_step,
-        epoch_size=100_000_000,
+        epoch_size=1_000_000_000,  # Must exceed max_steps * gradient_accumulation_steps
         **task_kwargs,
     )
     data_collator = lambda x: x[0]  # Identity
@@ -2426,11 +3062,106 @@ def main():
         max_input_size=args.max_input_size,
         seed=args.seed,
         persist_every=getattr(args, 'persist_every', 2000),
+        print_examples=min(5, args.print_eval_examples),
+        lr_reset_on_stage=getattr(args, 'lr_reset_on_stage', False),
+        lr_reset_warmup=getattr(args, 'lr_reset_warmup', 50),
+        peak_lr=args.learning_rate,
+        stage_schedule=getattr(args, 'stage_schedule', 'none'),
+        cosine_t_max=getattr(args, 'cosine_t_max', 3000),
+        cosine_t0=getattr(args, 'cosine_t0', 10000),
+        cosine_t_mult=getattr(args, 'cosine_t_mult', 2),
+        cosine_eta_min_ratio=getattr(args, 'cosine_eta_min_ratio', 0.01),
+        batch_increase_factor=getattr(args, 'batch_increase_factor', 2.0),
+        lr_spike_factor=getattr(args, 'lr_spike_factor', 5.0),
+        lr_spike_steps=getattr(args, 'lr_spike_steps', 200),
+        plateau_spike=getattr(args, 'plateau_spike', False),
+        plateau_action=getattr(args, 'plateau_action', 'lr_spike'),
+        plateau_window=getattr(args, 'plateau_window', 5000),
+        plateau_threshold=getattr(args, 'plateau_threshold', 0.02),
+        plateau_cooldown=getattr(args, 'plateau_cooldown', 10000),
     )
 
     if resume_ckpt:
         if _try_restore_curriculum_state(resume_ckpt, dataset, curriculum):
             rank_print(f"[CURRICULUM] Synced state with checkpoint: {resume_ckpt}")
+
+        # Load existing resume_points from current output_dir (persists across restarts)
+        rp_path = os.path.join(args.output_dir, "resume_points.json")
+        if os.path.isfile(rp_path):
+            try:
+                with open(rp_path) as f:
+                    existing_rps = json.load(f)
+                # Merge: existing points first, then any new ones from _try_restore
+                merged_rps = existing_rps
+                for rp in curriculum.resume_points:
+                    if rp not in merged_rps:
+                        merged_rps.append(rp)
+                curriculum.resume_points = merged_rps
+                rank_print(f"[CURRICULUM] Loaded {len(existing_rps)} existing resume points")
+            except Exception:
+                pass
+
+    # Ensure loss history includes predecessor job's data when auto-resuming locally
+    if args.resume_from_job and curriculum.loss_history:
+        first_step = curriculum.loss_history[0].get("step", 0)
+        if first_step > 1:
+            prev_dir = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}")
+            # Try JSONL first (has entries between checkpoint saves), fall back to JSON
+            prev_history = _load_from_jsonl(prev_dir, max_step=first_step - 1)
+            if prev_history is None:
+                prev_loss_path = os.path.join(prev_dir, "loss_history.json")
+                if os.path.isfile(prev_loss_path):
+                    with open(prev_loss_path) as f:
+                        raw = json.load(f)
+                    prev_history = [
+                        h for h in raw
+                        if h.get("step", 0) < first_step
+                        and not (h.get("resume") and h.get("tokens", -1) == 0)
+                    ]
+            if prev_history:
+                curriculum.loss_history = prev_history + curriculum.loss_history
+                rank_print(f"[CURRICULUM] Prepended {len(prev_history)} loss records from job {args.resume_from_job}")
+
+                # Also merge resume_points from predecessor
+                prev_rp_path = os.path.join(prev_dir, "resume_points.json")
+                if os.path.isfile(prev_rp_path):
+                    try:
+                        with open(prev_rp_path) as f:
+                            prev_rps = json.load(f)
+                        curriculum.resume_points = prev_rps + curriculum.resume_points
+                    except Exception:
+                        pass
+
+                # Rewrite JSONL with merged data
+                if is_main_process():
+                    try:
+                        _rewrite_jsonl(args.output_dir, curriculum.loss_history)
+                    except Exception as e:
+                        rank_print(f"[CURRICULUM][WARN] Failed to rewrite JSONL after merge: {e}")
+
+            prev_eval_path = os.path.join(prev_dir, "stage_eval_history.json")
+            if os.path.isfile(prev_eval_path) and curriculum.stage_eval_history:
+                first_eval_step = curriculum.stage_eval_history[0].get("step", 0)
+                with open(prev_eval_path) as f:
+                    prev_eval = json.load(f)
+                prev_eval = [h for h in prev_eval if h.get("step", 0) < first_eval_step]
+                if prev_eval:
+                    curriculum.stage_eval_history = prev_eval + curriculum.stage_eval_history
+                    rank_print(f"[CURRICULUM] Prepended {len(prev_eval)} eval records from job {args.resume_from_job}")
+
+    # Write JSONL to current output_dir (handles both within-job and cross-job resume)
+    if is_main_process() and curriculum.loss_history:
+        try:
+            _rewrite_jsonl(args.output_dir, curriculum.loss_history)
+            rank_print(f"[LOSS] Wrote {len(curriculum.loss_history)} records to JSONL in {args.output_dir}")
+        except Exception as e:
+            rank_print(f"[LOSS][WARN] Failed to write JSONL: {e}")
+
+    # Override curriculum stage if --resume_stage is set (for weights-only resume)
+    if getattr(args, 'resume_stage', None) is not None:
+        dataset.stage = args.resume_stage
+        curriculum.stage_start_step = 0
+        rank_print(f"[CURRICULUM] Overriding stage to {args.resume_stage} (--resume_stage)")
 
     # ==================== RETROACTIVE PLOT GENERATION / EXTENSION CHECK ====================
     # If resuming a completed job, either generate plots and exit, or continue with extended params
@@ -2504,7 +3235,8 @@ def main():
 
             if is_main_process():
                 rank_print("[RETROACTIVE] Generating plots for completed job...")
-                save_plot_data(args.output_dir, plot_metadata, flops_per_token, args.n_stages)
+                save_plot_data(args.output_dir, plot_metadata, flops_per_token, args.n_stages,
+                              n_gpus=get_world_size())
 
                 plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages, plot_metadata)
                 plot_loss_vs_flops(curriculum.loss_history, args.output_dir, flops_per_token, args.n_stages,
@@ -2542,12 +3274,13 @@ def main():
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
         warmup_steps=args.warmup_steps,
-        max_steps=args.benchmark_steps if args.benchmark_steps > 0 else 100000000,
+        lr_scheduler_type="constant",  # per-stage decay handled by --stage_schedule
+        max_steps=100000000,
         num_train_epochs=1000,
         logging_steps=10,
         logging_first_step=False,
         report_to="none",
-        save_strategy="no" if args.benchmark_steps > 0 else "steps",
+        save_strategy="steps",
         save_steps=500,
         save_total_limit=5,
         save_safetensors=True,
@@ -2655,7 +3388,8 @@ def main():
 
     if is_main_process():
         save_plot_data(args.output_dir, curriculum.plot_metadata,
-                       curriculum.flops_per_token, args.n_stages)
+                       curriculum.flops_per_token, args.n_stages,
+                       n_gpus=get_world_size())
 
     if not resume_ckpt:
         if is_main_process():
@@ -2693,56 +3427,7 @@ def main():
             resume_step = int(match.group(1))
             rank_print(f"[CURRICULUM] Resuming from step {resume_step}")
 
-    _bench_t0 = time.time()
     trainer.train(resume_from_checkpoint=resume_ckpt)
-    _bench_elapsed = time.time() - _bench_t0
-
-    if args.benchmark_steps > 0 and is_main_process():
-        steps = args.benchmark_steps
-        steps_sec = steps / _bench_elapsed
-        # Use actual tokens tracked during training (non-padding, across all GPUs)
-        actual_toks = curriculum.tokens_this_stage if hasattr(curriculum, 'tokens_this_stage') else 0
-        actual_toks_sec = actual_toks / _bench_elapsed if actual_toks > 0 else 0
-        actual_toks_per_step = actual_toks / steps if actual_toks > 0 else 0
-        rank_print(f"\n[BENCHMARK] {steps} steps in {_bench_elapsed:.1f}s")
-        rank_print(f"[BENCHMARK] {steps_sec:.3f} steps/sec | {actual_toks_sec:,.0f} actual_toks/sec ({actual_toks_sec/1e6:.3f} Mtok/s) | {actual_toks_per_step:,.0f} toks/step")
-        rank_print(f"[BENCHMARK] batch_size={args.batch_size} gpus={get_world_size()}")
-        rank_print(f"[BENCHMARK] base_L={args.base_lookahead}")
-        # Report timing breakdown
-        timing = trainer._train_timing
-        n_timing = timing["steps"]
-        data_wait_ms = (timing["data_wait"] / n_timing * 1000) if n_timing > 0 else 0
-        compute_ms = (timing["total_step"] / n_timing * 1000) if n_timing > 0 else 0
-        wall_ms = data_wait_ms + compute_ms
-        data_pct = (data_wait_ms / wall_ms * 100) if wall_ms > 0 else 0
-        rank_print(f"[BENCHMARK] DataWait={data_wait_ms:.1f}ms ({data_pct:.1f}%) | Compute={compute_ms:.1f}ms | Wall={wall_ms:.1f}ms")
-        # Report peak VRAM usage
-        peak_alloc = torch.cuda.max_memory_allocated() / (1024**3)
-        peak_reserved = torch.cuda.max_memory_reserved() / (1024**3)
-        total_vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        rank_print(f"[BENCHMARK] PeakVRAM: allocated={peak_alloc:.1f}GB reserved={peak_reserved:.1f}GB total={total_vram:.1f}GB headroom={total_vram-peak_reserved:.1f}GB")
-        # Write benchmark result to file
-        import json as _json
-        bench_result = {
-            "steps": steps, "elapsed_s": _bench_elapsed,
-            "steps_sec": steps_sec,
-            "actual_toks_sec": actual_toks_sec,
-            "actual_toks_per_step": actual_toks_per_step,
-            "batch_size": args.batch_size,
-            "gpus": get_world_size(),
-            "base_lookahead": args.base_lookahead, "lookahead_step": args.lookahead_step,
-            "data_wait_ms": data_wait_ms, "compute_ms": compute_ms,
-            "data_wait_pct": data_pct,
-            "workers": int(os.environ.get("BENCH_NUM_WORKERS", 4)),
-            "peak_alloc_gb": round(peak_alloc, 2),
-            "peak_reserved_gb": round(peak_reserved, 2),
-            "total_vram_gb": round(total_vram, 2),
-        }
-        bench_path = os.path.join(args.output_dir, "benchmark_result.json")
-        with open(bench_path, "w") as f:
-            _json.dump(bench_result, f, indent=2)
-        rank_print(f"[BENCHMARK] Result saved to {bench_path}")
-        sys.exit(0)
 
     rank_print("\n[TRAIN] Training complete.\n")
 
@@ -2878,13 +3563,33 @@ def main():
             rank_print("[SCRAMBLED-EVAL] Skipped (could not scramble any eval items)")
 
     if is_main_process():
-        # Save final loss history
+        # Flush any remaining JSONL buffer
+        if curriculum._jsonl_buffer:
+            try:
+                _append_to_jsonl(args.output_dir, curriculum._jsonl_buffer)
+                curriculum._jsonl_buffer = []
+            except Exception:
+                pass
+
+        # Save final loss history (atomic write)
         try:
-            with open(os.path.join(args.output_dir, "loss_history.json"), "w") as f:
-                json.dump(curriculum.loss_history, f)
+            _atomic_write_json(
+                os.path.join(args.output_dir, "loss_history.json"),
+                curriculum.loss_history
+            )
             rank_print(f"[LOSS] Saved {len(curriculum.loss_history)} records")
         except Exception as e:
             rank_print(f"[LOSS] Warning: {e}")
+
+        # Save resume points
+        if curriculum.resume_points:
+            try:
+                _atomic_write_json(
+                    os.path.join(args.output_dir, "resume_points.json"),
+                    curriculum.resume_points
+                )
+            except Exception:
+                pass
 
         # Final overall plot
         plot_overall_loss(curriculum.loss_history, args.output_dir, args.n_stages, curriculum.plot_metadata)

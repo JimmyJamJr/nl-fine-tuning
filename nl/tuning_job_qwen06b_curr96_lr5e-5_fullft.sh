@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH -J nl_search_768_0.6B_nocurr_L128_lr1e-4_batch96
+#SBATCH -J nl_qwen06b_curr96_lr5e-5_fullft
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=112
-#SBATCH --mem=128G
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=56
+#SBATCH --mem=64G
 #SBATCH --time=48:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
 #SBATCH -q preemptible
 #SBATCH --mail-user=huan2073@purdue.edu
-#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-type=START,END,FAIL
 #SBATCH -o ./slurm/%j_%x.out
 #SBATCH -e ./slurm/%j_%x.out
 #SBATCH --open-mode=append
@@ -33,7 +33,6 @@ conda activate search
 export SCRATCH="/scratch/gautschi/$USER"
 mkdir -p "$SCRATCH/nl_output" "$SCRATCH/model_cache"
 export HF_HOME="$SCRATCH/model_cache"
-# Load tokens from .env (not committed to git)
 if [ -f "$(dirname "$0")/.env" ]; then
     source "$(dirname "$0")/.env"
 fi
@@ -67,26 +66,26 @@ nvidia-smi || true
 # ==========================================================
 
 # Task / Model
-TASK="search"                    # si | dfs | search
+TASK="search"
 MODEL_NAME="Qwen/Qwen3-0.6B"
 
 # Training
-BATCH_SIZE=96
-GRADIENT_ACCUMULATION_STEPS=1
-LEARNING_RATE=1e-4
+BATCH_SIZE=48
+GRADIENT_ACCUMULATION_STEPS=4
+LEARNING_RATE=5e-5
 WARMUP_STEPS=100
 SEED=1234
-NUM_SHOTS=0                      # 0, 1, or 2
+NUM_SHOTS=0
 
 # LoRA
-USE_LORA=true
-LORA_RANK=16
+USE_LORA=false
+LORA_RANK=64
 LORA_DROPOUT=0.10
 
 # Curriculum
-N_STAGES=10
+N_STAGES=12
 BASE_ALPHA=0.1
-MAX_ALPHA=1.0                    # Cap training alpha (eval always uses 1.0)
+MAX_ALPHA=1.0
 ACCURACY_THRESHOLD=0.98
 MIN_STEPS_PER_STAGE=200
 CHECK_EVERY=25
@@ -95,26 +94,26 @@ EVAL_EVERY_STEPS=1000
 FIRST_TOKEN_SOFT_WEIGHT=0.0
 
 # Task parameters
-MAX_INPUT_SIZE=768                       # 6 * L = 6 * 128
-MAX_LOOKAHEAD=128                # search (nocurr L=128)
-MAX_FRONTIER_SIZE=12             # si
-MAX_BRANCH_SIZE=12               # si
-REQUESTED_BACKTRACK=3            # dfs
+MAX_INPUT_SIZE=576                       # 6 * L = 6 * 96
+MAX_LOOKAHEAD=96
+MAX_FRONTIER_SIZE=12
+MAX_BRANCH_SIZE=12
+REQUESTED_BACKTRACK=3
 
 # Memory optimizations
 GRADIENT_CHECKPOINTING=true
-USE_LIGER=true                   # Fused RoPE/RMSNorm/SwiGLU kernels
-USE_CHUNKED_CE=true              # Memory-efficient cross-entropy
+USE_LIGER=true
+USE_CHUNKED_CE=true
 CE_CHUNK_SIZE=4096
 
 # Evaluation
 EVAL_SAMPLES=500
-PRINT_EVAL_EXAMPLES=0
-DO_BASELINE=true                 # Pre-training baseline accuracy
-DO_FINAL_EVAL=true               # Post-training TF + greedy eval
-DO_REDACTED_EVAL=true            # Redacted sanity check (should be low)
-DO_SEEN_EVAL=true                # Seen-samples sanity check (should be ~100%)
-DO_STAGE_EVAL=true              # Eval at α=1.0 after each stage advancement
+PRINT_EVAL_EXAMPLES=5
+DO_BASELINE=true
+DO_FINAL_EVAL=true
+DO_REDACTED_EVAL=true
+DO_SEEN_EVAL=true
+DO_STAGE_EVAL=true
 
 # Resume from previous job (leave empty for fresh start)
 PREV_JOB_ID=""
@@ -154,7 +153,7 @@ ARGS=(
     --output_dir "$SCRATCH/nl_output"
     --scratch_dir "$SCRATCH"
     --job_id "$SLURM_JOB_ID"
-    
+
     # Training
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
@@ -180,7 +179,7 @@ ARGS=(
     --max_frontier_size "$MAX_FRONTIER_SIZE"
     --max_branch_size "$MAX_BRANCH_SIZE"
     --requested_backtrack "$REQUESTED_BACKTRACK"
-    
+
     # Evaluation
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
@@ -188,8 +187,8 @@ ARGS=(
     --use_packing
 
     --linear_lookahead
-    --base_lookahead 128
-    --lookahead_step 0
+    --base_lookahead 8
+    --lookahead_step 8
 
 )
 
@@ -205,7 +204,7 @@ $DO_SEEN_EVAL && ARGS+=(--do_seen_eval)
 $DO_STAGE_EVAL && ARGS+=(--do_stage_eval)
 [ -n "$PREV_JOB_ID" ] && ARGS+=(--resume_from_job "$PREV_JOB_ID")
 
-echo "Command: torchrun --nproc_per_node=$GPUS_PER_NODE --master_port=$MASTER_PORT qwen_tuning_nl_multi.py ${ARGS[*]}"
+echo "Command: torchrun --nproc_per_node=$GPUS_PER_NODE --master_port=$MASTER_PORT tuning_nl.py ${ARGS[*]}"
 
 # ========== Training loop with OOM restart ==========
 MAX_RETRIES=10
@@ -215,15 +214,15 @@ RESTART_FLAG="$JOB_OUTPUT_DIR/RESTART_FLAG"
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     echo "========== Attempt $((RETRY_COUNT+1))/$MAX_RETRIES | Port $MASTER_PORT =========="
-    
+
     set +e
     torchrun --nproc_per_node=$GPUS_PER_NODE \
              --master_port=$MASTER_PORT \
              --max_restarts=0 \
-             qwen_tuning_nl_multi.py "${ARGS[@]}"
+             tuning_nl.py "${ARGS[@]}"
     EXIT_CODE=$?
     set -e
-    
+
     if [ $EXIT_CODE -eq 0 ]; then
         echo "SUCCESS $(date)"
         rm -f "$RESTART_FLAG"
@@ -241,4 +240,4 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
 done
 
 echo "Max retries ($MAX_RETRIES) reached"
-exit 
+exit
