@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -J pretrain
+#SBATCH -J pretrain_fresh_perseq_lr6e-4_3000steps_0pct_bs1024_warmup100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=112
 #SBATCH --mem=128G
-#SBATCH --time=48:00:00
+#SBATCH --time=2:00:00
 #SBATCH --partition=ai
 #SBATCH -A asaparov
 #SBATCH -q preemptible
@@ -33,7 +33,7 @@ source /home/mnickel/miniconda3/etc/profile.d/conda.sh
 conda activate pptrain
 
 export SCRATCH="/scratch/gautschi/$USER"
-mkdir -p "$SCRATCH/pretrain" "$SCRATCH/model_cache"
+mkdir -p "$SCRATCH/model_cache"
 export HF_HOME="$SCRATCH/model_cache"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
@@ -60,34 +60,75 @@ nvidia-smi || true
 # ==========================================================
 #                    CONFIGURATION
 # ==========================================================
-# Only specify values that differ from pretrain.py defaults
-# Defaults: model=pythia-160m, total_steps=10000, mixin_percent=0.02,
-#           pptrain_checkpoint="latest", micro_batch=2, grad_accum=2, etc.
+# Mode 1: C4 only (baseline) - Fresh model + 100% C4
+# All pretrain.py arguments are listed here for easy modification.
+# ==========================================================
 
-DATA_DIR="/scratch/gautschi/mnickel/data/nl_splits/mis384_look64_seed12345"
+# Run configuration
+RUN_NAME="pretrain_fresh_perseq_lr2e-4_3000steps_0pct_bs1024_warmup100"
+DATA_DIR="/scratch/gautschi/mnickel/data/nl_splits"
+C4_DIR="/scratch/gautschi/mnickel/data/c4_tokenized"
+
+# Model
+MODEL_NAME="EleutherAI/pythia-160m"
+SEED=1337
+
+# Mode settings
+USE_SYNTHETIC_MIX="False"
+SYNTHETIC_SEED=99999
+SYNTHETIC_PERCENT="0.05"
+PPTRAIN_CHECKPOINT=""  # Not used for C4 only
+
+# Training
+TOTAL_STEPS=3000
+SEQ_LEN=2048
+MICRO_BATCH=16
+GRAD_ACCUM=8
+
+# Optimizer
+LR="2e-4"
+MIN_LR_RATIO="0.1"
+WEIGHT_DECAY="0.1"
+ADAM_BETA1="0.9"
+ADAM_BETA2="0.999"
+ADAM_EPS="1e-6"
+GRAD_CLIP="1.0"
+WARMUP_STEPS=100
+
+# Precision and checkpointing
+MIXED_PRECISION="bf16"
+SAVE_EVERY=10
+LOG_EVERY=10
+
+# Synthetic data config (not used for C4 only, but listed for completeness)
+MAX_LOOKAHEAD=32
 
 # ==========================================================
 
 echo "=========================================="
-echo "PRETRAINING (pretrain)"
+echo "PRETRAINING: $RUN_NAME (C4 only - baseline)"
+echo "Run dir: $SCRATCH/$RUN_NAME"
 echo "Data dir: $DATA_DIR"
-echo "Scratch: $SCRATCH"
+echo "C4 dir: $C4_DIR"
+echo "Model: $MODEL_NAME"
+echo "Total steps: $TOTAL_STEPS"
+echo "Batch: micro=$MICRO_BATCH grad_accum=$GRAD_ACCUM seq_len=$SEQ_LEN"
+echo "Optimizer: lr=$LR warmup=$WARMUP_STEPS"
 echo "=========================================="
 
-# ========== Build C++ generator if needed ==========
-cd /home/$USER/git/nl-fine-tuning/nl
+# ========== Cache model ==========
+cd /home/$USER/git/nl-fine-tuning/nl/pre_pretrain
 python -c "
-try:
-    import generator
-    print('[OK] C++ generator present')
-except:
-    print('[INFO] Building C++ generator...')
-    import subprocess, sys
-    subprocess.check_call([sys.executable, 'nl_generator.py'])
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import os
+m, c = '$MODEL_NAME', os.environ['HF_HOME']
+AutoTokenizer.from_pretrained(m, cache_dir=c, trust_remote_code=True)
+AutoModelForCausalLM.from_pretrained(m, cache_dir=c, trust_remote_code=True)
+print('[OK] Model cached')
 "
 
 # ========== Find latest checkpoint for auto-resume ==========
-CKPT_DIR="$SCRATCH/pretrain/checkpoints"
+CKPT_DIR="$SCRATCH/$RUN_NAME/checkpoints"
 LATEST_CKPT=""
 if [ -d "$CKPT_DIR" ]; then
     LATEST_CKPT=$(ls -d "$CKPT_DIR"/step_* 2>/dev/null | sort | tail -n1 || true)
@@ -96,13 +137,36 @@ fi
 if [ -n "$LATEST_CKPT" ]; then
     echo "Found checkpoint for resume: $LATEST_CKPT"
 else
-    echo "No checkpoint found, will load from pptrain checkpoint"
+    echo "No checkpoint found, starting fresh"
 fi
 
-# ========== Build arguments (minimal - use defaults) ==========
+# ========== Build arguments ==========
 ARGS=(
     --scratch_dir "$SCRATCH"
+    --run_name "$RUN_NAME"
+    --model_name "$MODEL_NAME"
+    --seed "$SEED"
+    --use_synthetic_mix "$USE_SYNTHETIC_MIX"
+    --synthetic_seed "$SYNTHETIC_SEED"
+    --synthetic_percent "$SYNTHETIC_PERCENT"
+    --total_steps "$TOTAL_STEPS"
+    --seq_len "$SEQ_LEN"
+    --micro_batch "$MICRO_BATCH"
+    --grad_accum "$GRAD_ACCUM"
+    --lr "$LR"
+    --min_lr_ratio "$MIN_LR_RATIO"
+    --weight_decay "$WEIGHT_DECAY"
+    --adam_beta1 "$ADAM_BETA1"
+    --adam_beta2 "$ADAM_BETA2"
+    --adam_eps "$ADAM_EPS"
+    --grad_clip "$GRAD_CLIP"
+    --warmup_steps "$WARMUP_STEPS"
+    --mixed_precision "$MIXED_PRECISION"
     --data_dir "$DATA_DIR"
+    --c4_dir "$C4_DIR"
+    --max_lookahead "$MAX_LOOKAHEAD"
+    --save_every "$SAVE_EVERY"
+    --log_every "$LOG_EVERY"
 )
 
 # Add resume flag if checkpoint exists
