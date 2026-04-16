@@ -29,6 +29,46 @@ def _print(msg):
     print(msg)
 
 
+def _smooth_step_based(steps, values, window=500):
+    """Step-based smoothing: average values within a step window."""
+    smoothed = np.empty(len(values))
+    smoothed[:] = np.nan
+    left = 0
+    for i in range(len(values)):
+        while steps[left] < steps[i] - window:
+            left += 1
+        smoothed[i] = np.mean(values[left:i + 1])
+    return smoothed
+
+
+def _overlay_split_losses(ax, valid_history, x_values, steps, step_window=500):
+    """Overlay search_loss and pretrain_loss lines if available in loss history."""
+    has_search = any("search_loss" in h for h in valid_history)
+    has_pretrain = any("pretrain_loss" in h for h in valid_history)
+    if not has_search and not has_pretrain:
+        return
+
+    x = np.array(x_values)
+
+    if has_search:
+        search_losses = np.array([h.get("search_loss", np.nan) for h in valid_history])
+        mask = ~np.isnan(search_losses)
+        if mask.any():
+            sm = _smooth_step_based(steps[mask], search_losses[mask], step_window)
+            sm_valid = ~np.isnan(sm)
+            ax.plot(x[mask][sm_valid], sm[sm_valid], linewidth=2, color='green',
+                    label=f'Search Loss (w={step_window})', alpha=0.9)
+
+    if has_pretrain:
+        pt_losses = np.array([h.get("pretrain_loss", np.nan) for h in valid_history])
+        mask = ~np.isnan(pt_losses)
+        if mask.any():
+            sm = _smooth_step_based(steps[mask], pt_losses[mask], step_window)
+            sm_valid = ~np.isnan(sm)
+            ax.plot(x[mask][sm_valid], sm[sm_valid], linewidth=2, color='orange',
+                    label=f'Instruct Loss (w={step_window})', alpha=0.9)
+
+
 def fit_exponential_decay(steps: List[int], losses: List[float], window: int = 50,
                           skip_initial_spike: bool = True) -> Optional[Dict[str, float]]:
     """
@@ -387,7 +427,10 @@ def plot_loss_vs_flops(loss_history: List[Dict], output_dir: str, flops_per_toke
             left += 1
         smoothed[i] = np.mean(losses[left:i + 1])
     valid_mask = ~np.isnan(smoothed)
-    ax.plot(cumulative_pflops[valid_mask], smoothed[valid_mask], linewidth=2, color='blue', label=f'Smoothed (w={step_window} steps)')
+    ax.plot(cumulative_pflops[valid_mask], smoothed[valid_mask], linewidth=2, color='blue', label=f'Total Loss (w={step_window} steps)')
+
+    # Overlay search/instruct loss lines if available
+    _overlay_split_losses(ax, valid_history, cumulative_pflops.tolist(), steps, step_window)
 
     stage_info = {}
     for i, h in enumerate(valid_history):
@@ -468,7 +511,10 @@ def plot_loss_vs_walltime(loss_history: List[Dict], output_dir: str, n_stages: i
             left += 1
         smoothed[i] = np.mean(losses[left:i + 1])
     valid_mask = ~np.isnan(smoothed)
-    ax.plot(wall_times[valid_mask], smoothed[valid_mask], linewidth=2, color='blue', label=f'Smoothed (w={step_window} steps)')
+    ax.plot(wall_times[valid_mask], smoothed[valid_mask], linewidth=2, color='blue', label=f'Total Loss (w={step_window} steps)')
+
+    # Overlay search/instruct loss lines if available
+    _overlay_split_losses(ax, valid_history, wall_times.tolist(), steps, step_window)
 
     stage_info = {}
     for i, h in enumerate(valid_history):
@@ -824,7 +870,10 @@ def plot_loss_vs_gpu_hours(loss_history: List[Dict], output_dir: str, n_gpus: in
             left += 1
         smoothed[i] = np.mean(losses[left:i + 1])
     valid_mask = ~np.isnan(smoothed)
-    ax.plot(gpu_hours[valid_mask], smoothed[valid_mask], linewidth=2, color='blue', label=f'Smoothed (w={step_window} steps)')
+    ax.plot(gpu_hours[valid_mask], smoothed[valid_mask], linewidth=2, color='blue', label=f'Total Loss (w={step_window} steps)')
+
+    # Overlay search/instruct loss lines if available
+    _overlay_split_losses(ax, valid_history, gpu_hours.tolist(), steps, step_window)
 
     stage_info = {}
     for i, h in enumerate(valid_history):
@@ -1209,33 +1258,93 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
     # Load all data
     runs = {}
     for job_dir, label, color in zip(job_dirs, labels, colors):
-        # Load loss history
-        lp = os.path.join(job_dir, "loss_history.json")
-        if not os.path.isfile(lp):
+        # Follow job chain: check run_meta.json for resume_from_job
+        import re as _re
+        chain_dirs = [job_dir]
+        cur = job_dir
+        while True:
+            meta_path = os.path.join(cur, "run_meta.json")
+            if not os.path.isfile(meta_path):
+                break
+            with open(meta_path) as f:
+                meta = json.load(f)
+            rfj = _re.search(r'--resume_from_job (\d+)', meta.get('cli', ''))
+            if not rfj:
+                break
+            parent_dir = os.path.join(os.path.dirname(cur), f"job_{rfj.group(1)}")
+            if not os.path.isdir(parent_dir) or parent_dir in chain_dirs:
+                break
+            chain_dirs.append(parent_dir)
+            cur = parent_dir
+
+        # Load loss history — use the latest job's data (it includes parent data if resumed properly)
+        # Only merge from parent if child doesn't already include it
+        chain_dirs.reverse()  # oldest first
+        h = []
+        for d in chain_dirs:
+            lp = os.path.join(d, "loss_history.json")
+            if not os.path.isfile(lp):
+                continue
+            with open(lp) as f:
+                part = json.load(f)
+            if not part:
+                continue
+            if not h:
+                h = part
+            elif part[0]["step"] > h[-1]["step"]:
+                # Child continues from where parent left off — append
+                h.extend(part)
+            else:
+                # Child includes parent data (starts at step 1) — use child's data
+                # which is more complete (has both parent history + new training)
+                if len(part) > len(h):
+                    h = part
+
+        if not h:
             _print(f"Skipping {label}: no loss_history.json")
             continue
-        with open(lp) as f:
-            h = json.load(f)
-        if not h:
-            continue
 
-        # Load plot_data for flops_per_token
-        pd_path = os.path.join(job_dir, "plot_data.json")
+        # Merge stage_eval_history from chain
+        all_evals = []
+        for d in chain_dirs:
+            ep = os.path.join(d, "stage_eval_history.json")
+            if os.path.isfile(ep):
+                with open(ep) as f:
+                    all_evals.extend(json.load(f))
+        # Deduplicate by step
+        seen_steps = set()
+        merged_evals = []
+        for ev in all_evals:
+            if ev["step"] not in seen_steps:
+                seen_steps.add(ev["step"])
+                merged_evals.append(ev)
+        merged_evals.sort(key=lambda e: e["step"])
+
+        # Load plot_data for flops_per_token (from latest job)
         fpt = None
         n_gpus = 4
-        if os.path.isfile(pd_path):
-            with open(pd_path) as f:
-                pd = json.load(f)
-            fpt = pd.get("flops_per_token")
-            n_gpus = pd.get("n_gpus") or 4
+        for d in reversed(chain_dirs):
+            pd_path = os.path.join(d, "plot_data.json")
+            if os.path.isfile(pd_path):
+                with open(pd_path) as f:
+                    pd = json.load(f)
+                fpt = pd.get("flops_per_token")
+                n_gpus = pd.get("n_gpus") or 4
+                if fpt:
+                    break
 
         if fpt is None:
             _print(f"Skipping {label}: no flops_per_token in plot_data.json")
             continue
 
+        if len(chain_dirs) > 1:
+            _print(f"  (merged {len(chain_dirs)} jobs: {' -> '.join(os.path.basename(d) for d in chain_dirs)})")
+
         tokens = np.array([e.get("tokens", 0) for e in h], dtype=np.float64)
         steps = np.array([e["step"] for e in h])
-        losses = np.array([e["loss"] for e in h])
+        # Use search_loss if available (for pretrain-mix runs), fall back to total loss
+        has_search_loss = any("search_loss" in e for e in h)
+        losses = np.array([e.get("search_loss", e["loss"]) for e in h]) if has_search_loss else np.array([e["loss"] for e in h])
         cum_pflops = np.cumsum(tokens * fpt) / 1e15
         gpu_hours = np.array([e.get("wall_time", 0) / 3600 * n_gpus for e in h])
 
@@ -1257,17 +1366,10 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
                 transitions.append((i, e.get("effective_L", "?")))
                 prev = e["stage"]
 
-        # Evals
-        ep = os.path.join(job_dir, "stage_eval_history.json")
-        evals = []
-        if os.path.isfile(ep):
-            with open(ep) as f:
-                evals = json.load(f)
-
         runs[label] = {
             "h": h, "steps": steps, "losses": losses, "smoothed": smoothed,
             "cum_pflops": cum_pflops, "gpu_hours": gpu_hours,
-            "transitions": transitions, "evals": evals, "color": color,
+            "transitions": transitions, "evals": merged_evals, "color": color,
         }
         _print(f"Loaded {label}: {len(h):,} entries, L={h[-1].get('effective_L')}")
 
@@ -1277,56 +1379,148 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
 
     sfn = lambda h: max(len(h) // 5000, 1)
 
-    # ── Loss plots ──
+    # ── Loss plots (plot_step_comparison style: inline text labels, density-controlled) ──
     for x_key, xlabel, fn in [
         ("pflops", "Cumulative Compute (PFLOPs)", "loss_vs_flops.png"),
         ("gpu_hours", "GPU-hours", "loss_vs_gpu_hours.png"),
         ("steps", "Training Steps", "loss_vs_steps.png"),
     ]:
-        fig, ax = plt.subplots(figsize=(14, 7))
-        for label, md in runs.items():
+        fig, ax = plt.subplots(figsize=(11, 5))
+        # Pick label vertical-offset direction per run to avoid overlap (alternate above/below)
+        for r_idx, (label, md) in enumerate(runs.items()):
             s = sfn(md["h"])
             x = md["steps"] if x_key == "steps" else md["cum_pflops"] if x_key == "pflops" else md["gpu_hours"]
+            # Subsample raw trace
             ax.plot(x[::s], md["losses"][::s], alpha=0.15, linewidth=0.5, color=md["color"])
-            ax.plot(x[::s], md["smoothed"][::s], linewidth=2, color=md["color"], label=label)
+            # For smoothed line, ensure x is monotonically increasing (fix wall_time resets)
+            x_sm = x.copy()
+            for i in range(1, len(x_sm)):
+                if x_sm[i] < x_sm[i-1]:
+                    x_sm[i] = x_sm[i-1]
+            sm_stride = max(len(md["h"]) // 10000, 1)
+            ax.plot(x_sm[::sm_stride], md["smoothed"][::sm_stride], linewidth=1.5,
+                    color=md["color"], label=label)
+            # Auto-pick label density: ≤16 stages = label all, more = downsample to ~16
+            n_stages = len(md["transitions"])
+            labeled_every = max(1, n_stages // 16)
+            # Alternate above/below per run so labels from different runs don't collide
+            place_above = (r_idx % 2 == 0)
             for idx, L in md["transitions"]:
-                ax.plot(x[idx], md["smoothed"][idx], 'o', color=md["color"], markersize=5, zorder=10)
-                ax.annotate(f'L={L}', (x[idx], md["smoothed"][idx]), textcoords="offset points",
-                            xytext=(4, 8), fontsize=9, color=md["color"], fontweight='bold')
-        ax.set_xlabel(xlabel, fontsize=12)
-        ax.set_ylabel('Loss', fontsize=12)
+                if labeled_every > 1 and L % labeled_every != 0:
+                    continue
+                y_text = md["smoothed"][idx] * (1.3 if place_above else 0.75)
+                ax.text(x_sm[idx], y_text, f"L={L}", fontsize=6, color=md["color"],
+                        ha="center", va="bottom" if place_above else "top")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel('Loss')
         ax.set_yscale('log')
-        ax.set_title(f'Training Loss vs {xlabel} — {title_prefix}', fontsize=13)
-        ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
+        ax.set_title(f'Training Loss vs {xlabel} — {title_prefix}')
+        ax.legend(loc="upper right", fontsize=9)
+        ax.grid(True, alpha=0.3, which="both")
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, fn), dpi=150)
         plt.close()
         _print(f"Saved {fn}")
 
-    # ── Lookahead vs FLOPs ──
-    fig, ax = plt.subplots(figsize=(14, 7))
+    # ── Lookahead vs (FLOPs | GPU-hours) ──
+    # Build per-run stage-transition (x, L) lists for each x-axis at the same time so
+    # we can reuse them later for the ratio plot.
+    per_run_stages = {}  # label -> {"pflops": [(pflop, L), ...], "gpu_hours": [(gh, L), ...]}
     for label, md in runs.items():
-        pfl = [(0, md["h"][0].get("effective_L", 0))]
+        stages_pflops = [(0, md["h"][0].get("effective_L", 0))]
+        stages_gpuh = [(0, md["h"][0].get("effective_L", 0))]
         prev = md["h"][0]["stage"]
         for i, e in enumerate(md["h"]):
             if e["stage"] != prev:
-                pfl.append((md["cum_pflops"][i], e.get("effective_L", 0)))
+                L = e.get("effective_L", 0)
+                stages_pflops.append((md["cum_pflops"][i], L))
+                stages_gpuh.append((md["gpu_hours"][i], L))
                 prev = e["stage"]
-        pfl.append((md["cum_pflops"][-1], md["h"][-1].get("effective_L", 0)))
-        xs, ys = zip(*pfl)
-        ax.step(xs, ys, where='post', linewidth=2.5, color=md["color"], label=label)
-        for x, y in pfl[1:-1]:
-            ax.plot(x, y, 'o', color=md["color"], markersize=5, zorder=10)
-    ax.set_xlabel('Cumulative Compute (PFLOPs)', fontsize=12)
-    ax.set_ylabel('Achieved Lookahead (L)', fontsize=12)
-    ax.set_title(f'Achieved Lookahead vs Compute — {title_prefix}', fontsize=13)
-    ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "lookahead_vs_flops.png"), dpi=150)
-    plt.close()
-    _print("Saved lookahead_vs_flops.png")
+        stages_pflops.append((md["cum_pflops"][-1], md["h"][-1].get("effective_L", 0)))
+        stages_gpuh.append((md["gpu_hours"][-1], md["h"][-1].get("effective_L", 0)))
+        per_run_stages[label] = {"pflops": stages_pflops, "gpu_hours": stages_gpuh}
+
+    def _annotate_stages_boxed(ax, stages, color, labeled_every=1, y_offset=0.5):
+        """plot_step_comparison-style boxed L=N labels with white bg + colored border."""
+        Ls = sorted({L for _, L in stages if L > 0})
+        for L in Ls:
+            if labeled_every > 1 and L % labeled_every != 0:
+                continue
+            # Find x for first occurrence of this L
+            x = next(x for x, l in stages if l == L)
+            ax.text(x, L + y_offset, f"L={L}", fontsize=7, color=color,
+                    ha="center", va="bottom",
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color,
+                              lw=0.5, alpha=0.9))
+
+    for axis_key, xlabel, fname in [
+        ("pflops",    "Cumulative Compute (PFLOPs)", "lookahead_vs_flops.png"),
+        ("gpu_hours", "GPU-hours",                   "lookahead_vs_gpu_hours.png"),
+    ]:
+        fig, ax = plt.subplots(figsize=(11, 5))
+        for label, md in runs.items():
+            stages = per_run_stages[label][axis_key]
+            xs, ys = zip(*stages)
+            ax.plot(xs, ys, "-", linewidth=2, color=md["color"], label=label)
+            # Auto-pick label density: if >20 stages, label every Nth so it's not crowded
+            n_stages = len({L for _, L in stages if L > 0})
+            labeled_every = max(1, n_stages // 16)
+            _annotate_stages_boxed(ax, stages, md["color"], labeled_every=labeled_every)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel('Achieved Lookahead (L)')
+        ax.set_title(f'Achieved Lookahead vs {xlabel} — {title_prefix}')
+        ax.legend(loc="lower right", fontsize=9)
+        ax.set_ylim(bottom=0)
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, fname), dpi=150)
+        plt.close()
+        _print(f"Saved {fname}")
+
+    # ── Compute ratio per L (variant/baseline) ──
+    # Only meaningful if there are ≥2 runs; uses the FIRST run as baseline.
+    if len(runs) >= 2:
+        labels_list = list(runs.keys())
+        baseline_label = labels_list[0]
+        # baseline_L -> first_pflops dict for quick lookup
+        baseline_stages = {L: pf for pf, L in per_run_stages[baseline_label]["pflops"]
+                           if L > 0}
+        fig, ax = plt.subplots(figsize=(14, 7))
+        bar_width = 0
+        # Collect all variant L values to size bars proportionally
+        for v_idx, label in enumerate(labels_list[1:], start=1):
+            md = runs[label]
+            v_stages = {L: pf for pf, L in per_run_stages[label]["pflops"] if L > 0}
+            shared_Ls = sorted(set(v_stages.keys()) & set(baseline_stages.keys()))
+            if not shared_Ls:
+                continue
+            ratios = [v_stages[L] / baseline_stages[L] for L in shared_Ls]
+            # Offset bars per variant to avoid overlap
+            n_variants = len(labels_list) - 1
+            if bar_width == 0:
+                bar_width = (min(np.diff(shared_Ls)) if len(shared_Ls) > 1 else 4) * 0.8 / n_variants
+            offset = (v_idx - 1 - (n_variants - 1) / 2) * bar_width
+            ax.bar([L + offset for L in shared_Ls], ratios, width=bar_width,
+                   color=md["color"], edgecolor="black", linewidth=0.5,
+                   label=f"{label} / {baseline_label}")
+            # Annotate
+            for L, r in zip(shared_Ls, ratios):
+                if r < 100:  # skip absurd noise from tiny baseline at very early L
+                    ax.text(L + offset, r * 1.02, f"{r:.1f}x",
+                            ha="center", va="bottom", fontsize=7, color="black")
+        ax.axhline(1.0, color="black", linestyle="--", linewidth=1,
+                   label=f"{baseline_label} baseline")
+        ax.set_xlabel('Lookahead Depth L', fontsize=12)
+        ax.set_ylabel(f'Compute Ratio (variant / {baseline_label})', fontsize=12)
+        ax.set_title(f'Per-L Compute Ratio vs Baseline — {title_prefix}', fontsize=13)
+        # Cap y-axis at 95th percentile of finite ratios to avoid early-stage noise dominating
+        ax.set_ylim(0, 8)
+        ax.legend(fontsize=9, loc="upper right")
+        ax.grid(True, alpha=0.3, axis="y")
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "compute_ratio_per_L.png"), dpi=150)
+        plt.close()
+        _print("Saved compute_ratio_per_L.png")
 
     # ── Eval accuracy plots ──
     for x_key, xlabel, suffix in [
@@ -1338,12 +1532,20 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
         for label, md in runs.items():
             if not md["evals"]:
                 continue
+            # Build monotonic x-axis arrays
+            x_arr = md["steps"] if x_key == "steps" else md["cum_pflops"] if x_key == "pflops" else md["gpu_hours"]
+            x_mono = x_arr.copy()
+            for i in range(1, len(x_mono)):
+                if x_mono[i] < x_mono[i-1]:
+                    x_mono[i] = x_mono[i-1]
             xs, ys = [], []
             for ev in md["evals"]:
                 idx = min(np.searchsorted(md["steps"], ev["step"]), len(md["steps"]) - 1)
-                x = ev["step"] if x_key == "steps" else md["cum_pflops"][idx] if x_key == "pflops" else md["gpu_hours"][idx]
-                xs.append(x)
+                xs.append(x_mono[idx])
                 ys.append(ev.get("greedy_full", 0) * 100)
+            # Sort by x to prevent backwards lines
+            pairs = sorted(zip(xs, ys))
+            xs, ys = [p[0] for p in pairs], [p[1] for p in pairs]
             ax.plot(xs, ys, 'o-', color=md["color"], label=label, markersize=3, linewidth=1.5)
         ax.set_xlabel(xlabel, fontsize=12)
         ax.set_ylabel('Greedy Full Accuracy (%)', fontsize=12)
