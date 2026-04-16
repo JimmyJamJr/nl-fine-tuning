@@ -640,6 +640,12 @@ class PackedSequenceDataset(Dataset):
             store_examples: bool = False,
             store_cap: int = 1000,
             epoch_size: int = 10_000_000,  # Large enough to never cycle
+            mix_pretrain_data: Optional[str] = None,
+            mix_pretrain_subset: Optional[str] = "en",
+            mix_pretrain_ratio: float = 0.1,
+            mix_pretrain_max_len: int = 512,
+            mix_pretrain_cache_dir: Optional[str] = None,
+            use_chat_template: bool = False,
             **task_kwargs,
     ):
         if not FLASH_ATTN_AVAILABLE:
@@ -666,6 +672,19 @@ class PackedSequenceDataset(Dataset):
         self.task_kwargs = task_kwargs
         self.epoch_size = epoch_size
 
+        # Pretraining data mixing (anti-catastrophic-forgetting)
+        self.mix_pretrain_data = mix_pretrain_data
+        self.mix_pretrain_subset = mix_pretrain_subset
+        self.mix_pretrain_ratio = mix_pretrain_ratio
+        self.mix_pretrain_max_len = mix_pretrain_max_len
+        self.mix_pretrain_cache_dir = mix_pretrain_cache_dir
+        self.use_chat_template = use_chat_template
+        if mix_pretrain_data:
+            print(f"[DATASET] Pretraining mix: {mix_pretrain_data} ({mix_pretrain_subset}), "
+                  f"ratio={mix_pretrain_ratio:.0%}, max_len={mix_pretrain_max_len}")
+        if use_chat_template:
+            print(f"[DATASET] Chat template enabled for search data (enable_thinking=False)")
+
         self.eos_token_id = tokenizer.eos_token_id
         self.pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
 
@@ -679,6 +698,7 @@ class PackedSequenceDataset(Dataset):
         # Per-worker state (lazily initialized)
         self._worker_generator = None
         self._worker_rng = None
+        self._pretrain_iterator = None
         self._worker_id = None
 
         self.few_shot_examples = self._build_few_shots(num_shots, seed)
@@ -813,12 +833,32 @@ class PackedSequenceDataset(Dataset):
         chosen = rng.choice(ex.output_texts)
         task_type = _determine_task_type(self.task, ex.input_text)
 
-        prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
-        ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
-        end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+        if self.use_chat_template:
+            # Wrap search data in chat template with enable_thinking=False
+            msgs = [
+                {"role": "user", "content": prompt_text},
+                {"role": "assistant", "content": chosen},
+            ]
+            full_ids = self.tokenizer.apply_chat_template(
+                msgs, tokenize=True, add_generation_prompt=False,
+                enable_thinking=False,
+            )
+            # Find the boundary: tokenize prefix up to assistant response
+            prefix_ids = self.tokenizer.apply_chat_template(
+                msgs[:1], tokenize=True, add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            prompt_ids = full_ids[:len(prefix_ids)]
+            ans_ids = full_ids[len(prefix_ids):]
+            input_ids = full_ids
+            labels = [-100] * len(prompt_ids) + ans_ids
+        else:
+            prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
+            ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
+            end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
 
-        input_ids = prompt_ids + ans_ids + end_ids
-        labels = [-100] * len(prompt_ids) + ans_ids + end_ids
+            input_ids = prompt_ids + ans_ids + end_ids
+            labels = [-100] * len(prompt_ids) + ans_ids + end_ids
 
         # Build valid first token targets (tokenize each alternative once)
         first_union = sorted({
@@ -892,32 +932,186 @@ class PackedSequenceDataset(Dataset):
             "_efficiency": 100.0,
         }
 
+    def _get_pretrain_iterator(self, rng):
+        """Lazily load streaming pretraining dataset in each worker."""
+        if self._pretrain_iterator is None:
+            import os
+            os.environ.setdefault("HF_DATASETS_DOWNLOAD_TIMEOUT", "120")
+            from datasets import load_dataset
+            worker_info = torch.utils.data.get_worker_info()
+            worker_id = worker_info.id if worker_info else 0
+            load_kwargs = dict(
+                path=self.mix_pretrain_data,
+                split="train",
+                streaming=True,
+                cache_dir=self.mix_pretrain_cache_dir,
+                trust_remote_code=True,
+                download_config=__import__('datasets').DownloadConfig(
+                    num_proc=1, max_retries=5,
+                ),
+            )
+            if self.mix_pretrain_subset:
+                load_kwargs["name"] = self.mix_pretrain_subset
+            ds = load_dataset(**load_kwargs)
+            # Shuffle with worker-specific seed
+            seed = (self.seed or 0) + 77777 + worker_id
+            ds = ds.shuffle(seed=seed, buffer_size=1000)
+            self._pretrain_iterator = iter(ds)
+        return self._pretrain_iterator
+
+    def _generate_one_pretrain_sample(self, rng):
+        """Generate a single pretraining/instruction sample.
+
+        Supports two dataset formats:
+          - Raw text (e.g. C4): uses 'text' field, standard causal LM loss on all tokens
+          - Chat/instruction (e.g. Dolci-Instruct-SFT): uses 'messages' field,
+            formats with chat template, loss only on assistant turns
+        """
+        pretrain_iter = self._get_pretrain_iterator(rng)
+        max_len = self.mix_pretrain_max_len
+
+        for _ in range(20):  # try up to 20 texts to find a valid one
+            try:
+                example = next(pretrain_iter)
+            except StopIteration:
+                self._pretrain_iterator = None
+                pretrain_iter = self._get_pretrain_iterator(rng)
+                example = next(pretrain_iter)
+            except Exception:
+                import time
+                time.sleep(1)
+                continue
+
+            # Chat/instruction format (e.g. Dolci-Instruct-SFT)
+            if "messages" in example and example["messages"]:
+                messages = example["messages"]
+                # Need at least one user + one assistant message
+                if len(messages) < 2:
+                    continue
+                # Filter to role/content only
+                msgs = [{"role": m["role"], "content": m["content"]} for m in messages
+                        if m.get("role") and m.get("content")]
+                if len(msgs) < 2:
+                    continue
+
+                # Use chat template with enable_thinking=False to properly format
+                # instruction data with empty <think> blocks (matches Qwen3 non-thinking mode)
+                try:
+                    # Tokenize full conversation
+                    full_ids = self.tokenizer.apply_chat_template(
+                        msgs, tokenize=True, add_generation_prompt=False,
+                        enable_thinking=False,
+                        truncation=True, max_length=max_len,
+                    )
+                except Exception:
+                    continue
+
+                if len(full_ids) < 4:
+                    continue
+
+                # Build labels: only train on assistant response tokens
+                # Tokenize prefixes to find assistant response boundaries
+                labels = [-100] * len(full_ids)
+                for i in range(len(msgs)):
+                    if msgs[i]["role"] != "assistant":
+                        continue
+                    # Prefix: everything up to this assistant turn (with generation prompt)
+                    if i > 0:
+                        prefix_ids = self.tokenizer.apply_chat_template(
+                            msgs[:i], tokenize=True, add_generation_prompt=True,
+                            enable_thinking=False,
+                            truncation=True, max_length=max_len,
+                        )
+                    else:
+                        prefix_ids = []
+                    # Through: everything up to and including this assistant turn
+                    through_ids = self.tokenizer.apply_chat_template(
+                        msgs[:i + 1], tokenize=True, add_generation_prompt=False,
+                        enable_thinking=False,
+                        truncation=True, max_length=max_len,
+                    )
+                    tok_start = len(prefix_ids)
+                    tok_end = min(len(through_ids), len(full_ids))
+                    # Labels: compute_loss already shifts (shift_labels = all_labels[1:]),
+                    # so labels[t] = full_ids[t] (same position, NOT t+1)
+                    for t in range(tok_start, tok_end):
+                        labels[t] = full_ids[t]
+
+                if all(l == -100 for l in labels):
+                    continue
+
+                return {
+                    "input_ids": full_ids,
+                    "labels": labels,
+                    "seq_len": len(full_ids),
+                    "prompt_len": 0,
+                    "valid_first_targets": [],
+                }
+
+            # Raw text format (e.g. C4)
+            text = example.get("text", "")
+            if not text or len(text) < 10:
+                continue
+
+            token_ids = self.tokenizer(
+                text, add_special_tokens=True, truncation=True,
+                max_length=max_len, return_attention_mask=False,
+            )["input_ids"]
+
+            if len(token_ids) < 4:
+                continue
+
+            # Standard causal LM: labels = input_ids, with -100 at position 0
+            labels = [-100] + token_ids[1:]
+
+            return {
+                "input_ids": token_ids,
+                "labels": labels,
+                "seq_len": len(token_ids),
+                "prompt_len": 0,
+                "valid_first_targets": [],
+            }
+
+        return None
+
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
         Generate one fully packed batch.
 
         Each call generates target_samples_per_batch samples and packs them
-        into a single flat sequence.
+        into a single flat sequence. With mix_pretrain_data enabled, a fraction
+        of samples within each batch are pretraining data (within-batch mixing).
         """
         effective_idx = idx + self.resume_step
         gen, rng = self._get_worker_state(effective_idx)
 
         target_samples = self.target_samples_per_batch
 
+        # Determine how many pretrain vs search samples in this batch
+        if self.mix_pretrain_data and self.mix_pretrain_ratio > 0:
+            n_pretrain = int(target_samples * self.mix_pretrain_ratio)
+            n_search = target_samples - n_pretrain
+        else:
+            n_pretrain = 0
+            n_search = target_samples
+
         all_samples = []
 
-        # Generate samples until we hit target count
-        max_attempts = target_samples * 10
+        # Generate search samples
+        max_attempts = n_search * 10
         attempts = 0
-
-        while len(all_samples) < target_samples and attempts < max_attempts:
+        while len(all_samples) < n_search and attempts < max_attempts:
             attempts += 1
             sample = self._generate_one_sample(rng)
-
             if sample is None:
                 continue
-
             all_samples.append(sample)
+
+        # Generate pretrain samples (within same batch)
+        for _ in range(n_pretrain):
+            pt_sample = self._generate_one_pretrain_sample(rng)
+            if pt_sample is not None:
+                all_samples.append(pt_sample)
 
         # Handle edge case: no samples generated
         if not all_samples:
@@ -942,6 +1136,8 @@ class PackedSequenceTrainer(Trainer):
         self.recent_losses = deque(maxlen=100)
         self.first_token_correct = deque(maxlen=accuracy_window)
         self.full_word_correct = deque(maxlen=accuracy_window)
+        self._last_search_loss = None
+        self._last_pretrain_loss = None
 
         self._last_batch_samples = 0
         self._last_batch_tokens = 0
@@ -1295,12 +1491,15 @@ class PackedSequenceTrainer(Trainer):
             first_indices = torch.zeros(S, dtype=torch.long, device=device)
             seq_starts = torch.zeros(S, dtype=torch.long, device=device)
             seq_ends = torch.zeros(S, dtype=torch.long, device=device)
+            is_search = torch.zeros(S, dtype=torch.bool, device=device)
             for si, seq in enumerate(sequence_info):
-                first_indices[si] = seq["start_idx"] + seq["prompt_len"] - 1
-                seq_starts[si] = seq["start_idx"] + seq["prompt_len"] - 1
+                pl = seq["prompt_len"]
+                is_search[si] = pl > 0  # pretrain samples have prompt_len=0
+                first_indices[si] = seq["start_idx"] + max(pl, 1) - 1
+                seq_starts[si] = seq["start_idx"] + max(pl, 1) - 1
                 seq_ends[si] = min(seq["end_idx"] - 1, Tm1)
 
-            first_in_range = (first_indices >= 0) & (first_indices < Tm1)
+            first_in_range = (first_indices >= 0) & (first_indices < Tm1) & is_search
             first_valid = first_in_range & valid_mask[first_indices.clamp(0, Tm1 - 1)]
 
             # Chunked lm_head to avoid OOM (full [Tm1, V] logits would be ~65 GiB)
@@ -1346,6 +1545,23 @@ class PackedSequenceTrainer(Trainer):
 
             loss = ce.sum() / n_valid
 
+            # Track separate search vs pretrain loss for logging
+            with torch.no_grad():
+                # Build per-token is_search mask (shifted by 1 for autoregressive)
+                token_is_search = torch.zeros(Tm1, dtype=torch.bool, device=device)
+                for si in range(S):
+                    if is_search[si]:
+                        s, e = int(seq_starts[si]), int(seq_ends[si])
+                        if s < e:
+                            token_is_search[s:e] = True
+                search_valid = valid_mask & token_is_search
+                pretrain_valid = valid_mask & ~token_is_search
+                ce_idx = torch.cumsum(valid_mask.int(), dim=0) - 1
+                n_search = search_valid.sum().item()
+                n_pretrain = pretrain_valid.sum().item()
+                self._last_search_loss = ce[ce_idx[search_valid]].mean().item() if n_search > 0 else None
+                self._last_pretrain_loss = ce[ce_idx[pretrain_valid]].mean().item() if n_pretrain > 0 else None
+
             # Track accuracy
             # Batch GPU->CPU transfers to minimize sync points
             with torch.no_grad():
@@ -1363,7 +1579,10 @@ class PackedSequenceTrainer(Trainer):
                     self.first_token_correct.append(first_pred_list[j] in sequence_info[si]["valid_first_targets"])
 
                 # Full-word accuracy (pure Python loop on CPU tensors)
+                is_search_cpu = is_search.cpu()
                 for si in range(S):
+                    if not is_search_cpu[si]:
+                        continue  # skip pretrain samples
                     s, e = starts[si], ends[si]
                     if s >= e:
                         continue
@@ -1415,17 +1634,37 @@ def run_eval_tf_loss(
     local_count = 0
     unwrapped = model.module if hasattr(model, "module") else model
 
+    use_chat_template = kwargs.get("use_chat_template", False)
+
     for x, ys in zip(my_inputs, my_labels):
         ys = ys if isinstance(ys, list) else [ys]
         chosen = rng.choice(ys)
         task_type = _determine_task_type(task, x)
 
-        prompt_ids = tokenizer(x, add_special_tokens=True, truncation=False)["input_ids"]
-        ans_ids = _tokenize_leading_space(tokenizer, chosen)
-        end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+        if use_chat_template:
+            msgs = [
+                {"role": "user", "content": x},
+                {"role": "assistant", "content": chosen},
+            ]
+            full_ids = tokenizer.apply_chat_template(
+                msgs, tokenize=True, add_generation_prompt=False,
+                enable_thinking=False,
+            )
+            prefix_ids = tokenizer.apply_chat_template(
+                msgs[:1], tokenize=True, add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            prompt_ids = full_ids[:len(prefix_ids)]
+            ans_ids = full_ids[len(prefix_ids):]
+            input_ids = torch.tensor([full_ids], device=device)
+            label_ids = torch.tensor([[-100] * len(prompt_ids) + ans_ids], device=device)
+        else:
+            prompt_ids = tokenizer(x, add_special_tokens=True, truncation=False)["input_ids"]
+            ans_ids = _tokenize_leading_space(tokenizer, chosen)
+            end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
 
-        input_ids = torch.tensor([prompt_ids + ans_ids + end_ids], device=device)
-        label_ids = torch.tensor([[-100] * len(prompt_ids) + ans_ids + end_ids], device=device)
+            input_ids = torch.tensor([prompt_ids + ans_ids + end_ids], device=device)
+            label_ids = torch.tensor([[-100] * len(prompt_ids) + ans_ids + end_ids], device=device)
 
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             out = unwrapped(input_ids=input_ids, labels=label_ids)
@@ -1454,6 +1693,7 @@ def run_eval_greedy_readable(
         inputs: List[str],
         labels: List[List[str]],
         print_examples: int = 0,
+        use_chat_template: bool = False,
         **kwargs,
 ) -> Dict[str, Any]:
     barrier()
@@ -1506,8 +1746,18 @@ def run_eval_greedy_readable(
         ys = ys if isinstance(ys, list) else [ys]
 
         # Tokenize
-        enc = tokenizer(x, return_tensors="pt").to(device)
-        prompt_len = enc.input_ids.shape[1]
+        if use_chat_template:
+            msgs = [{"role": "user", "content": x}]
+            input_ids = tokenizer.apply_chat_template(
+                msgs, tokenize=True, add_generation_prompt=True,
+                enable_thinking=False, return_tensors="pt",
+            )
+            if not isinstance(input_ids, torch.Tensor):
+                input_ids = torch.tensor([input_ids], dtype=torch.long)
+            enc = {"input_ids": input_ids.to(device), "attention_mask": torch.ones_like(input_ids).to(device)}
+        else:
+            enc = tokenizer(x, return_tensors="pt").to(device)
+        prompt_len = enc["input_ids"].shape[1]
 
         # Generate (Must run for everyone)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -1582,6 +1832,7 @@ class FirstTokenCurriculum(TrainerCallback):
             use_packing: bool = False,  # NEW
             # Stage eval config
             do_stage_eval: bool = False,
+            stage_eval_every: int = 1,  # Run stage eval every N stage advancements (1=every stage)
             eval_every_steps: int = 0,
             eval_inputs_hard: List[str] = None,
             eval_labels_hard: List[List[str]] = None,
@@ -1659,6 +1910,7 @@ class FirstTokenCurriculum(TrainerCallback):
 
         # Stage eval config
         self.do_stage_eval = do_stage_eval
+        self.stage_eval_every = stage_eval_every
         self.eval_every_steps = eval_every_steps
         self.eval_inputs_hard = eval_inputs_hard
         self.eval_labels_hard = eval_labels_hard
@@ -2105,13 +2357,15 @@ class FirstTokenCurriculum(TrainerCallback):
         was_training = model.training
         model.eval()
 
+        _use_chat = getattr(self.dataset, 'use_chat_template', False)
+
         with torch.no_grad():
             # Teacher-forced loss
             tf_loss = run_eval_tf_loss(
                 model, self.tokenizer, self.task,
                 self.eval_inputs_hard, self.eval_labels_hard,
                 num_shots=self.num_shots, max_input_size=self.max_input_size,
-                seed=self.seed, **self.task_kwargs
+                seed=self.seed, use_chat_template=_use_chat, **self.task_kwargs
             )
 
             # Greedy accuracy
@@ -2120,7 +2374,7 @@ class FirstTokenCurriculum(TrainerCallback):
                 self.eval_inputs_hard, self.eval_labels_hard,
                 num_shots=self.num_shots, max_input_size=self.max_input_size,
                 seed=self.seed, print_examples=self.print_examples,
-                **self.task_kwargs
+                use_chat_template=_use_chat, **self.task_kwargs
             )
 
             # Stage-alpha eval: generate and evaluate on stage-difficulty data
@@ -2155,7 +2409,7 @@ class FirstTokenCurriculum(TrainerCallback):
                         stage_eval_inputs, stage_eval_labels,
                         num_shots=self.num_shots, max_input_size=self.max_input_size,
                         seed=self.seed, print_examples=0,
-                        **self.task_kwargs
+                        use_chat_template=_use_chat, **self.task_kwargs
                     )
 
         # Restore training mode
@@ -2251,6 +2505,11 @@ class FirstTokenCurriculum(TrainerCallback):
                 "achieved_tflops": achieved_tflops,
                 "n_gpus": get_world_size(),
             }
+            # Add separate search/pretrain losses if available
+            if hasattr(self.trainer, '_last_search_loss') and self.trainer._last_search_loss is not None:
+                entry["search_loss"] = self.trainer._last_search_loss
+            if hasattr(self.trainer, '_last_pretrain_loss') and self.trainer._last_pretrain_loss is not None:
+                entry["pretrain_loss"] = self.trainer._last_pretrain_loss
 
             # Mark as resume point if this is the first entry after a resume
             if self._mark_next_as_resume:
@@ -2398,8 +2657,10 @@ class FirstTokenCurriculum(TrainerCallback):
                     else:
                         print(f"[COMPLETE] Stage {old_stage} complete")
 
-                # Run stage eval BEFORE advancing
-                self._run_stage_eval(old_stage, state.global_step)
+                # Run stage eval BEFORE advancing (skip if not a multiple of stage_eval_every)
+                target_L_for_eval = self.dataset._stage_target_lookahead()
+                if self.stage_eval_every <= 1 or (target_L_for_eval and target_L_for_eval % self.stage_eval_every == 0):
+                    self._run_stage_eval(old_stage, state.global_step)
 
                 # Save persistent stage checkpoint (won't be rotated by save_total_limit)
                 try:
@@ -2690,6 +2951,8 @@ def main():
     p.add_argument("--do_final_eval", action="store_true", help="Run post-training TF + greedy eval")
     p.add_argument("--do_redacted_eval", action="store_true", help="Run redacted sanity check (should be low)")
     p.add_argument("--do_seen_eval", action="store_true", help="Run seen-samples sanity check (should be ~100%)")
+    p.add_argument("--stage_eval_every", type=int, default=1,
+                   help="Run stage eval every N lookahead units (e.g. 8 = eval only when L is multiple of 8)")
     p.add_argument("--do_stage_eval", action="store_true",
                    help="Run TF+greedy eval at alpha=1.0 after each stage advancement")
     p.add_argument("--eval_every_steps", type=int, default=0,
@@ -2757,6 +3020,18 @@ def main():
     # Packing
     p.add_argument("--use_packing", action="store_true",
                    help="Use sequence packing for efficiency")
+
+    # Pretraining data mixing (anti-catastrophic-forgetting)
+    p.add_argument("--mix_pretrain_data", type=str, default=None,
+                   help="HuggingFace dataset for pretraining mix (e.g. 'allenai/c4')")
+    p.add_argument("--mix_pretrain_subset", type=str, default=None,
+                   help="Dataset subset/config (e.g. 'en' for C4, omit for datasets without subsets)")
+    p.add_argument("--mix_pretrain_ratio", type=float, default=0.1,
+                   help="Fraction of batches that are pretraining data (default: 0.1 = 10%%)")
+    p.add_argument("--mix_pretrain_max_len", type=int, default=2048,
+                   help="Max sequence length for pretraining samples (default: 2048)")
+    p.add_argument("--use_chat_template", action="store_true",
+                   help="Wrap search data in chat template (enable_thinking=False)")
 
     global args
     args = p.parse_args()
@@ -3037,6 +3312,12 @@ def main():
         base_lookahead=args.base_lookahead,
         lookahead_step=args.lookahead_step,
         epoch_size=1_000_000_000,  # Must exceed max_steps * gradient_accumulation_steps
+        mix_pretrain_data=getattr(args, 'mix_pretrain_data', None),
+        mix_pretrain_subset=getattr(args, 'mix_pretrain_subset', None),
+        mix_pretrain_ratio=getattr(args, 'mix_pretrain_ratio', 0.1),
+        mix_pretrain_max_len=getattr(args, 'mix_pretrain_max_len', 512),
+        mix_pretrain_cache_dir=os.path.join(os.environ.get("SCRATCH", "/tmp"), "pretrain_cache"),
+        use_chat_template=getattr(args, 'use_chat_template', False),
         **task_kwargs,
     )
     data_collator = lambda x: x[0]  # Identity
@@ -3051,6 +3332,7 @@ def main():
         use_packing=args.use_packing,
         # Stage eval config
         do_stage_eval=args.do_stage_eval,
+        stage_eval_every=getattr(args, 'stage_eval_every', 1),
         eval_every_steps=args.eval_every_steps,
         eval_inputs_hard=eval_inputs_hard,
         eval_labels_hard=eval_labels_hard,
@@ -3282,7 +3564,7 @@ def main():
         report_to="none",
         save_strategy="steps",
         save_steps=500,
-        save_total_limit=5,
+        save_total_limit=20,
         save_safetensors=True,
         bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
