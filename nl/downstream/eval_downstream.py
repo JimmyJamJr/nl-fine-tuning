@@ -493,7 +493,9 @@ def eval_legal(model, tokenizer, use_chat, n=100):
 
 # ---------------- Game of 24 ----------------
 
-@register("game24")
+# Unregistered: game24 is consistently <5% across all 0.6B models (instruct=0.05,
+# all others 0.01–0.04). Too hard for 0.6B; revive for Qwen 1.7B+ if needed.
+# @register("game24")
 def eval_game24(model, tokenizer, use_chat, n=100):
     """Game of 24: given 4 numbers, combine with +-*/() to make 24.
 
@@ -673,6 +675,7 @@ def _eval_planbench_domain(model, tokenizer, use_chat, domain, n):
     total = 0
     n_actions_correct = 0
     n_actions_total = 0
+    first_action_correct = 0
     for ex in matched:
         gold_actions = _normalize_plan(ex["ground_truth_plan"])
         if not gold_actions:
@@ -681,11 +684,13 @@ def _eval_planbench_domain(model, tokenizer, use_chat, domain, n):
         pred_text = generate_chat(model, tokenizer, prompt, max_new_tokens=200, use_chat=use_chat)
         pred_actions = _normalize_plan(pred_text)
         _dbg_log_gen(f"{domain}:overall", prompt,
-                     " | ".join(gold_actions[:3]) + (" …" if len(gold_actions) > 3 else ""),
+                     " | ".join(" ".join(a) for a in gold_actions[:3]) + (" …" if len(gold_actions) > 3 else ""),
                      pred_text,
-                     " | ".join(pred_actions[:3]) + (" …" if len(pred_actions) > 3 else ""))
+                     " | ".join(" ".join(a) for a in pred_actions[:3]) + (" …" if len(pred_actions) > 3 else ""))
         if pred_actions == gold_actions:
             correct += 1
+        if pred_actions and pred_actions[0] == gold_actions[0]:
+            first_action_correct += 1
         total += 1
         k = 0
         while k < min(len(pred_actions), len(gold_actions)) and pred_actions[k] == gold_actions[k]:
@@ -695,14 +700,22 @@ def _eval_planbench_domain(model, tokenizer, use_chat, domain, n):
 
     plan_acc = correct / total if total else 0.0
     prefix_acc = n_actions_correct / n_actions_total if n_actions_total else 0.0
-    print(f"  [{domain}] plan_exact={correct}/{total}={plan_acc:.1%}  prefix_match={prefix_acc:.1%}")
+    first_acc = first_action_correct / total if total else 0.0
+    print(f"  [{domain}] plan_exact={correct}/{total}={plan_acc:.1%}  "
+          f"first_action={first_action_correct}/{total}={first_acc:.1%}  "
+          f"prefix_match={prefix_acc:.1%}")
     return {
         domain: {
             "correct": correct, "total": total,
             "accuracy": plan_acc,
+            "first_action_accuracy": first_acc,
             "prefix_match_rate": prefix_acc,
         },
-        "overall": {"correct": correct, "total": total, "accuracy": plan_acc},
+        "overall": {
+            "correct": correct, "total": total,
+            "accuracy": plan_acc,
+            "first_action_accuracy": first_acc,
+        },
     }
 
 
@@ -770,6 +783,49 @@ def eval_logistics(model, tokenizer, use_chat, n=50):
     return _eval_planbench_domain(model, tokenizer, use_chat, "logistics", n)
 
 
+# ---------------- First-action variants (easier scoring) ----------------
+# Wrap the existing PlanBench evals and surface first_action_accuracy as the
+# headline `accuracy`. These give signal even when full-plan exact-match is 0%.
+
+def _planbench_first_action_wrapper(domain):
+    def _runner(model, tokenizer, use_chat, n=50):
+        result = _eval_planbench_domain(model, tokenizer, use_chat, domain, n)
+        if "error" in result:
+            return result
+        d = result.get(domain, {})
+        first = d.get("first_action_accuracy", 0.0)
+        return {
+            domain: {
+                "correct": int(first * d.get("total", 0)),
+                "total": d.get("total", 0),
+                "accuracy": first,
+                "exact_match_accuracy": d.get("accuracy", 0.0),
+            },
+            "overall": {
+                "correct": int(first * d.get("total", 0)),
+                "total": d.get("total", 0),
+                "accuracy": first,
+            },
+        }
+    return _runner
+
+@register("blocksworld_first")
+def eval_blocksworld_first(model, tokenizer, use_chat, n=50):
+    """First-action accuracy for blocksworld. Easier than full plan match —
+    scores 1 if the model's first emitted action matches the gold first action."""
+    return _planbench_first_action_wrapper("blocksworld")(model, tokenizer, use_chat, n)
+
+@register("mystery_blocksworld_first")
+def eval_mystery_blocksworld_first(model, tokenizer, use_chat, n=50):
+    """First-action accuracy for mystery_blocksworld."""
+    return _planbench_first_action_wrapper("mystery_blocksworld")(model, tokenizer, use_chat, n)
+
+@register("logistics_first")
+def eval_logistics_first(model, tokenizer, use_chat, n=50):
+    """First-action accuracy for logistics."""
+    return _planbench_first_action_wrapper("logistics")(model, tokenizer, use_chat, n)
+
+
 # ==========================================================
 # Log-probability variants for sequence-generation tasks
 # These score teacher-forced log p(gold_output | prompt), normalized by token
@@ -827,6 +883,9 @@ def eval_logistics_logprob(model, tokenizer, use_chat, n=50):
 @register("chess_mate_logprob")
 def eval_chess_mate_logprob(model, tokenizer, use_chat, n=50):
     """Chess mate-in-N: mean per-token log-prob of gold move sequence."""
+    # Streaming dataset — cap required. If main() passed n=None (full test set
+    # default), fall back to signature default so we have a termination condition.
+    n = n or 50
     from datasets import load_dataset
     try:
         ds = load_dataset("Lichess/chess-puzzles", split="train", streaming=True)
@@ -1204,6 +1263,8 @@ def eval_chess_mate(model, tokenizer, use_chat, n=50):
     This is hard for a 0.6B model. Expect low numbers in absolute terms; the
     differential between instruct_only and 6pct+search is the informative signal.
     """
+    # Streaming dataset — cap required. If main() passed n=None, fall back to default.
+    n = n or 50
     from datasets import load_dataset
 
     try:
@@ -1299,6 +1360,36 @@ def eval_chess_mate(model, tokenizer, use_chat, n=50):
         "first_move_accuracy": all_first / all_total if all_total else 0.0,
     }
     return results
+
+
+@register("chess_mate_first")
+def eval_chess_mate_first(model, tokenizer, use_chat, n=50):
+    """First-move accuracy for chess mate-in-N. Easier than full mating sequence —
+    scores 1 if the model's first emitted move matches the gold first move.
+    Aligned with how Lichess scores their puzzles for smaller models."""
+    raw = eval_chess_mate(model, tokenizer, use_chat, n=n)
+    if "error" in raw:
+        return raw
+    out = {}
+    for cat in ["mateIn1", "mateIn2", "mateIn3"]:
+        if cat in raw:
+            d = raw[cat]
+            first = d.get("first_move_accuracy", 0.0)
+            out[cat] = {
+                "correct": int(first * d.get("total", 0)),
+                "total": d.get("total", 0),
+                "accuracy": first,
+                "exact_match_accuracy": d.get("accuracy", 0.0),
+            }
+    if "overall" in raw:
+        d = raw["overall"]
+        first = d.get("first_move_accuracy", 0.0)
+        out["overall"] = {
+            "correct": int(first * d.get("total", 0)),
+            "total": d.get("total", 0),
+            "accuracy": first,
+        }
+    return out
 
 
 # ---------------- lm-eval-harness adapter ----------------
@@ -1711,26 +1802,29 @@ def main():
 
     print(f"\nResults saved to {args.output}")
 
-    # Summary
+    # Summary — iterate over RESOLVED short names (not raw specs), since
+    # all_results is keyed by resolved name (e.g. "instruct_only", not
+    # "instruct_only=/scratch/.../instruct_only").
+    resolved_names = [name for name, _ in resolved]
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
     for bname in args.benchmarks:
         print(f"\n{bname}:")
         header = f"  {'sub-task':>20}"
-        for mname in args.models:
+        for mname in resolved_names:
             header += f"  {mname:>18}"
         print(header)
 
         # Collect all sub-task keys across models
         all_keys = set()
-        for mname in args.models:
+        for mname in resolved_names:
             res = all_results[mname].get(bname, {})
             if isinstance(res, dict):
                 all_keys.update(k for k, v in res.items() if isinstance(v, dict) and "accuracy" in v)
         for key in sorted(all_keys, key=lambda k: (str(k).isdigit(), str(k))):
             row = f"  {str(key):>20}"
-            for mname in args.models:
+            for mname in resolved_names:
                 acc = all_results[mname].get(bname, {}).get(key, {}).get("accuracy", None)
                 row += f"  {acc*100:>17.1f}%" if acc is not None else f"  {'—':>18}"
             print(row)
