@@ -3154,6 +3154,17 @@ def main():
     else:
         model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
 
+    # Force-tie lm_head.weight to embed_tokens.weight as the same Parameter.
+    # HF's tie_weights() is broken for Qwen3 + Trainer.resume_from_checkpoint,
+    # leaving lm_head at pretrained init after resume (loss explodes to ~30).
+    # Direct aliasing ensures both params point to the same tensor so
+    # load_state_dict updates both simultaneously.
+    if hasattr(model, "lm_head") and hasattr(model, "get_input_embeddings"):
+        embed = model.get_input_embeddings()
+        if embed is not None and model.lm_head.weight is not embed.weight:
+            model.lm_head.weight = embed.weight
+            rank_print("[TIE] Force-tied lm_head.weight to embed_tokens.weight")
+
     if is_main_process():
         attn_impl = getattr(model.config, "_attn_implementation", "unknown")
         print(f"[ATTENTION] Using: {attn_impl}")
