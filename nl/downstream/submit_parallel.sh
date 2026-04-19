@@ -38,7 +38,7 @@ fi
 BENCHMARKS="${BENCHMARKS:-legal legal_gen proofwriter proofwriter_cwa proofwriter_gen proofwriter_cwa_gen zebra_mc zebra_mc_gen stepgame stepgame_gen blocksworld blocksworld_logprob blocksworld_first mystery_blocksworld mystery_blocksworld_logprob mystery_blocksworld_first logistics logistics_logprob logistics_first chess_mate chess_mate_logprob chess_mate_first standard bbh bbh_cot}"
 
 # Per-benchmark sample caps for slow generation-heavy benchmarks. Override via env.
-N_OVERRIDES="${N_OVERRIDES:-game24=100 blocksworld=50 mystery_blocksworld=50 logistics=50 chess_mate=50 stepgame_gen=100 proofwriter_gen=200 proofwriter_cwa_gen=200}"
+N_OVERRIDES="${N_OVERRIDES:-blocksworld=50 blocksworld_first=50 mystery_blocksworld=50 mystery_blocksworld_first=50 logistics=50 logistics_first=50 chess_mate=50 chess_mate_first=50 stepgame_gen=100 proofwriter_gen=200 proofwriter_cwa_gen=200}"
 
 # Debug samples per (benchmark, sub-task) — set >0 to print sample model outputs
 DEBUG_SAMPLES="${DEBUG_SAMPLES:-0}"

@@ -31,8 +31,8 @@ cd /home/huan2073/nl-fine-tuning/nl/downstream
 MODELS="${MODELS:-base instruct_only 6pct_L16 6pct_L75}"
 BENCHMARKS="${BENCHMARKS:-zebra_mc legal}"
 # Full test set by default. Only cap the slow generation-heavy benchmarks.
-# Override via env (e.g. N_OVERRIDES="game24=100").
-N_OVERRIDES="${N_OVERRIDES:-game24=100 blocksworld=50 mystery_blocksworld=50 logistics=50 chess_mate=50 stepgame_gen=100 proofwriter_gen=200 proofwriter_cwa_gen=200}"
+# Override via env.
+N_OVERRIDES="${N_OVERRIDES:-blocksworld=50 blocksworld_first=50 mystery_blocksworld=50 mystery_blocksworld_first=50 logistics=50 logistics_first=50 chess_mate=50 chess_mate_first=50 stepgame_gen=100 proofwriter_gen=200 proofwriter_cwa_gen=200}"
 DEBUG_SAMPLES="${DEBUG_SAMPLES:-0}"  # set to e.g. 3 to print sample model outputs per benchmark
 OUTPUT="${OUTPUT:-results/eval_${SLURM_JOB_ID}.json}"
 
