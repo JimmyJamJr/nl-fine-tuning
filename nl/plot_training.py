@@ -162,6 +162,25 @@ def _draw_resume_markers(ax, loss_history: List[Dict], x_key: str = "step", x_va
             ax.axvline(x=x, color='red', linestyle=':', alpha=0.5, linewidth=1.5, zorder=5)
 
 
+def _stage_alpha_series(xs, stage_eval_history: List[Dict], full_alpha_tol: float = 1e-3):
+    """Return (xs, ys) for the stage-α greedy line.
+
+    The trainer skips the redundant stage-α evaluation when training α already
+    equals 1.0 (e.g. final stage). For those entries we fall back to ``greedy_full``
+    (identical by definition); entries that legitimately lack the data are dropped.
+    """
+    out_xs, out_ys = [], []
+    for x, h in zip(xs, stage_eval_history):
+        v = h.get("stage_greedy_full")
+        if v is None and abs(h.get("alpha_training", 0.0) - 1.0) <= full_alpha_tol:
+            v = h.get("greedy_full")
+        if v is None:
+            continue
+        out_xs.append(x)
+        out_ys.append(v * 100)
+    return out_xs, out_ys
+
+
 def _build_plot_subtitle(metadata: Dict) -> str:
     """Build a subtitle string from plot metadata."""
     parts = []
@@ -699,15 +718,17 @@ def plot_eval_acc_vs_step(stage_eval_history: List[Dict], output_dir: str, metad
     greedy_full = [h["greedy_full"] * 100 for h in stage_eval_history]
     greedy_first = [h["greedy_first"] * 100 for h in stage_eval_history]
 
-    has_stage_alpha = "stage_greedy_full" in stage_eval_history[0]
+    has_stage_alpha = any("stage_greedy_full" in h for h in stage_eval_history)
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
     ax.plot(steps, greedy_full, '-', color='#4CAF50', label='Eval (\u03b1=1.0)', linewidth=1.5, markersize=2, marker='.')
 
     if has_stage_alpha:
-        stage_full = [h.get("stage_greedy_full", 0) * 100 for h in stage_eval_history]
-        ax.plot(steps, stage_full, '-', color='#FF9800', label='Train (stage \u03b1)', linewidth=1.5, markersize=2, marker='.')
+        # When stage-α eval is skipped (e.g. final stage where training α already == 1.0),
+        # fall back to greedy_full (identical by definition); otherwise drop the point.
+        stage_xs, stage_ys = _stage_alpha_series(steps, stage_eval_history)
+        ax.plot(stage_xs, stage_ys, '-', color='#FF9800', label='Train (stage \u03b1)', linewidth=1.5, markersize=2, marker='.')
 
     # Stage divider lines
     prev_stage = stage_eval_history[0]["stage"]
@@ -778,15 +799,15 @@ def plot_eval_acc_vs_flops(stage_eval_history: List[Dict], loss_history: List[Di
     eval_exaflops = [f / 1e18 for f in eval_flops]
 
     greedy_full = [h["greedy_full"] * 100 for h in stage_eval_history]
-    has_stage_alpha = "stage_greedy_full" in stage_eval_history[0]
+    has_stage_alpha = any("stage_greedy_full" in h for h in stage_eval_history)
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
     ax.plot(eval_exaflops, greedy_full, '-', color='#4CAF50', label='Eval (\u03b1=1.0)', linewidth=1.5, markersize=2, marker='.')
 
     if has_stage_alpha:
-        stage_full = [h.get("stage_greedy_full", 0) * 100 for h in stage_eval_history]
-        ax.plot(eval_exaflops, stage_full, '-', color='#FF9800', label='Train (stage \u03b1)', linewidth=1.5, markersize=2, marker='.')
+        stage_xs, stage_ys = _stage_alpha_series(eval_exaflops, stage_eval_history)
+        ax.plot(stage_xs, stage_ys, '-', color='#FF9800', label='Train (stage \u03b1)', linewidth=1.5, markersize=2, marker='.')
 
     # Stage divider lines
     prev_stage = stage_eval_history[0]["stage"]
@@ -949,7 +970,7 @@ def plot_eval_acc_vs_gpu_hours(stage_eval_history: List[Dict], loss_history: Lis
                 eval_gpu_hours.append(0)
 
     greedy_full = [h["greedy_full"] * 100 for h in stage_eval_history]
-    has_stage_alpha = "stage_greedy_full" in stage_eval_history[0]
+    has_stage_alpha = any("stage_greedy_full" in h for h in stage_eval_history)
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -958,8 +979,8 @@ def plot_eval_acc_vs_gpu_hours(stage_eval_history: List[Dict], loss_history: Lis
 
     # Training accuracy (stage alpha) — the metric that drives curriculum advancement
     if has_stage_alpha:
-        stage_full = [h.get("stage_greedy_full", 0) * 100 for h in stage_eval_history]
-        ax.plot(eval_gpu_hours, stage_full, '-', color='#FF9800', label='Train (stage \u03b1)', linewidth=1.5, markersize=2, marker='.')
+        stage_xs, stage_ys = _stage_alpha_series(eval_gpu_hours, stage_eval_history)
+        ax.plot(stage_xs, stage_ys, '-', color='#FF9800', label='Train (stage \u03b1)', linewidth=1.5, markersize=2, marker='.')
 
     # Draw vertical stage divider lines with labels
     n_stages_seen = max(h["stage"] for h in stage_eval_history)
