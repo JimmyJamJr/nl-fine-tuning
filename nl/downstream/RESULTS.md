@@ -30,9 +30,15 @@ Full test set (n ≈ 9495 across 3 tasks combined) run 2026-04-16 on Gilbreth.
 
 **Log-likelihood scoring** (score " Yes" / " No" on chat-wrapped prompt):
 
+**Log-likelihood scoring** — now macro-averaged across 3 subtasks (hearsay, international_citizenship_questions, proa), per LegalBench convention. Previously reported micro (weighted by count) which was dominated by the 9306-sample international task — kept as `micro` row for reference.
+
 | | base | instruct_only | 6pct_L6 | 6pct_L16 | 6pct_L32 | 6pct_L75 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| overall | **0.574** | 0.425 | 0.424 | 0.424 | 0.424 | 0.422 |
+| hearsay (n=94) | 0.596 | **0.628** | 0.564 | 0.564 | 0.564 | 0.564 |
+| international_citizenship_questions (n=9306) | **0.572** | 0.422 | 0.422 | 0.422 | 0.422 | 0.420 |
+| proa (n=95) | **0.800** | 0.505 | 0.495 | 0.495 | 0.495 | 0.495 |
+| **macro-avg** | **0.656** | 0.518 | 0.493 | 0.493 | 0.493 | 0.493 |
+| micro-avg | 0.574 | 0.425 | 0.424 | 0.424 | 0.424 | 0.422 |
 
 **Generation scoring** (`legal_gen` — model generates answer, few-shot prompt matches LegalBench author setup):
 
@@ -504,6 +510,7 @@ Same 11 subtasks but with 3-shot CoT prompting:
 
 ## Changelog
 
+- 2026-04-19: **Legal scoring fixed to macro-average** (LegalBench/HELM convention). Previous micro-average was dominated by the 9306-sample `international_citizenship_questions` task. Headline base-wins-legal gap widened from +15pp (micro) to +14pp (macro), but the per-subtask picture is now honest. Audit of all other benchmarks confirmed: standard/bbh/bbh_cot use macro (via lm-eval-harness); proofwriter/chess/planbench report per-sub-category; zebra_mc uses micro consistent with ZebraLogic leaderboard; stepgame micro ≈ macro (equal n per hop).
 - 2026-04-18: **Added L6 and L32 columns** to all primary tables (sections 1a-1g, 2a, 3a, 3b) — curriculum-depth scaling curve now has 5 points (base → L6 → L16 → L32 → L75) for benchmarks where L6/L32 evals were run. Per-task breakdowns for L6/L32 on standard NLU and BBH not yet folded in (only macro-avg). proofwriter and proofwriter_cwa log-lik tables were also rerun on the **full test set** (was n=200/depth) to be sample-matched with L6/L32 — old n=200 numbers replaced. stepgame_gen for L6 and L32 rerun at n=1000 to match the others.
 - 2026-04-16: initial dump from `compiled_downstream.json` (420 records, 7 benchmarks)
 - 2026-04-16: PrOntoQA removed (degenerate L=1 case of DeepRD training data)

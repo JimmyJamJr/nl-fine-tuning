@@ -481,13 +481,22 @@ def eval_legal(model, tokenizer, use_chat, n=100):
         results[task] = {"correct": correct, "total": total, "accuracy": acc}
         print(f"  [legal:{task}]: {correct}/{total} = {acc:.1%}")
 
+    # LegalBench convention: macro-average across tasks (each task weighted
+    # equally). Micro would be dominated by international_citizenship_questions
+    # which has ~9k samples vs ~95 for hearsay/proa. Per LegalBench paper
+    # (Guha et al., NeurIPS 2023) and HELM leaderboard.
+    per_task_accs = [v["accuracy"] for v in results.values() if "accuracy" in v]
+    macro_avg = sum(per_task_accs) / len(per_task_accs) if per_task_accs else 0.0
     all_correct = sum(v.get("correct", 0) for v in results.values())
     all_total = sum(v.get("total", 0) for v in results.values())
     results["overall"] = {
         "correct": all_correct,
         "total": all_total,
-        "accuracy": all_correct / all_total if all_total else 0.0,
+        "accuracy": macro_avg,           # macro-avg is the headline metric
+        "micro_accuracy": all_correct / all_total if all_total else 0.0,
     }
+    print(f"  [legal] macro-avg: {macro_avg:.3f}  (micro: "
+          f"{all_correct/max(all_total,1):.3f} over {all_total} samples)")
     return results
 
 
@@ -998,7 +1007,16 @@ def eval_legal_gen(model, tokenizer, use_chat, n=100):
         print(f"  [legal_gen:{task}]: {correct}/{total} = {acc:.1%}")
     all_c = sum(v.get("correct", 0) for v in results.values())
     all_t = sum(v.get("total", 0) for v in results.values())
-    results["overall"] = {"correct": all_c, "total": all_t, "accuracy": all_c/all_t if all_t else 0.0}
+    # Macro-average across tasks (LegalBench convention)
+    per_task_accs = [v["accuracy"] for v in results.values() if "accuracy" in v]
+    macro_avg = sum(per_task_accs) / len(per_task_accs) if per_task_accs else 0.0
+    results["overall"] = {
+        "correct": all_c, "total": all_t,
+        "accuracy": macro_avg,
+        "micro_accuracy": all_c/all_t if all_t else 0.0,
+    }
+    print(f"  [legal_gen] macro-avg: {macro_avg:.3f}  (micro: "
+          f"{all_c/max(all_t,1):.3f} over {all_t} samples)")
     return results
 
 
