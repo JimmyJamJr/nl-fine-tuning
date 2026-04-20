@@ -15,7 +15,7 @@ set -euo pipefail
 module load conda
 conda activate search
 
-export SCRATCH="/scratch/gautschi/$USER"
+export SCRATCH="${SCRATCH:-/scratch/gautschi/$USER}"
 export HF_HOME="$SCRATCH/model_cache"
 export HF_HUB_OFFLINE=0
 export TRITON_CACHE_DIR="$SCRATCH/triton_cache"
