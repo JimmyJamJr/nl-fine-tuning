@@ -1518,6 +1518,14 @@ def eval_bbh_cot(model, tokenizer, use_chat, n=None):
     return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_COT_TASKS, n=n, num_fewshot=None)
 
 
+@register("bbh_cot_chat")
+def eval_bbh_cot_chat(model, tokenizer, use_chat, n=None):
+    """Same as bbh_cot but with apply_chat_template=True. Used to test whether
+    curriculum/instruct-tuned models recover BBH performance when given their
+    native chat-formatted input (single-turn wrap of the 3-shot prompt)."""
+    return _run_lm_eval(model, tokenizer, use_chat=True, task_list=BBH_COT_TASKS, n=n, num_fewshot=None)
+
+
 # ---------------- ProofWriter ----------------
 
 def _find_proofwriter_raw():
