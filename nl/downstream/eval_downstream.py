@@ -81,6 +81,7 @@ MODEL_REGISTRY = {
     "base": "Qwen/Qwen3-0.6B",
     "instruct_only": lambda: _latest_ckpt("9152198") or _latest_ckpt("9052803") or _latest_ckpt("8969184"),
     "6pct_L4":  lambda: _stage_ckpt("8894380", 4),
+    "6pct_L6":  lambda: _stage_ckpt("8894380", 6),
     "6pct_L8":  lambda: _stage_ckpt("8894380", 8),
     "6pct_L16": lambda: _stage_ckpt("8894380", 16),
     "6pct_L32": lambda: _stage_ckpt("8894380", 32),
