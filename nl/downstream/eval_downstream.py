@@ -1492,8 +1492,13 @@ def eval_standard(model, tokenizer, use_chat, n=None):
 
 @register("bbh")
 def eval_bbh(model, tokenizer, use_chat, n=None):
-    """11 BBH zero-shot reasoning subtasks via lm-eval-harness (same tasks as eval_bbh.sh)."""
-    return _run_lm_eval(model, tokenizer, use_chat, BBH_TASKS, n=n)
+    """11 BBH zero-shot reasoning subtasks via lm-eval-harness.
+
+    NOTE: ignore the `use_chat` arg — chat template wraps the prompt in Qwen's
+    assistant format, which makes the model emit markdown-wrapped answers
+    ("**No**", "- Yes.") that fail lm-eval-harness's exact_match filter.
+    Published BBH numbers are from the raw Suzgun prompt (no chat wrap)."""
+    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_TASKS, n=n)
 
 
 # Paper-matching variant: 3-shot CoT, as in Suzgun et al. 2023's headline eval.
@@ -1508,8 +1513,11 @@ def eval_bbh_cot(model, tokenizer, use_chat, n=None):
     Suzgun et al. 2023's evaluation: 3 in-context examples with reasoning
     traces, then the test question, with exact-match on the final answer
     after the CoT.
-    """
-    return _run_lm_eval(model, tokenizer, use_chat, BBH_COT_TASKS, n=n)
+
+    NOTE: ignores `use_chat` — see eval_bbh. The 3-shot CoT exemplars condition
+    the model to emit "So the answer is X." format; chat-template wrapping
+    breaks this."""
+    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_COT_TASKS, n=n)
 
 
 # ---------------- ProofWriter ----------------
