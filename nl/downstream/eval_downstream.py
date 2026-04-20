@@ -1435,12 +1435,15 @@ BBH_TASKS = [
 ]
 
 
-def _run_lm_eval(model, tokenizer, use_chat, task_list, n=None):
+def _run_lm_eval(model, tokenizer, use_chat, task_list, n=None, num_fewshot=None):
     """Run a list of lm-eval-harness tasks on an already-loaded model.
 
+    `num_fewshot=None` keeps each task's default (e.g. bbh_cot_fewshot_* default
+    is 3, matching Suzgun et al. 2023's paper-standard 3-shot CoT). Pass an
+    integer to override (e.g. 0 for forced zero-shot on tasks that allow it).
+
     For Qwen3 models, monkey-patches tokenizer.apply_chat_template so every
-    chat-wrapping call forces enable_thinking=False — matching how the paper's
-    existing eval scripts invoked lm-eval.
+    chat-wrapping call forces enable_thinking=False.
     """
     from lm_eval import simple_evaluate
     from lm_eval.models.huggingface import HFLM
@@ -1453,13 +1456,10 @@ def _run_lm_eval(model, tokenizer, use_chat, task_list, n=None):
         tokenizer.apply_chat_template = _patched
 
     lm = HFLM(pretrained=model, tokenizer=tokenizer, batch_size=16)
-    raw = simple_evaluate(
-        model=lm,
-        tasks=task_list,
-        num_fewshot=0,
-        limit=n,
-        apply_chat_template=use_chat,
-    )
+    se_kwargs = dict(model=lm, tasks=task_list, limit=n, apply_chat_template=use_chat)
+    if num_fewshot is not None:
+        se_kwargs["num_fewshot"] = num_fewshot
+    raw = simple_evaluate(**se_kwargs)
 
     out = {}
     for task_name, task_result in raw.get("results", {}).items():
@@ -1492,13 +1492,13 @@ def eval_standard(model, tokenizer, use_chat, n=None):
 
 @register("bbh")
 def eval_bbh(model, tokenizer, use_chat, n=None):
-    """11 BBH zero-shot reasoning subtasks via lm-eval-harness.
+    """11 BBH zero-shot reasoning subtasks (`bbh_zeroshot_*`) via lm-eval-harness.
 
-    NOTE: ignore the `use_chat` arg — chat template wraps the prompt in Qwen's
-    assistant format, which makes the model emit markdown-wrapped answers
-    ("**No**", "- Yes.") that fail lm-eval-harness's exact_match filter.
-    Published BBH numbers are from the raw Suzgun prompt (no chat wrap)."""
-    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_TASKS, n=n)
+    NOTE: literature does not standardly report zero-shot BBH for small (<3B)
+    models — they tend to score 0 because exact_match is too strict. We keep
+    this for completeness but recommend `bbh_cot` (3-shot CoT, matches Suzgun
+    et al. and Qwen/Llama/OLMo papers) as the headline."""
+    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_TASKS, n=n, num_fewshot=0)
 
 
 # Paper-matching variant: 3-shot CoT, as in Suzgun et al. 2023's headline eval.
@@ -1507,17 +1507,15 @@ BBH_COT_TASKS = [t.replace("bbh_zeroshot_", "bbh_cot_fewshot_") for t in BBH_TAS
 
 @register("bbh_cot")
 def eval_bbh_cot(model, tokenizer, use_chat, n=None):
-    """11 BBH subtasks with 3-shot Chain-of-Thought prompting (paper-matching).
+    """11 BBH subtasks with 3-shot Chain-of-Thought (paper-standard).
 
-    Uses lm-eval-harness's `bbh_cot_fewshot_*` configs, which replicate
-    Suzgun et al. 2023's evaluation: 3 in-context examples with reasoning
-    traces, then the test question, with exact-match on the final answer
-    after the CoT.
+    Uses lm-eval-harness's `bbh_cot_fewshot_*` configs which default to 3-shot
+    with Suzgun et al. 2023's hand-written CoT exemplars. We pass `num_fewshot=None`
+    to preserve that default (was previously being clobbered to 0).
 
-    NOTE: ignores `use_chat` — see eval_bbh. The 3-shot CoT exemplars condition
-    the model to emit "So the answer is X." format; chat-template wrapping
-    breaks this."""
-    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_COT_TASKS, n=n)
+    Forces `use_chat=False` because chat-template wrapping breaks the 3-shot
+    "Q:..A: Let's think...So the answer is X." format the regex filter expects."""
+    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_COT_TASKS, n=n, num_fewshot=None)
 
 
 # ---------------- ProofWriter ----------------
