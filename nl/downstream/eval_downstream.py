@@ -929,6 +929,55 @@ def eval_stepgame(model, tokenizer, use_chat, n=100):
 # zebra_mc_gen merged into zebra_mc — fused scorer returns both metrics in one pass.
 
 
+def _find_proofwriter_raw():
+    """Locate ProofWriter raw dataset: $DATA_DIR/proofwriter_raw/proofwriter-dataset-V2020.12.3."""
+    if DATA_DIR is None:
+        return None
+    p = os.path.join(DATA_DIR, "proofwriter_raw", "proofwriter-dataset-V2020.12.3")
+    if os.path.isdir(os.path.join(p, "CWA")) and os.path.isdir(os.path.join(p, "OWA")):
+        return p
+    return None
+
+
+def _load_proofwriter_raw(mode: str, depth_dir: str = "depth-5"):
+    """Load AllenAI ProofWriter meta-test.jsonl for a given assumption mode.
+
+    Flattens each record's nested questions into (theory, question, answer, QDep)
+    tuples. Uses the depth-5 directory by default so we get questions at all
+    QDep values (0 through 5) from theories that require up to 5-hop reasoning."""
+    root = _find_proofwriter_raw()
+    if root is None:
+        return None
+    path = os.path.join(root, mode, depth_dir, "meta-test.jsonl")
+    if not os.path.isfile(path):
+        return None
+    examples = []
+    with open(path) as f:
+        for line in f:
+            rec = json.loads(line)
+            theory = rec.get("theory", "")
+            for qid, q in rec.get("questions", {}).items():
+                examples.append({
+                    "theory": theory,
+                    "question": q.get("question", ""),
+                    "answer": q.get("answer"),
+                    "QDep": q.get("QDep"),
+                })
+    return examples
+
+
+def _normalize_pw_answer(ans):
+    """ProofWriter answers are JSON booleans for True/False and the string
+    'Unknown' for the open-world case. Normalize to canonical strings."""
+    if ans is True:
+        return "True"
+    if ans is False:
+        return "False"
+    if isinstance(ans, str):
+        return ans
+    return None
+
+
 def _proofwriter_few_shot_block(mode):
     """Produce ProofWriter few-shot block. Samples K balanced demos from
     `meta-test.jsonl` of a depth different from the one being evaluated
