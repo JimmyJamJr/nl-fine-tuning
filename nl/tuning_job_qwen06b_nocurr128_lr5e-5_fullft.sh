@@ -152,7 +152,7 @@ ARGS=(
     --cache_dir "$HF_HOME"
     --output_dir "$SCRATCH/nl_output"
     --scratch_dir "$SCRATCH"
-    --job_id "$SLURM_JOB_ID"
+    --job_id "${JOB_ID_OVERRIDE:-$SLURM_JOB_ID}"
 
     # Training
     --batch_size "$BATCH_SIZE"

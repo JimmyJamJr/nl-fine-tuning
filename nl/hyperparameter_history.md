@@ -72,11 +72,28 @@ All Pythia 160M runs: 12 stages, max_L=96, max_input=576. Cleared Stage 1 (L=8),
 | ~~8424518~~ | 1e-4 | 48 | 1 | 4 | 192 | **Cancelled** — still on L=8 at 1,963 PFLOPs with 58% acc. Baseline cleared L=16 at 496 PFLOPs. Same failure pattern as 1B lr=1e-4 |
 | ~~8424519~~ | 5e-5 | 48 | 2 | 4 | 384 | **Cancelled** — 2.4-4x worse PFLOPs than baseline at every stage (L=16@2,009 vs 496, L=24@7,316 vs 2,824, L=32@15,488 vs 6,396). Larger batch hurts 410M |
 
-### Full Fine-Tuning (step=4 curriculum)
+### Full Fine-Tuning (curriculum step ablation)
 
-| Jobs | LR | BS | GA | GPUs | Eff Batch | Notes |
-|------|-----|-----|-----|------|-----------|-------|
-| **8446252 → 8478416 → 8566793** | **5e-5** | **64** | **1** | **3** | **192** | **Step=4 curriculum** (L=4,8,...,96, 24 stages). Same eff_batch as baseline. **~2x worse at early L but crossover at L=56**: L=16@1,302 vs 496 (2.6x), L=24@5,744 vs 2,824 (2.0x), L=32@13,663 vs 6,396 (2.1x), L=40@30,705 vs 13,650 (2.2x), L=48@63,226 vs 42,002 (1.5x), **L=56@110,817 vs 219,303 (step=4 wins 2.0x!)**, **L=64@222,308 vs 360,821 (step=4 wins 1.6x!)**. Finer curriculum avoids massive walls. Currently at L=64, 258K PFLOPs, grinding |
+All same hypers as step=8 baseline (LR=5e-5, eff_batch=192, threshold=0.98, min_steps=200). Only `--base_lookahead`/`--lookahead_step`/`--n_stages` differ.
+
+| Jobs | step | LR | BS | GA | GPUs | Eff Batch | Notes |
+|------|------|-----|-----|-----|------|-----------|-------|
+| **8446252 → 8478416 → 8566793 → 9281175 → 9463244** | **4** | **5e-5** | **48** | **2** | **2** | **192** | **Step=4 curriculum** (L=4,8,...,96, 24 stages). **~2x worse at early L but crossover at L=56**: L=16@1,302 vs 496 (2.6x), L=24@5,744 vs 2,824 (2.0x), L=32@13,663 vs 6,396 (2.1x), L=40@30,705 vs 13,650 (2.2x), L=48@63,226 vs 42,002 (1.5x), **L=56@110,817 vs 219,303 (step=4 wins 2.0x!)**, **L=64@222,308 vs 360,821 (step=4 wins 1.6x!)**. Updated 2026-04-23 (Gautschi maintenance halt): chain reached **stage 17/24 = L=68, 711K loss-history entries**. Resume job 9477440 cancelled during maintenance window |
+| **9463245** | **8** | **5e-5** | **48** | **2** | **2** | **192** | **Step=8 curriculum** (L=8,16,...,96, 12 stages). Resumed from job_8500174 chain. Updated 2026-04-23: **stage 8/12 = L=64, 1,173,500 loss-history entries**. Resume job (would-have-been) cancelled — see history note above |
+| **9463235** | **2** | **5e-5** | **48** | **2** | **2** | **192** | **Step=2 curriculum** (L=2,4,...,96, 48 stages). **Fresh cold start** 2026-04-21. Updated 2026-04-23: **stage 12/48 = L=24, 43,000 loss-history entries**. Resume job 9478376 cancelled during maintenance window |
+| **9463234** | **16** | **5e-5** | **48** | **2** | **2** | **192** | **Step=16 curriculum** (L=16,32,...,96, 6 stages). **Fresh cold start** 2026-04-21. Updated 2026-04-23: **stage 2/6 = L=32, 39,500 loss-history entries**. Resume job 9477442 cancelled during maintenance window |
+| ~~9241493~~ | 1 | 5e-5 | 64 | 1 | 3 | 192 | Cancelled before start — replaced by 9252292 |
+| ~~9252292~~ | 1 | 5e-5 | 48 | 1 | 4 | 192 | **Accidentally warm-started** from 8478416 checkpoint-558500 (PREV_JOB_ID not cleared when copying step=4 script). Cancelled at ~10h into new training. Model was well-trained to L=64 from step=4, breezed through L=16→57 in 3h, then got stuck on L=58 (a fresh L that step=4 had skipped). Useful data point but not a cold comparison |
+| **9273225** | **1** | **5e-5** | **48** | **1** | **4** | **192** | **COLD-START Step=1 curriculum** (L=1,2,...,96, 96 stages). Fresh start. Stopped 2026-04-23 on RunPod at **stage 33 = L=33** (~3-5 days remaining at projected pace; deemed not cost-effective). 1.7B per-token gain over base on hold |
+
+**Status at 2026-04-23 (Gautschi maintenance start):**
+- step=1 stopped at L=33 (RunPod, abandoned)
+- step=2 at L=24 (12/48 stages)
+- step=4 at L=68 (17/24 stages)
+- step=8 at L=64 (8/12 stages)
+- step=16 at L=32 (2/6 stages)
+
+All 3 resume jobs (9477440 step=4, 9477442 step=16, 9478376 step=2) cancelled during 2026-04-22 to 2026-04-29 maintenance window. Plots regenerated 2026-04-23 in `plots/pythia410m_stepsize/` reflecting current progress. Will need to decide whether to resubmit post-maintenance — depends on which step-size is most informative for paper.
 
 ### Full Fine-Tuning (Reinit — random weights)
 
@@ -173,9 +190,21 @@ All Qwen 0.6B runs use LoRA rank=16 unless noted.
 
 | Jobs | LR | BS | GA | GPUs | Eff Batch | Notes |
 |------|-----|-----|-----|------|-----------|-------|
-| **8533255** | **5e-5** | **48** | **4** | **4** | **768** | **COMPLETED L=96** at 98.4% greedy, 47.9K PFLOPs, 55 GPU-hrs. **2x faster than LoRA** at every stage. Extended to L=128 via job 8555128 |
-| **8555128** | **5e-5** | **48** | **4** | **4** | **768** | **COMPLETED L=128** (resumed from 8533255). 98.6% greedy, 83.3K PFLOPs, 95 GPU-hrs total. Per-stage: L=104@67.7K, L=112@69.6K, L=120@75.7K, L=128@83.3K. **2.4x faster than LoRA** (LoRA: 202K PFLOPs for L=128). No walls — Qwen handles all L smoothly |
+| **8533255** | **5e-5** | **48** | **4** | **4** | **768** | **COMPLETED L=96** at 98.4% greedy, 47K PFLOPs, 55 GPU-hrs (step=8 baseline, base=8/step=8, 12 stages). Total run = 67K PFLOPs (kept training past). Extended to L=128 via job 8555128 |
+| **8555128** | **5e-5** | **48** | **4** | **4** | **768** | **COMPLETED L=128** (true resume from 8533255 ckpt-19500, n_stages=16, max_input=768, max_lookahead=128). 98.6% greedy, **82K PFLOPs total cold-start to L=128**, 95 GPU-hrs. Per-stage cumulative PFLOPs: L=96@47K, L=104@67K, L=112@68K, L=120@74K, **L=128@82K**. No walls — Qwen handles all L smoothly. **NB:** previous "83K" figure in history was a small rounding error |
 | ~~8544599~~ | 5e-5 | 48 | 4 | 4 | 768 | Pythia 1B with same hypers — cancelled |
+
+### Curriculum step ablation (Full FT, no instruct mix, max_L=96/128)
+
+All same hypers as step=8 baseline above (LR=5e-5, BS=48, GA=4, 4 GPUs, eff_batch=768, threshold=0.98, min_steps=200, seed=1234). Only `--base_lookahead`/`--lookahead_step`/`--n_stages` differ.
+
+| Jobs | step | base | n_stages | max_L | Result |
+|------|------|------|----------|-------|--------|
+| **8533255 → 8555128** | **8** | 8 | 12→16 | 96→128 | **Reference**. Cold start to L=128 in **82K PFLOPs / 95 GPU-h** |
+| ~~9194256~~ | **1** | 1 | 96 | 96 | **Cancelled at L=91** after 107K PFLOPs / 114 GPU-h. **2.5-2.9x worse** than step=8 at every L from L=32 onward (PFLOPs/GPU-h ratios both stable). Already burned 30% more compute than step=8's full L=128 run while still 5 stages short of L=96. Min_steps_per_stage floor only binds in 17 of 91 stages (median 325 steps/stage) — overhead is real curriculum-boundary re-stabilization, not the floor. **Conclusion:** finer curriculum is pure overhead on Qwen because there are no walls to amortize against. Per-stage cumulative PFLOPs: L=16@2.1K, L=32@10.2K, L=48@23.8K, L=64@47.1K, L=80@77.0K, L=88@99.5K, L=91@106.9K |
+| ~~9275570~~ | **1** | 1 | 96 | 96 | **Step=1 WITH chat template, no instruct mix.** Cancelled at L=24 (12.8K PFLOPs, 8.2h) on 2026-04-16 once trend was clear. Only diff from 9194256: `--use_chat_template`. **Chat template adds ~3x PFLOPs to reach matched L** vs no-chat (ratio stable across L=4-24: 2.4-3.5×). Per-stage cumulative PFLOPs (chat vs no-chat): L=4@430 vs 146 (2.95×), L=8@1505 vs 490 (3.07×), L=16@6904 vs 2126 (3.25×), L=24@12771 vs 5233 (2.44×). Loss at matched L is also slightly worse with chat (Δ≈+0.005-0.012). **Conclusion:** chat template wrapping is a real ~3x compute tax on top of any data cost. Step=1 chat ≈ ~7-9× more expensive than step=8 no-chat to reach the same L target. Implications: chat template is NECESSARY for runs that mix Dolci (chat-formatted instruction data) so it's not avoidable for instruct/6pct/20pct dolci runs, but it IS avoidable for pure curriculum runs |
+| ~~9252107~~ | 16 | 16 | 8 | 128 | **Step=16 curriculum**, base/step=16, 8 stages. **Crashed at step 8130 (Stage 4, L=64)** after 4h35m with Liger RMSNorm Triton cache error — `FileNotFoundError: /home/huan2073/.triton/cache/...` because home quota was 98.8% full. Fixed via `~/.triton → /scratch/.../triton_cache` symlink + `TRITON_CACHE_DIR` env var in both scripts. Stages 1-3 (L=16,32,48) cleared cleanly; Stage 4 (L=64) was at 96% full_acc when it crashed |
+| **9273210** | **16** | 16 | 8 | 128 | **Resubmit of 9252107** with triton cache fix. **COMPLETED L=128** on 2026-04-16, 21,925 steps, 22.8M tokens. All 8 stages cleared (L=16, 32, 48, 64, 80, 96, 112, 128). Last checkpoint: `job_9273210/stage_checkpoints/stage_8_step_21925_L128/`. Latest optimizer state: `checkpoint-21500/` (3.4 GB). 2026-04-23: planned extension to L=256 via transfer to Jackie's cluster (script: `tuning_job_qwen06b_curr256_step16_RESUME_jackie.sh`, 8 more stages of step=16 → L=144,160,…,256, expected ~200-400 GPU-hrs on 4×H100 with input_size=1536) |
 
 ### Full Fine-Tuning No-Curriculum (various max_L, max_input=6*L)
 
@@ -292,6 +321,56 @@ All symbolic runs use SophiaG optimizer, max_input_size=256, max_lookahead=40, b
 - **Capacity ceiling is L=12-14** for this architecture (6 layers, 360 hidden dim, ~4.6M params)
 - New symbolic run submitted (8480401) with properly working cosine decay (peak=1e-4, min=1e-6) — higher peak LR to test if more aggressive training can break through L=14
 
+### Instruction Mixing + Chat Template (curriculum, max_L=96, max_input=576)
+
+All runs use `--use_chat_template` (wraps search data in `<|im_start|>` format with `enable_thinking=False`).
+Instruction data: allenai/Dolci-Instruct-SFT, loss only on assistant tokens.
+
+**Bug history:** Initial instruction mixing had a double-shift label bug — `labels[t] = full_ids[t+1]` but compute_loss already shifts, so labels were off by one. Model produced gibberish. Fixed to `labels[t] = full_ids[t]`. Also required `enable_thinking=False` in chat template to inject empty `<think>\n\n</think>\n\n` block matching Qwen3's expected format — without this, instruct loss monotonically increased.
+
+| Jobs | Mix % | LR | BS | GA | GPUs | Eff Batch | Notes |
+|------|-------|-----|-----|-----|------|-----------|-------|
+| **8894380 → 9001346** | **6%** | **5e-5** | **48** | **4** | **4** | **768** | **Best config**. L=64 at 99K steps (48h timeout). ~12x slower than pure curr. Advances ~1 stage per 1.5K steps at high L |
+| **8826383 → 8969183 → 8982104 → 9004017** | **20%** | **5e-5** | **48** | **4** | **4** | **768** | L=36 at 182K steps. Much slower curriculum advancement — too much instruct dilution |
+| **8826386 → 8969184 → 9052803 → 9152198** | **100%** | **5e-5** | **48** | **4** | **4** | **768** | **Instruct-only** (no search data). n_stages=1, control experiment for catastrophic forgetting. Cancelled after 506K PFLOPs (already overshot 6% target of 461K) |
+| **9048131** | **6%** | **5e-5** | **48** | **4** | **4** | **768** | **L=16, 99% threshold variant** (`accuracy_threshold=0.99`, base/step=1). Stage checkpoints at every L=1..16, downstream eval every 2 stages. **COMPLETED** at step 143.8K, 32.5h wall-clock. Used to map downstream accuracy vs L. **Finding:** downstream gains saturate by L=4 — minimal benefit from going deeper at 99% threshold. 99% costs ~3x more compute per L than 98% threshold |
+
+**Broken runs (pre-fix, all deleted):**
+- 8639230: 6% Dolci, no chat template, no `<think>` tags — instruct loss rose to 3.4, model gibberish
+- 8737810: 20% Dolci, no chat template — same failure
+- 8796649: 20% + chat template but double-shift label bug — same failure
+- 8796651: instruct-only with double-shift bug — same failure
+
+### Downstream Benchmark Results (Qwen 0.6B)
+
+**Standard Benchmarks (12 tasks):**
+
+| Model | Config | Steps | L | hellaswag | winogrande | piqa | arc_easy | arc_challenge | boolq | openbookqa | sciq | copa | csqa | tqa_mc1 | gsm8k | **AVG** |
+|-------|--------|-------|---|-----------|------------|------|----------|---------------|-------|------------|------|------|------|---------|-------|---------|
+| Base Qwen 0.6B | — | — | — | 47.3 | 56.4 | 67.3 | 55.9 | 33.7 | 63.8 | 31.8 | 83.5 | 64.0 | 46.5 | 27.3 | 42.0 | **51.6** |
+| Instruct-only | 100% Dolci | 100.5K | — | 48.5 | 54.2 | 68.7 | 60.4 | 35.3 | 50.4 | 32.8 | 85.3 | 67.0 | 53.3 | 26.1 | 38.5 | **51.7** |
+| 20%+Search | 20% Dolci | 145.5K | 31 | 49.0 | 55.2 | 67.9 | 61.5 | 36.2 | 55.6 | 35.6 | 90.2 | 69.0 | 46.0 | 26.4 | 28.1 | **51.7** |
+| **6%+Search** | **6% Dolci** | **95.5K** | **59** | 48.2 | 54.5 | 68.4 | **66.0** | **37.6** | **69.3** | 33.0 | **92.0** | 69.0 | 51.2 | 26.1 | 35.9 | **54.3** |
+| Pure Curr (no mix) | — | 22.5K | 128 | 27.2 | 48.7 | 52.8 | 29.5 | 21.9 | 57.0 | 25.6 | 60.4 | 54.0 | 19.6 | 26.1 | 0.0 | **35.2** |
+
+**BBH Reasoning Benchmarks (11 tasks, zeroshot):**
+
+| Model | Config | bool_exp | dyck | formal_fall | log_ded_3 | log_ded_5 | log_ded_7 | navigate | track_3 | track_5 | track_7 | web_lies | **AVG** |
+|-------|--------|----------|------|-------------|-----------|-----------|-----------|----------|---------|---------|---------|----------|---------|
+| Base Qwen 0.6B | — | 41.6 | 0.0 | 44.0 | 30.8 | 34.4 | 42.0 | 22.4 | 39.6 | 12.4 | 13.2 | 46.4 | **29.7** |
+| Instruct-only | 100% Dolci | 49.6 | 0.4 | 47.2 | 35.6 | 27.2 | 24.0 | 62.4 | 33.2 | 17.2 | 10.4 | 43.6 | **31.9** |
+| 20%+Search | 20% Dolci | 62.4 | 0.0 | 46.8 | 40.0 | 32.0 | 26.8 | 43.2 | 28.0 | 21.6 | 12.4 | 48.0 | **32.8** |
+| **6%+Search** | **6% Dolci** | **75.6** | 2.4 | 47.2 | 40.0 | 28.0 | 26.4 | 57.6 | 31.2 | **23.2** | **15.2** | **48.4** | **35.9** |
+| Pure Curr (no mix) | — | 0.0 | 0.0 | 0.0 | 0.0 | 0.4 | 0.0 | 0.0 | 0.4 | 6.8 | 3.6 | 0.0 | **1.0** |
+
+**Key downstream findings:**
+- Pure curriculum (no instruction mixing) causes catastrophic forgetting: 35.2% standard, 1.0% BBH
+- 6%+Search is the best overall: +2.7% standard, +6.2% BBH over base; +2.6% standard, +4.0% BBH over instruct-only
+- Boolean expressions: 75.6% (6%+Search) vs 41.6% (base) vs 49.6% (instruct-only) — search training provides +26pp over instruct-only
+- 20% instruction mixing is too much dilution: slower curriculum advancement and lower benchmark scores than 6%
+- boolq shows +18.9pp over instruct-only for 6%+Search, likely due to shared boolean reasoning structure
+- GSM8K degrades for all fine-tuned models (42→36-39%), instruction mixing doesn't fully prevent math forgetting
+
 ---
 
 ## Summary of Unique Configs Tried
@@ -336,11 +415,24 @@ All symbolic runs use SophiaG optimizer, max_input_size=256, max_lookahead=40, b
 
 10. **Symbolic capacity ceiling is L=14**: Confirmed with both constant LR and per-stage cosine decay — identical trajectories, same peak (95.2%), same destabilization point (~12K epochs). Not an LR issue — hard capacity wall for this architecture.
 
-11. **Step=4 curriculum: worse early, better late**: 2.0-2.6x worse PFLOPs at L=16-48, but **2x BETTER at L=56** (111K vs 219K PFLOPs). Finer curriculum avoids the massive wall baseline hits. Crossover between L=48 and L=56.
+11. **Curriculum step granularity is a tradeoff governed by walls**: Finer curriculum has a fixed cost (200-step floor + accuracy-window re-stabilization at each boundary, ~2.5x overhead per stage doubling) and a conditional benefit (avoids difficulty walls). Outcome depends entirely on whether the model has walls:
+    - **Pythia 410M (has wall at L=48-56)**: step=4 is 2.0-2.6x worse at L=16-48, but **2x better at L=56** (111K vs 219K PFLOPs). Crossover at the wall.
+    - **Qwen 0.6B (no walls)**: step=1 is **2.5-2.9x worse than step=8 at every L** from L=32 onward, stable ratio. Cancelled at L=91 after 107K PFLOPs / 114 GPU-h vs step=8's full L=128 in 82K PFLOPs / 95 GPU-h. Pure overhead because there's nothing to amortize against.
+    - **Rule of thumb**: finer curriculum only pays off when a coarser schedule is getting stuck. Otherwise it just multiplies boundary overhead.
 
 12. **Qwen Full FT >> LoRA >> Pythia**: Qwen 0.6B full FT reaches L=48 at 8.4K PFLOPs — **3.2x faster than LoRA** (27K) and **5x faster than Pythia 410M** (42K). Architecture matters more than model size: Qwen 0.6B outperforms Pythia 1B despite being smaller. Possible causes: better pretraining, higher rope_theta (1M vs 10K), 100% rotary coverage, GQA, more layers (28 vs 16/24).
 
-13. **Per-stage compute shows architectural differences**: Qwen cost per stage grows gradually (3K→7K→18K→43K PFLOPs). Pythia has sudden 10-20x jumps (410M: 7K→28K→177K at L=32→40→48). Pythia hits walls; Qwen doesn't. Likely due to positional encoding differences (25% rotary coverage in Pythia vs 100% in Qwen).
+13. **Synthetic search training transfers to downstream reasoning**: 6%+Search model achieves 35.9% on BBH reasoning tasks vs 31.9% instruct-only vs 29.7% base. Strongest transfer on boolean_expressions (+34pp over base, +26pp over instruct-only), consistent with structural similarity between boolean evaluation and graph search. Standard benchmarks also improve (+2.7% over base).
+
+14. **6% instruction mix is the sweet spot**: 6% Dolci instruction mixing preserves benchmarks while allowing fast curriculum advancement (~12x slower than pure curr). 20% is too much dilution — slower curriculum (L=36 at 182K steps vs L=64 at 99K steps for 6%) and lower benchmark scores. The effective token ratio matters more than sample ratio due to label masking on instruction data.
+
+15. **Instruction data format must match model's training format**: Qwen3 expects `<think>\n\n</think>\n\n` prefix for non-thinking mode. Without this, instruct loss monotonically increases and model produces gibberish. With correct format, instruct loss cycles between 0.3-1.8 (domain variation in streaming data) and model maintains coherent outputs throughout training.
+
+16. **Without instruction mixing, fine-tuning causes catastrophic forgetting**: Pure curriculum (no mixing) drops standard benchmarks from 51.6% to 35.2%, BBH from 29.7% to 1.0%, GSM8K from 42% to 0%. Even small instruction mixing (6%) prevents this entirely.
+
+17. **Per-stage compute shows architectural differences**: Qwen cost per stage grows gradually (3K→7K→18K→43K PFLOPs). Pythia has sudden 10-20x jumps (410M: 7K→28K→177K at L=32→40→48). Pythia hits walls; Qwen doesn't. Likely due to positional encoding differences (25% rotary coverage in Pythia vs 100% in Qwen).
+
+18. **Chat template adds ~3× compute on top of any data cost** (Qwen 0.6B step=1, no instruct mix, job 9275570 vs 9194256). Only difference between the two runs: `--use_chat_template`. Chat-template variant takes 2.4-3.5× more PFLOPs to reach matched L (stable ratio across L=4-24): L=8@1505 vs 490 (3.07×), L=16@6904 vs 2126 (3.25×), L=24@12771 vs 5233 (2.44×). Loss at matched L also slightly worse (Δ≈+0.005-0.012). **Implications:** chat template is mandatory for runs that mix Dolci (chat-formatted instruction data) — the 6%/20% dolci runs and instruct_only correctly used it. But for pure curriculum runs without instruct mixing, chat template is pure overhead. Composing factors: step=1 chat ≈ 7-9× more expensive than step=8 no-chat to reach matched L. **Future optimization**: train curriculum no-chat then a brief format-alignment SFT pass with chat template at the end ("format finetune") could capture both benefits.
 
 ---
 
