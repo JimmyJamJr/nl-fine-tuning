@@ -1,226 +1,160 @@
 # Downstream Eval Framework
 
-Benchmarks suite + driver for evaluating pretrained/fine-tuned models on
-downstream tasks. Works with any HuggingFace causal LM (Qwen, Pythia, custom
-checkpoints, etc.).
+Driver + benchmark suite for evaluating pretrained / curriculum-fine-tuned
+causal LMs on 14 reasoning benchmarks. Designed for Qwen 0.6B / 1.7B and
+Pythia 160M / 410M but works with any HuggingFace causal LM.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `eval_downstream.py` | Main eval driver. 23 benchmarks; one CLI, one output JSON. |
-| `eval_downstream.sh` | Gautschi sbatch launcher (H100, `-p ai -q normal`, 16h walltime). |
+| `eval_downstream.py` | Main eval driver. 14 primary + 5 few-shot variants (19 total). |
+| `eval_full_n1000.sh` | Gautschi sbatch launcher for full `n=1000` eval (1 GPU, `smallgpu`, 8h walltime). Takes `$MODEL` env var. |
+| `eval_smoketest.sh` | Quick `n=20` smoke test of the full benchmark suite (Gautschi `smallgpu`). |
+| `eval_downstream.sh` | Legacy Gautschi launcher (`ai` partition, h100). Kept for reference; use `eval_full_n1000.sh` for current runs. |
 | `eval_downstream_gilbreth.sh` | Gilbreth sbatch launcher (A30, `-p a30 -q standby`, 3h55m). |
-| `prompts/` | Hand-crafted few-shot prompts + verbatim LegalBench author prompts. |
-| `results/` | Per-run output JSONs (one per sbatch job). |
-| `RESULTS.md` | Manually maintained human-readable results doc. Update by hand. |
+| `submit_parallel.sh` | Gilbreth parallel-submit (one job per model). |
+| `setup_cache_datasets.py` + `cache_datasets.sh` | One-shot: pre-download all HF datasets + filter Lichess puzzles into a local Parquet. Run once per cluster. |
+| `prompts/` | Fallback hand-crafted few-shot prompts (ProofWriter/StepGame) + LegalBench author templates (auto-downloaded from HazyResearch repo on first use). |
+| `results/` | Per-run output JSONs. |
+| `RESULTS.md` | Hand-compiled results summary. |
 
-## Supported benchmarks
+## Supported benchmarks (14 primary + 5 few-shot variants)
 
-23 benchmark keys total — many underlying datasets have two scoring variants
-(our zero-shot log-lik version + a generation/paper-matching version).
+Each primary adapter returns **three metrics in one forward pass**:
+- `loglik_accuracy`: log-likelihood argmax over candidate labels (lm-eval-harness convention)
+- `calibrated_accuracy`: contextual calibration (Zhao et al. ICML 2021) — subtract model's content-free prior
+- `gen_accuracy`: constrained greedy — argmax over the full next-token distribution, mapped to a valid candidate
 
-### Reasoning & search-transfer (our additions)
+Gen-canonical benchmarks (`nlgraph_gen`, `legal`) use their authors' own generation-based scorers instead.
 
-Columns below are the `--benchmarks` keys for each scoring variant on the same
-underlying dataset. A dash (`—`) means that variant doesn't exist for that dataset.
+### Primary adapters (14)
 
-| Dataset | Sub-tasks | Log-lik (zero-shot, ours) | Generation / paper-matching | Log-prob of gold |
-| --- | --- | --- | --- | --- |
-| LegalBench (3 binary tasks) | hearsay, international_citizenship_questions, proa | `legal` — Yes/No log-lik w/ author prompts | `legal_gen` — few-shot generation (Guha 2023) | — |
-| ProofWriter OWA | depths 0–5 | `proofwriter` — 3-class (T/F/Unknown) log-lik | `proofwriter_gen` — 3-shot generation | — |
-| ProofWriter CWA | depths 0–5 | `proofwriter_cwa` — 2-class (T/F) log-lik | `proofwriter_cwa_gen` — 3-shot generation | — |
-| ZebraLogic MC | overall | `zebra_mc` — 4-way log-lik | `zebra_mc_gen` — few-shot generation | — |
-| StepGame | hops 1…10 | `stepgame` — 9-way log-lik | `stepgame_gen` — 5-shot generation (Li 2024) | — |
-| Game of 24 (ToT hard subset) | puzzles 900–999 | — | `game24` — generation + expression eval | — |
-| PlanBench Blocksworld | plan generation | — | `blocksworld` — gen + exact-match & prefix-match | `blocksworld_logprob` — mean log-prob of gold plan |
-| PlanBench Mystery-BW | plan generation | — | `mystery_blocksworld` — gen + exact-match | `mystery_blocksworld_logprob` |
-| PlanBench Logistics | plan generation | — | `logistics` — gen + exact-match | `logistics_logprob` |
-| Chess mate-in-N (Lichess) | mate-in-1/2/3 | — | `chess_mate` — gen + exact-match | `chess_mate_logprob` — log-prob of gold moves |
+| Key | Protocol | Canonical source | # classes | Scoring |
+|---|---|---|---|---|
+| `proofwriter` | 8-shot Direct (no CoT) | Saparov & He 2023 (CoT) — deviation | 3 (True/False/Unknown) | fused |
+| `proofwriter_cwa` | 8-shot Direct | same | 2 | fused |
+| `prontoqa_ood` | 8-shot Direct (no CoT demos) | Saparov 2023 (CoT) — deviation | 2 | fused, per-variant |
+| `clutrr` | 0-shot | none (original: GNN-based) | 21 kinship | fused, per-k |
+| `folio` | 8-shot from train | Han et al. EMNLP 2024 ✓ canonical | 3 | fused |
+| `logiqa` | 0-shot | AGIEval log-lik ✓ canonical | 4 | fused |
+| `ruletaker` | 0-shot | none (original: fine-tuning) | 2 | fused, per-depth |
+| `logicbench_bqa` | 3-shot Direct | Parmar et al. ACL 2024 FS-Direct ✓ | 2 | fused |
+| `logicbench_mcqa` | 3-shot Direct | same ✓ | 4 | fused |
+| `multilogieval` | 0-shot Direct | Patel et al. EMNLP 2024 (0-shot CoT) — deviation | 2 | fused, per-(depth,logic) |
+| `zebra_mc` | 0-shot | WildEval grid-JSON (we use MC mode) | 5–6 per puzzle | fused, per-size |
+| `stepgame` | 8-shot from train | none (original: fine-tuning) | 8 directions | fused |
+| `nlgraph_gen` | canonical 4-shot Direct | Wang et al. NeurIPS 2023 ✓ | varies per task | per-task author scorers (path validation, regex per task) |
+| `legal` | canonical 6-shot author demos | Guha et al. NeurIPS 2023 ✓ | varies per subtask | `balanced_accuracy_score` + `normalize()` |
 
-**Scoring notes:**
+### Few-shot variants (5)
 
-- *Log-lik (ours)*: zero-shot comparison of log P(label | prompt) across the
-  valid labels. Fast, no prompt engineering, works on every model (no chat
-  template or CoT required). This is our main reasoning-transfer measurement.
-- *Generation / paper-matching*: replicates the author's setup as closely as
-  possible without fine-tuning or CoT thinking — typically few-shot prompting
-  plus answer-extraction. Slower and higher variance but comparable to
-  published numbers.
-- *Log-prob of gold*: mean per-token log-probability of the gold solution.
-  Useful for tasks where the solution is a long structured sequence (plans,
-  move lists) and exact-match is too brittle; rewards models that are close
-  without penalizing them for minor format deviations.
+Alternative prompting for benchmarks that are 0-shot by default. Same metrics, demo block prepended:
 
-**Removed benchmarks:**
+| Key | Protocol | Rationale |
+|---|---|---|
+| `ruletaker_fs` | 5-shot Direct | Tests whether format-teaching helps escape class collapse |
+| `clutrr_fs` | 5-shot Direct (stratified by k) | Same |
+| `logiqa_fs` | 3-shot Direct | Deviates from AGIEval 0-shot canonical; alternative view |
+| `multilogieval_fs` | 3-shot Direct | Same |
+| `zebra_mc_fs` | 3-shot (demos from small 2×2/2×3 puzzles) | Same |
 
-- `zebra` (ZebraLogic-grid): removed 2026-04-16. Bundled reasoning capability
-  with JSON-format-following, and fine-tuned models pay a "format tax"
-  (parse rate dropped 99% → 71%) that wiped out their reasoning advantage.
-  Same puzzles are still measured via `zebra_mc` (log-likelihood scoring),
-  which isolates reasoning from format adherence. Old grid results are
-  preserved in [RESULTS.md](RESULTS.md) for reference but no new grid runs.
+### Dropped (for reference)
 
-### Standard NLU (via lm-evaluation-harness)
+- `chess_mate` — 0% (exact + first_move) across all 12 tested models; no signal at 0.6–1.7B scale.
+- `stepgame_gen` — redundant with fused `stepgame` (pre-consolidation artifact).
+- `grapharena_gen` — needs `rdkit` + `build_dataset.py` generation; no pre-built data.
+- `blocksworld` / `mystery_blocksworld` / `logistics` (+`_first`, `_logprob`) — PlanBench, not in paper benchmark set.
+- `bbh` / `bbh_cot` / `bbh_cot_chat` / `standard` — BBH & standard NLU, not in paper benchmark set.
+- `game24` — too hard at 0.6B, consistently <5%.
 
-All three use the lm-eval-harness default scoring for each task (log-lik for
-multiple-choice, exact-match for gsm8k).
+### Test set sizes
 
-| Key | Tasks | Shot style |
-| --- | --- | --- |
-| `standard` | 12 tasks: hellaswag, winogrande, piqa, arc_easy, arc_challenge, boolq, openbookqa, sciq, copa, commonsense_qa, truthfulqa_mc1, gsm8k | zero-shot |
-| `bbh` | 11 BBH reasoning subtasks | zero-shot |
-| `bbh_cot` | Same 11 BBH subtasks | 3-shot Chain-of-Thought |
+- Small (≤1500): FOLIO val 203, LogiQA test 651, LogicBench MCQA 500, LogicBench BQA 1520, LegalBench subtasks 96–300 each, Multi-LogiEval ~2000 after yes/no filter
+- Medium: NLGraph 1000 (8 tasks), ZebraLogic-MC 3259
+- Large: ProofWriter OWA/CWA (20K × 6 depths each), RuleTaker 150K, CLUTRR 70K, StepGame 100K
 
-## Model specification
+`n=1000` cap is applied **per benchmark, stratified across subsets** via `_distribute_n` + seeded random `_subsample(seed=42)`.
 
-`--models` accepts any combination of:
-
-1. **Registry alias** (Qwen-specific shortcuts — see `MODEL_REGISTRY` in `eval_downstream.py`)
-   - `base` → Qwen/Qwen3-0.6B
-   - `instruct_only` → latest checkpoint from the instruct-only SFT chain
-   - `6pct_L{4,8,16,32,48,64,75}` → 6%-Dolci curriculum stage checkpoints
-2. **Alias=path** explicit mapping: `my_ckpt=/scratch/.../checkpoint-87000`
-3. **Bare path or HF repo**: `/path/to/ckpt` or `EleutherAI/pythia-410m`
-
-Registry aliases require `--checkpoints-root` to point at the dir containing
-`job_<id>/` subdirs.
-
-## Running
-
-### Basic usage (direct CLI)
+## Usage
 
 ```bash
-conda activate search
+# Prereq: one-time dataset caching (run once per cluster)
+sbatch cache_datasets.sh
 
-python eval_downstream.py \
-    --models base instruct_only EleutherAI/pythia-410m \
-    --benchmarks zebra_mc legal proofwriter bbh \
-    --output results/my_run.json \
-    --hf-cache /scratch/gautschi/$USER/model_cache \
-    --prompts-dir ./prompts \
-    --checkpoints-root /scratch/gautschi/$USER/nl_output/search \
-    --data-dir /scratch/gautschi/$USER/nl_eval
+# Smoke test (n=20, single model, all 19 benchmarks)
+sbatch eval_smoketest.sh
+
+# Full n=1000 eval for one model (Gautschi smallgpu)
+MODEL=base sbatch eval_full_n1000.sh
+MODEL=6pct_L32 sbatch eval_full_n1000.sh
+MODEL=6pct_1.7b_L32 sbatch eval_full_n1000.sh
+
+# Parallel sweep on Gilbreth (4 models × 4 A30 GPUs, fully parallel)
+bash submit_parallel.sh
 ```
 
-### Via sbatch (recommended)
+Models are resolved via `MODEL_REGISTRY` in `eval_downstream.py`:
+- `base`, `base_1.7b` → HF repo (`Qwen/Qwen3-0.6B`, `Qwen/Qwen3-1.7B`)
+- `instruct_only` → `_latest_ckpt("9152198")` with fallbacks
+- `6pct_L{4,6,8,16,32,48,64,75}` → `_stage_ckpt("8894380", L)` or `_stage_ckpt("9001346", L)`
+- `6pct_1.7b_L{8,16,32}` → `_stage_ckpt("runpod_qwen17b_L32_20260418_085434", L)`
 
-Both sbatch scripts are env-driven. Typical invocation:
+Override with explicit `alias=path` via `--models` CLI flag.
+
+## Environment
 
 ```bash
-# Gautschi
-MODELS="base instruct_only 6pct_L75" \
-BENCHMARKS="zebra_mc legal proofwriter bbh standard" \
-sbatch eval_downstream.sh
-
-# Gilbreth (note: use explicit name=path for non-base models since Gilbreth
-# doesn't mount Gautschi's nl_output tree)
-MODELS="base instruct_only=$SCRATCH/models/instruct_only 6pct_L75=$SCRATCH/models/6pct_L75" \
-BENCHMARKS="zebra_mc legal" \
-sbatch eval_downstream_gilbreth.sh
+export SCRATCH=/scratch/gautschi/$USER        # or /scratch/gilbreth/$USER
+export HF_HOME=$SCRATCH/model_cache
+export HF_DATASETS_OFFLINE=1                  # use pre-cached datasets, no network
+export DATA_DIR=$SCRATCH/nl_eval              # local paths for PrOntoQA zip, LogicBench/NLGraph/MultiLogiEval clones, chess parquet
 ```
 
-### Controlling sample size
-
-`--n` sets the **default** examples per sub-task. `None` (default) = full test set.
-
-`--n-per-benchmark bench=N ...` overrides on a per-benchmark basis. The sbatch
-scripts default to caps for generation-heavy tasks and full sets for log-lik tasks:
-
-```
-game24=100 blocksworld=50 mystery_blocksworld=50 logistics=50
-chess_mate=50 stepgame_gen=100 proofwriter_gen=200 proofwriter_cwa_gen=200
-```
-
-Override via env var:
-
-```bash
-N_OVERRIDES="bbh=250 game24=200" sbatch eval_downstream.sh
-```
-
-Or CLI:
-
-```bash
-python eval_downstream.py \
-    --benchmarks zebra_mc bbh \
-    --n 100 \
-    --n-per-benchmark bbh=50 \
-    ...
-```
-
-### Debug mode
-
-Set `DEBUG_SAMPLES=N` (or `--debug-samples N` on the CLI) to print the first
-N examples per (benchmark, sub-task) with the full prompt excerpt, gold answer,
-predicted answer, and per-class log-likelihoods (or generation output for
-generation benchmarks). Useful for spotting label-bias collapse, format issues,
-or tokenization confounds.
-
-```bash
-DEBUG_SAMPLES=3 BENCHMARKS="legal proofwriter zebra_mc" sbatch eval_downstream.sh
-```
-
-Counters reset between models, so each model gets its own N samples per benchmark.
-Set `DEBUG_SAMPLES=0` (default) to disable.
-
-### Chat template behavior
-
-Auto-detected from the tokenizer:
-- Tokenizer has `chat_template` (Qwen, Llama chat, etc.) → chat-wrapped prompts
-- No template (Pythia, base GPT-NeoX, etc.) → plain completion
-
-Override with `--chat-template always|never` for ablations.
-
-### Few-shot via train-split ICEs
-
-Set `USE_TRAIN_ICES=1` (optional `TRAIN_ICE_K=5`) in the environment to load
-few-shot examples from the dataset's own train split instead of the static
-prompts in `prompts/`. Supported for ProofWriter and StepGame generation
-variants.
-
-## Path configuration (4 CLI args, all required or plumbed from sbatch env)
-
-| Arg | Purpose | Required when |
-| --- | --- | --- |
-| `--hf-cache` | HuggingFace model/data cache | always recommended (else `$HF_HOME` is used) |
-| `--prompts-dir` | Dir containing prompt template files | has a default (`prompts/` next to the script) |
-| `--checkpoints-root` | Root containing `job_<id>/` dirs | required iff registry aliases (`instruct_only`, `6pct_L*`) are used |
-| `--data-dir` | Contains `game24_data/`, `proofwriter_raw/` | required iff `game24` or `proofwriter*` benchmarks are requested |
+HF token auto-propagates from `~/.cache/huggingface/token` if present. All
+SLURM launchers (`eval_full_n1000.sh`, `eval_smoketest.sh`, `cache_datasets.sh`,
+`eval_downstream_gilbreth.sh`) handle this automatically.
 
 ## Output format
 
-A single JSON keyed by model → benchmark → sub-task:
+One JSON per SLURM job at `results/eval_n1000_${MODEL}_${SLURM_JOB_ID}.json`:
 
 ```json
 {
   "base": {
     "_path": "Qwen/Qwen3-0.6B",
     "_chat_template": true,
-    "zebra_mc": { "overall": { "accuracy": 0.297, "n": 3260 } },
-    "legal":    { "hearsay": { "accuracy": 0.638, ... }, ... }
-  },
-  "6pct_L75": { ... }
+    "proofwriter": {
+      "0": {
+        "loglik_accuracy": 0.395,
+        "gen_accuracy": 0.400,
+        "calibrated_accuracy": 0.550,
+        "total": 167,
+        "per_class_loglik": {"True": {...}, "False": {...}, "Unknown": {...}}
+      },
+      "...": "...",
+      "overall": {"..., baseline_logprobs": {"True": -18.1, "False": -13.9, "Unknown": -11.9}}
+    },
+    "legal": {"overall": {"accuracy": 0.438, "total": 1000}, "diversity_1": {...}, ...}
+  }
 }
 ```
 
-The driver writes atomically after each benchmark so preemption mid-run doesn't
-corrupt partial results.
+See `RESULTS.md` for human-readable summary tables.
 
-## After a run
+## Canonical sources vs. deviations
 
-1. Inspect the JSON output in `results/`.
-2. **Manually update [RESULTS.md](RESULTS.md)** — find the matching table,
-   fill in the new cells, bump the changelog. This is the canonical
-   human-readable results doc; there is no auto-compiler.
-
-## Model compatibility
-
-Works with any HuggingFace `AutoModelForCausalLM`. Tested on:
-
-- Qwen3 (0.6B) — chat template auto-used
-- Pythia (160M/410M/1B) — plain completion auto-used
-- Any other HF repo or local checkpoint via `--models user/repo` or `--models alias=/path`
-
-Caveats:
-- `torch_dtype=torch.bfloat16` hardcoded. Works on Ampere+ (A30/A100/H100). Needs `--dtype` patch for pre-Ampere (e.g. V100).
-- `device_map="cuda"` means single-GPU. No tensor-parallel sharding for very large models.
+| Benchmark | Canonical method | Our approach | Deviation reason |
+|---|---|---|---|
+| NLGraph | 4-shot Direct + per-task regex (Wang 2023) | **canonical** | none |
+| LegalBench | 6-shot author demos + balanced_accuracy (Guha 2023) | **canonical** | none |
+| LogiQA | 0-shot log-lik (AGIEval) | **canonical** | none |
+| FOLIO | 8-shot from train (Han 2024) | matches few-shot protocol; log-lik scoring instead of gen | author uses gen, we can't without CoT banned |
+| LogicBench BQA/MCQA | 0-shot CoT OR 3-shot Direct (Parmar 2024) | **3-shot Direct** ✓ (matches one of paper's 4 conditions) | none |
+| Multi-LogiEval | 0-shot CoT (Patel 2024) | 0-shot Direct | CoT banned per our paper framing |
+| ProofWriter OWA/CWA | 8-shot CoT (Saparov & He 2023) | 8-shot Direct | CoT banned |
+| PrOntoQA-OOD | 8-shot CoT (Saparov 2023) | 8-shot Direct | CoT banned |
+| CLUTRR | original: GNN; no LLM canonical | 0-shot + calibration | none exists |
+| RuleTaker | original: fine-tuning; no LLM canonical | 0-shot + calibration | none exists |
+| StepGame | original: fine-tuning; no LLM canonical | 8-shot from train | none exists |
+| ZebraLogic | grid-JSON output (Lin 2024) | MC mode log-lik | we use mc_mode variant, not grid_mode |

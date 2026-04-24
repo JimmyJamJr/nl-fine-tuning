@@ -40,11 +40,12 @@ def _load_prompt(rel_path: str) -> str:
         return f.read()
 
 
-# Set USE_TRAIN_ICES=1 in the environment to use K in-context examples drawn
-# from the dataset's train split instead of the hand-crafted prompt files for
-# ProofWriter / StepGame. Defaults to 0 (use the static prompt files).
-_USE_TRAIN_ICES = os.environ.get("USE_TRAIN_ICES", "0") not in ("0", "", "false", "False")
-_TRAIN_ICE_K = int(os.environ.get("TRAIN_ICE_K", "5"))
+# Default: draw K in-context examples from each dataset's train split (matches
+# the canonical FOLIO-style protocol used when the original paper's few-shot
+# uses CoT we can't use). Set USE_TRAIN_ICES=0 to fall back to the legacy
+# hand-written prompt files in prompts/ for ProofWriter / StepGame.
+_USE_TRAIN_ICES = os.environ.get("USE_TRAIN_ICES", "1") not in ("0", "", "false", "False")
+_TRAIN_ICE_K = int(os.environ.get("TRAIN_ICE_K", "8"))
 _train_ice_cache = {}  # benchmark_name -> cached few-shot prompt string
 
 
@@ -88,6 +89,11 @@ MODEL_REGISTRY = {
     "6pct_L48": lambda: _stage_ckpt("8894380", 48),
     "6pct_L64": lambda: _stage_ckpt("9001346", 64),
     "6pct_L75": lambda: _stage_ckpt("9001346", 75),
+    # Qwen 1.7B
+    "base_1.7b":    "Qwen/Qwen3-1.7B",
+    "6pct_1.7b_L8":  lambda: _stage_ckpt("runpod_qwen17b_L32_20260418_085434", 8),
+    "6pct_1.7b_L16": lambda: _stage_ckpt("runpod_qwen17b_L32_20260418_085434", 16),
+    "6pct_1.7b_L32": lambda: _stage_ckpt("runpod_qwen17b_L32_20260418_085434", 32),
 }
 
 
@@ -209,6 +215,116 @@ def _loglik_completion(model, tokenizer, prefix: str, completion: str) -> float:
     return total
 
 
+def _score_choices_fused(model, tokenizer, prompt: str, choices, use_chat: bool,
+                         baseline_logprobs=None):
+    """Run the model ONCE on `prompt` and return both:
+       - per-choice log-prob (for log-lik scoring)
+       - greedy next-token argmax (for "gen" scoring)
+       - calibrated prediction (if `baseline_logprobs` is provided)
+
+    For multi-token choices, falls back to per-choice teacher-forced log-lik
+    (still single forward pass per choice).
+
+    Contextual Calibration (Zhao et al. ICML 2021): pass `baseline_logprobs`
+    = the same model's logprobs over the same choices on a content-free prompt
+    (e.g., replace task input with "N/A"). We subtract those from the per-example
+    logprobs before argmax, which cancels out the model's prompt-independent
+    class prior.
+
+    Returns dict:
+      'logprobs': {choice: float}            log p(" choice" | prompt)
+      'loglik_pred': str                     argmax over choices by logprob
+      'gen_pred': str                        greedy argmax of next token, mapped to a choice
+      'calibrated_pred': str or None         argmax over (logprobs - baseline), if provided
+    """
+    prefix = _chat_format(tokenizer, prompt) if use_chat else prompt
+    choice_token_ids = {}
+    for c in choices:
+        ids = tokenizer.encode(" " + c, add_special_tokens=False)
+        choice_token_ids[c] = ids
+
+    all_single = all(len(ids) == 1 for ids in choice_token_ids.values())
+
+    prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
+    inp = torch.tensor([prefix_ids], device=model.device)
+    with torch.no_grad():
+        logits = model(inp).logits[0, -1, :]  # next-token logits
+    log_probs = torch.log_softmax(logits, dim=-1)
+
+    if all_single:
+        scores = {c: log_probs[ids[0]].item() for c, ids in choice_token_ids.items()}
+    else:
+        scores = {c: _loglik_completion(model, tokenizer, prefix, " " + c)
+                  for c in choices}
+
+    loglik_pred = max(scores, key=scores.get)
+
+    greedy_id = int(torch.argmax(logits).item())
+    greedy_token = tokenizer.decode([greedy_id])
+    gen_pred = _extract_label_from_anchored(greedy_token, choices) or loglik_pred
+
+    calibrated_pred = None
+    if baseline_logprobs is not None:
+        calibrated = {c: scores[c] - baseline_logprobs.get(c, 0.0) for c in choices}
+        calibrated_pred = max(calibrated, key=calibrated.get)
+
+    return {"logprobs": scores, "loglik_pred": loglik_pred, "gen_pred": gen_pred,
+            "calibrated_pred": calibrated_pred}
+
+
+def _content_free_baseline(model, tokenizer, cf_prompt: str, choices, use_chat: bool):
+    """Compute the model's content-free class prior by running the fused scorer
+    on a neutral prompt (same format as real prompts, task-specific content
+    replaced by 'N/A' or similar). Used for Contextual Calibration."""
+    out = _score_choices_fused(model, tokenizer, cf_prompt, choices, use_chat)
+    return out["logprobs"]
+
+
+def _subsample(items, cap, seed=42):
+    """Return up to `cap` items from `items`, sampled randomly with a fixed seed.
+
+    Avoids bias from order-preserving slicing (LogicBench files alternate yes/no,
+    ProofWriter groups by question type, etc. — taking first N can give
+    class-imbalanced samples). Uses Python's stdlib `random.sample` for
+    reproducibility across runs.
+    """
+    if cap <= 0: return []
+    if len(items) <= cap: return list(items)
+    import random as _random
+    return _random.Random(seed).sample(list(items), cap)
+
+
+def _distribute_n(n, num_subsets, sizes=None):
+    """Distribute a per-benchmark `n` cap across `num_subsets` subsets.
+
+    If `sizes` is provided (list of per-subset available counts), the per-subset
+    cap is min(n // num_subsets, size). Any leftover from small subsets is
+    redistributed across the larger ones up to their size.
+
+    Returns a list of per-subset caps (length = num_subsets).
+    """
+    if num_subsets <= 0: return []
+    if sizes is None:
+        base = n // num_subsets
+        rem = n - base * num_subsets
+        # Distribute remainder one-per-subset to first `rem` subsets.
+        return [base + (1 if i < rem else 0) for i in range(num_subsets)]
+    # Adaptive: if a subset has fewer than its share, redistribute leftover.
+    caps = [min(sizes[i], n // num_subsets) for i in range(num_subsets)]
+    leftover = n - sum(caps)
+    # Round-robin add leftover to subsets with headroom
+    while leftover > 0:
+        progress = False
+        for i in range(num_subsets):
+            if caps[i] < sizes[i]:
+                caps[i] += 1
+                leftover -= 1
+                progress = True
+                if leftover == 0: break
+        if not progress: break
+    return caps
+
+
 # ==========================================================
 # Debug sample printing
 # ==========================================================
@@ -264,54 +380,6 @@ def _dbg_log_gen(label, prompt, gold, gen_text, pred=None):
     print(line)
 
 
-def score_yesno(model, tokenizer, prompt: str, use_chat: bool, _dbg_label=None, _dbg_gold=None) -> str:
-    """Return 'yes' or 'no' by comparing log-likelihood of the two completions.
-
-    When use_chat is True, wraps the prompt in the chat template (with enable_thinking=False
-    for Qwen3) so the scoring reflects the distribution the chat-tuned model actually produces.
-    Pass _dbg_label="bench:sub" and _dbg_gold for debug output (controlled by DEBUG_SAMPLES).
-    """
-    prefix = _chat_format(tokenizer, prompt) if use_chat else prompt
-    # Score " Yes" and " No" — leading space is lm-eval convention and ensures
-    # BPE tokenizers pick up the standalone token rather than a merged prefix.
-    ll_yes = _loglik_completion(model, tokenizer, prefix, " Yes")
-    ll_no = _loglik_completion(model, tokenizer, prefix, " No")
-    pred = "yes" if ll_yes > ll_no else "no"
-    _dbg_log_loglik(_dbg_label, prompt, _dbg_gold, pred,
-                    {" Yes": ll_yes, " No": ll_no, "gap": ll_yes - ll_no})
-    return pred
-
-
-def score_truefalse(model, tokenizer, prompt: str, use_chat: bool, _dbg_label=None, _dbg_gold=None) -> str:
-    """Return 'true' or 'false' by log-likelihood comparison."""
-    prefix = _chat_format(tokenizer, prompt) if use_chat else prompt
-    ll_t = _loglik_completion(model, tokenizer, prefix, " True")
-    ll_f = _loglik_completion(model, tokenizer, prefix, " False")
-    pred = "true" if ll_t > ll_f else "false"
-    _dbg_log_loglik(_dbg_label, prompt, _dbg_gold, pred,
-                    {" True": ll_t, " False": ll_f, "gap": ll_t - ll_f})
-    return pred
-
-
-def score_tfu(model, tokenizer, prompt: str, use_chat: bool, _dbg_label=None, _dbg_gold=None) -> str:
-    """Return 'true', 'false', or 'unknown' by 3-way log-likelihood comparison.
-
-    This is the correct scoring for ProofWriter under the open-world assumption:
-    Unknown is a first-class label meaning the query is neither provable nor
-    disprovable from the theory. Filtering it out would bias toward easier examples
-    and change the task semantics.
-    """
-    prefix = _chat_format(tokenizer, prompt) if use_chat else prompt
-    scores = {
-        "true":    _loglik_completion(model, tokenizer, prefix, " True"),
-        "false":   _loglik_completion(model, tokenizer, prefix, " False"),
-        "unknown": _loglik_completion(model, tokenizer, prefix, " Unknown"),
-    }
-    pred = max(scores, key=scores.get)
-    _dbg_log_loglik(_dbg_label, prompt, _dbg_gold, pred, scores)
-    return pred
-
-
 def _yesno(pred):
     s = pred.lower().strip()
     if "yes" in s[:10] or "true" in s[:10]:
@@ -319,6 +387,112 @@ def _yesno(pred):
     if "no" in s[:10] or "false" in s[:10]:
         return "no"
     return ""
+
+
+# ==========================================================
+# Shared constants and helpers (added 2026-04-24 overhaul)
+# ==========================================================
+
+DEFAULT_MAX_N = 1000  # cap for benchmarks with large test sets
+
+# CLUTRR's 21 kinship labels (Sinha 2019)
+CLUTRR_LABELS = [
+    "aunt", "uncle", "father", "mother", "brother", "sister",
+    "son", "daughter", "grandmother", "grandfather",
+    "granddaughter", "grandson", "niece", "nephew",
+    "husband", "wife", "father-in-law", "mother-in-law",
+    "son-in-law", "daughter-in-law", "sister-in-law",
+]
+FOLIO_LABELS = ["True", "False", "Uncertain"]
+LOGIQA_LABELS = ["A", "B", "C", "D"]
+RULETAKER_LABELS = ["True", "False"]
+
+
+def _clamp_n(n, max_n=DEFAULT_MAX_N):
+    """Cap n at DEFAULT_MAX_N=1000 unless explicitly set lower."""
+    if n is None:
+        return max_n
+    return min(n, max_n)
+
+
+def _extract_label_from_anchored(text, candidates, anchors=None):
+    """Extract label after a matching anchor phrase, falling back to last-occurrence
+    or first-occurrence search. Used for generation+regex scoring across multiple
+    benchmarks (FOLIO, LogiQA, ProofWriter-gen, etc.).
+
+    For single-character candidates (e.g. ['A','B','C','D']) we require a word
+    boundary to avoid matching arbitrary letters inside words like "analyze"
+    or "answer".
+
+    Args:
+        text: model's generated text
+        candidates: list of valid label strings (e.g. ["True","False","Uncertain"])
+        anchors: regex-like anchor phrases to look for first. If found, take the
+            text immediately after.
+    Returns the matched candidate label (preserving case from candidates list) or None.
+    """
+    import re as _re
+    if anchors is None:
+        anchors = [r"answer\s*(?:is)?\s*:?\s*", r"final answer\s*:?\s*",
+                   r"the correct option is\s*:?\s*", r"therefore,?\s+"]
+    text_low = text.strip().lower()
+    cands_sorted = sorted([c.lower() for c in candidates], key=lambda s: -len(s))
+    cand_orig = {c.lower(): c for c in candidates}
+    single_char = all(len(c) == 1 for c in cands_sorted)
+
+    def _find(cand, hay):
+        """Substring search with word-boundary enforcement for single chars."""
+        if single_char:
+            m = _re.search(r"(?<![a-z0-9])" + _re.escape(cand) + r"(?![a-z0-9])", hay)
+            return m.start() if m else -1
+        return hay.find(cand)
+
+    def _rfind(cand, hay):
+        if single_char:
+            matches = list(_re.finditer(
+                r"(?<![a-z0-9])" + _re.escape(cand) + r"(?![a-z0-9])", hay))
+            return matches[-1].start() if matches else -1
+        return hay.rfind(cand)
+
+    # 1. Anchored match
+    for anchor in anchors:
+        m = _re.search(anchor, text_low)
+        if m:
+            tail = text_low[m.end():m.end() + 64]
+            best_pos, best_cand = -1, None
+            for cand in cands_sorted:
+                p = _find(cand, tail)
+                if p >= 0 and (best_pos < 0 or p < best_pos):
+                    best_pos, best_cand = p, cand
+            if best_cand is not None:
+                return cand_orig[best_cand]
+    # 2. Last-occurrence match (scan from right)
+    last_pos, last_label = -1, None
+    for cand in cands_sorted:
+        pos = _rfind(cand, text_low)
+        if pos > last_pos:
+            last_pos, last_label = pos, cand
+    if last_label is not None:
+        return cand_orig[last_label]
+    # 3. First-occurrence in head (legacy fallback)
+    head = text_low[:64]
+    best_pos, best_cand = -1, None
+    for cand in cands_sorted:
+        p = _find(cand, head)
+        if p >= 0 and (best_pos < 0 or p < best_pos):
+            best_pos, best_cand = p, cand
+    return cand_orig[best_cand] if best_cand else None
+
+
+def _format_few_shot_block(examples, format_fn):
+    """Build a few-shot prompt block from a list of (input, output) examples.
+
+    examples: list of dicts with whatever fields format_fn expects.
+    format_fn(ex) -> str returning the formatted Q+A for that example.
+    Returns a single string with all examples concatenated by blank lines.
+    """
+    blocks = [format_fn(ex) for ex in examples]
+    return "\n\n".join(blocks) + "\n\n"
 
 
 # ==========================================================
@@ -346,19 +520,13 @@ def register(name):
 
 
 @register("zebra_mc")
-def eval_zebra_mc(model, tokenizer, use_chat, n=100):
-    """ZebraLogic multiple-choice mode via log-likelihood scoring.
-
-    Uses WildEval/ZebraLogic/mc_mode (3260 questions across 25 puzzle sizes 2*2..6*6).
-    Each example: (puzzle, question, choices[list], answer[str]).
-    Scoring: log-likelihood of each choice as a completion; argmax -> predicted choice.
-
-    This is a non-paper-standard variant that's more reliable for small models —
-    it measures whether the model can pick the correct attribute from a closed set,
-    rather than whether it can emit valid JSON for a full solution table.
+def eval_zebra_mc(model, tokenizer, use_chat, n=None):
+    """ZebraLogic mc_mode — single forward pass returns BOTH log-lik and
+    constrained-greedy gen accuracy. Choices are puzzle-specific (5-6 names
+    per puzzle, multi-token). n is total cap distributed across 25 puzzle sizes.
     """
     from datasets import load_dataset
-
+    n = _clamp_n(n)
     try:
         ds = load_dataset("WildEval/ZebraLogic", "mc_mode", split="test")
     except Exception as e:
@@ -366,74 +534,151 @@ def eval_zebra_mc(model, tokenizer, use_chat, n=100):
     print(f"  [zebra_mc] loaded WildEval/ZebraLogic/mc_mode: {len(ds)} questions")
 
     def extract_size(ex_id):
-        try:
-            return ex_id.split("-")[2].replace("x", "*")
-        except Exception:
-            return "?"
+        try: return ex_id.split("-")[2].replace("x", "*")
+        except Exception: return "?"
 
     by_size = {}
     for ex in ds:
         by_size.setdefault(extract_size(ex["id"]), []).append(ex)
+    sizes = sorted(by_size.keys(), key=lambda s: tuple(int(x) for x in s.split("*"))
+                                                 if "*" in s else (99,99))
+    size_counts = [len(by_size[s]) for s in sizes]
+    caps = _distribute_n(n, len(sizes), size_counts)
 
-    def _size_key(s):
-        try:
-            return tuple(int(x) for x in s.split("*"))
-        except Exception:
-            return (99, 99)
-
+    # Content-free baseline per puzzle size (choice set varies per example,
+    # so we use each puzzle's own choices with a content-free prompt).
     results = {}
-    for size in sorted(by_size.keys(), key=_size_key):
-        group = by_size[size][:n]
-        correct = 0
-        total = 0
-        for ex in group:
+    for size, cap in zip(sizes, caps):
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(by_size[size], cap):
             prompt = f"{ex['puzzle']}\n\nQuestion: {ex['question']}\nAnswer:"
-            prefix = _chat_format(tokenizer, prompt) if use_chat else prompt
-            scores = [
-                _loglik_completion(model, tokenizer, prefix, " " + str(c))
-                for c in ex["choices"]
-            ]
-            pred = ex["choices"][max(range(len(scores)), key=lambda i: scores[i])]
-            _dbg_log_loglik(f"zebra_mc:{size}", prompt, ex["answer"], pred,
-                            {f"choice[{i}]={c!r}": scores[i] for i, c in enumerate(ex["choices"])})
-            if pred == ex["answer"]:
-                correct += 1
+            choices = [str(c) for c in ex["choices"]]
+            # Per-example baseline since choice set varies across puzzles
+            cf_prompt = f"N/A\n\nQuestion: N/A\nAnswer:"
+            baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, choices, use_chat)
+            out = _score_choices_fused(model, tokenizer, prompt, choices, use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"zebra_mc:{size}", prompt, ex["answer"],
+                            out["loglik_pred"], out["logprobs"])
+            if out["loglik_pred"] == ex["answer"]: ll_c += 1
+            if out["gen_pred"] == ex["answer"]: gen_c += 1
+            if out["calibrated_pred"] == ex["answer"]: cal_c += 1
             total += 1
-        results[size] = {
-            "correct": correct, "total": total,
-            "accuracy": correct / total if total else 0.0,
-        }
-        print(f"  [zebra_mc] size={size:>5} n={total:>3}  acc={results[size]['accuracy']:.1%}")
-
-    sizes = [v for v in results.values() if v["total"] > 0]
-    all_correct = sum(v["correct"] for v in sizes)
-    all_total = sum(v["total"] for v in sizes)
-    results["overall"] = {
-        "correct": all_correct,
-        "total": all_total,
-        "accuracy": all_correct / all_total if all_total else 0.0,
-    }
+        results[size] = {"loglik_accuracy":     ll_c/total if total else 0.0,
+                          "gen_accuracy":        gen_c/total if total else 0.0,
+                          "calibrated_accuracy": cal_c/total if total else 0.0,
+                          "total": total,
+                          "accuracy": ll_c/total if total else 0.0}
+        print(f"  [zebra_mc] size={size:>5} n={total:>3}  ll={ll_c/max(total,1):.1%}  "
+              f"gen={gen_c/max(total,1):.1%}  cal={cal_c/max(total,1):.1%}")
+    all_ll = sum(v["loglik_accuracy"] * v["total"] for v in results.values())
+    all_gen = sum(v["gen_accuracy"] * v["total"] for v in results.values())
+    all_cal = sum(v["calibrated_accuracy"] * v["total"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"loglik_accuracy":     all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":        all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0}
     return results
 
 
 # ---------------- LegalBench ----------------
 
-# LegalBench task adapters. Template paths are resolved lazily by `_legal_template`
-# so PROMPTS_DIR can still be overridden via --prompts-dir (set in main()).
+# LegalBench task adapters. Updated 2026-04-24 — switched from
+# {hearsay, international_citizenship_questions, proa} (1-hop, dominated by
+# majority-class baseline) to {diversity_1..6 + sara_entailment + sara_numeric}
+# which test multi-condition reasoning (diversity) and statutory interpretation
+# (sara). Templates are downloaded from HazyResearch/legalbench's base_prompt.txt
+# on first use and cached locally under PROMPTS_DIR/legal/.
+#
+# Per-task scoring:
+#   diversity_1..6   -> binary Yes/No (exact-match after normalization)
+#   sara_entailment  -> 2-class {Entailment, Contradiction}
+#   sara_numeric     -> first integer extracted, ±10% tolerance vs gold
 LEGAL_TASKS = {
-    "hearsay": {
-        "input_col": "text", "answer_col": "answer",
-        "template_path": "legal/hearsay.txt",
-    },
-    "international_citizenship_questions": {
-        "input_col": "question", "answer_col": "answer",
-        "template_path": "legal/international_citizenship_questions.txt",
-    },
-    "proa": {
-        "input_col": "text", "answer_col": "answer",
-        "template_path": "legal/proa.txt",
-    },
+    "diversity_1": {"input_col": "text", "answer_col": "answer",
+                    "template_path": "legal/diversity_1.txt", "score_type": "yesno"},
+    "diversity_2": {"input_col": "text", "answer_col": "answer",
+                    "template_path": "legal/diversity_2.txt", "score_type": "yesno"},
+    "diversity_3": {"input_col": "text", "answer_col": "answer",
+                    "template_path": "legal/diversity_3.txt", "score_type": "yesno"},
+    "diversity_4": {"input_col": "text", "answer_col": "answer",
+                    "template_path": "legal/diversity_4.txt", "score_type": "yesno"},
+    "diversity_5": {"input_col": "text", "answer_col": "answer",
+                    "template_path": "legal/diversity_5.txt", "score_type": "yesno"},
+    "diversity_6": {"input_col": "text", "answer_col": "answer",
+                    "template_path": "legal/diversity_6.txt", "score_type": "yesno"},
+    "sara_entailment": {"input_col": "text", "answer_col": "answer",
+                        "template_path": "legal/sara_entailment.txt",
+                        "score_type": "entailment"},
+    "sara_numeric": {"input_col": "text", "answer_col": "answer",
+                     "template_path": "legal/sara_numeric.txt",
+                     "score_type": "numeric"},
 }
+
+LEGAL_ENTAILMENT_LABELS = ["Entailment", "Contradiction"]
+
+
+def _ensure_legal_template(spec):
+    """Download the base_prompt.txt for a LegalBench task from GitHub if not local."""
+    import os as _os, urllib.request as _ureq
+    rel = spec["template_path"]
+    full = _os.path.join(PROMPTS_DIR, rel)
+    if _os.path.isfile(full):
+        return
+    task_name = _os.path.splitext(_os.path.basename(rel))[0]
+    url = f"https://raw.githubusercontent.com/HazyResearch/legalbench/main/tasks/{task_name}/base_prompt.txt"
+    _os.makedirs(_os.path.dirname(full), exist_ok=True)
+    try:
+        _ureq.urlretrieve(url, full)
+        print(f"  [legal] Downloaded template: {rel}")
+    except Exception as e:
+        print(f"  [legal] WARNING: failed to download {url}: {e}")
+
+
+def _legal_normalize(text, stem=False):
+    """Port of HazyResearch/legalbench/evaluation.py:normalize() — strip
+    punctuation, lowercase, optionally Porter-stem. Matches their canonical
+    exact-match-balanced-accuracy normalization."""
+    import string
+    text = str(text).translate(str.maketrans("", "", string.punctuation))
+    text = text.strip().lower()
+    if stem:
+        try:
+            from nltk.stem.porter import PorterStemmer
+            text = PorterStemmer().stem(text)
+        except Exception: pass
+    return text
+
+
+def _legal_balanced_accuracy(generations, answers):
+    """Port of evaluate_exact_match_balanced_accuracy() — sklearn balanced acc
+    on normalized strings. Falls back to plain accuracy if sklearn missing."""
+    norm_gen = [_legal_normalize(g) for g in generations]
+    norm_ans = [_legal_normalize(a) for a in answers]
+    try:
+        from sklearn.metrics import balanced_accuracy_score
+        return balanced_accuracy_score(norm_ans, norm_gen)
+    except ImportError:
+        # Fallback: plain accuracy
+        if not norm_ans: return 0.0
+        return sum(1 for g, a in zip(norm_gen, norm_ans) if g == a) / len(norm_ans)
+
+
+def _score_legal_numeric(pred_text, gold_text):
+    """Match HazyResearch/legalbench/evaluation.py:evaluate_sara_numeric_acc.
+    Strip commas/dollars, regex first integer, accept if within 10% of gold."""
+    import re as _re
+    def _to_int(s):
+        s = str(s).replace(",", "").replace("$", "").replace(".", "")
+        m = _re.search(r"\d+", s)
+        return int(m.group(0)) if m else None
+    pred = _to_int(pred_text)
+    gold = _to_int(gold_text)
+    if pred is None or gold is None or gold == 0:
+        return False
+    return abs(pred / gold - 1.0) < 0.1
 
 
 def _legal_template(spec):
@@ -443,61 +688,78 @@ def _legal_template(spec):
 
 
 @register("legal")
-def eval_legal(model, tokenizer, use_chat, n=100):
-    """LegalBench: 3 binary-classification subtasks using the official few-shot templates."""
-    from datasets import load_dataset
+def eval_legal(model, tokenizer, use_chat, n=None):
+    """LegalBench (canonical eval) — diversity_1..6 + sara_entailment + sara_numeric.
 
-    results = {}
-    for task, spec in LEGAL_TASKS.items():
+    Uses HazyResearch/legalbench's official author-written 6-shot demos
+    (downloaded as base_prompt.txt per task) and the canonical evaluate()
+    function: balanced_accuracy on normalized strings for diversity_* and
+    sara_entailment; ±10% tolerance for sara_numeric. Generation-based:
+    model emits a full string answer, we normalize+match (no log-lik fallback).
+
+    n is total cap distributed evenly across the 8 subtasks.
+    """
+    from datasets import load_dataset
+    n = _clamp_n(n)
+    tasks = list(LEGAL_TASKS.keys())
+    # Pre-load all subsets to compute sizes
+    loaded = {}
+    for task in tasks:
         try:
-            ds = load_dataset("nguha/legalbench", task, split="test")
+            loaded[task] = load_dataset("nguha/legalbench", task, split="test")
         except Exception as e:
             print(f"  [legal:{task}] load failed: {e}")
-            results[task] = {"error": str(e)}
-            continue
-        if len(ds) == 0:
-            results[task] = {"error": "empty test split"}
-            continue
+            loaded[task] = None
+    sizes = [len(loaded[t]) if loaded[t] is not None else 0 for t in tasks]
+    caps = _distribute_n(n, len(tasks), sizes)
 
-        # Fallback to 'label' if 'answer' is missing
+    results = {}
+    for task, cap in zip(tasks, caps):
+        spec = LEGAL_TASKS[task]
+        ds = loaded[task]
+        if ds is None or len(ds) == 0:
+            results[task] = {"error": "load failed or empty"}
+            continue
+        _ensure_legal_template(spec)
         ans_col = spec["answer_col"]
         if ans_col not in ds.column_names:
             ans_col = "label" if "label" in ds.column_names else ds.column_names[-1]
+        score_type = spec.get("score_type", "yesno")
 
-        correct = 0
-        total = 0
-        for ex in list(ds)[:n]:
+        generations, answers = [], []
+        for ex in _subsample(list(ds), cap):
             text = ex.get(spec["input_col"])
             gold = ex.get(ans_col)
-            if text is None or gold is None:
+            if text is None or gold is None: continue
+            try:
+                prompt = _load_prompt(spec["template_path"]).format(input=text)
+            except Exception:
                 continue
-            prompt = _legal_template(spec).format(input=text)
-            pred_yn = score_yesno(model, tokenizer, prompt, use_chat,
-                                  _dbg_label=f"legal:{task}", _dbg_gold=gold)
-            gold_yn = _yesno(str(gold))
-            if pred_yn == gold_yn and pred_yn:
-                correct += 1
-            total += 1
-        acc = correct / total if total else 0.0
-        results[task] = {"correct": correct, "total": total, "accuracy": acc}
-        print(f"  [legal:{task}]: {correct}/{total} = {acc:.1%}")
+            # Canonical: full generation, then normalize+exact-match
+            max_tok = 20 if score_type == "numeric" else 10
+            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=max_tok,
+                                 use_chat=use_chat)
+            _dbg_log_gen(f"legal:{task}", prompt, gold, pred)
+            generations.append(pred)
+            answers.append(gold)
 
-    # LegalBench convention: macro-average across tasks (each task weighted
-    # equally). Micro would be dominated by international_citizenship_questions
-    # which has ~9k samples vs ~95 for hearsay/proa. Per LegalBench paper
-    # (Guha et al., NeurIPS 2023) and HELM leaderboard.
+        if not generations:
+            results[task] = {"error": "no valid examples"}
+            continue
+        if score_type == "numeric":
+            corrects = [1 if _score_legal_numeric(g, a) else 0
+                        for g, a in zip(generations, answers)]
+            acc = sum(corrects) / len(corrects)
+        else:
+            acc = _legal_balanced_accuracy(generations, answers)
+        results[task] = {"accuracy": acc, "total": len(generations)}
+        print(f"  [legal:{task}]: balanced_acc={acc:.3f} over {len(generations)} samples")
+
     per_task_accs = [v["accuracy"] for v in results.values() if "accuracy" in v]
-    macro_avg = sum(per_task_accs) / len(per_task_accs) if per_task_accs else 0.0
-    all_correct = sum(v.get("correct", 0) for v in results.values())
-    all_total = sum(v.get("total", 0) for v in results.values())
-    results["overall"] = {
-        "correct": all_correct,
-        "total": all_total,
-        "accuracy": macro_avg,           # macro-avg is the headline metric
-        "micro_accuracy": all_correct / all_total if all_total else 0.0,
-    }
-    print(f"  [legal] macro-avg: {macro_avg:.3f}  (micro: "
-          f"{all_correct/max(all_total,1):.3f} over {all_total} samples)")
+    macro = sum(per_task_accs) / len(per_task_accs) if per_task_accs else 0.0
+    all_total = sum(v.get("total", 0) for v in results.values() if "total" in v)
+    results["overall"] = {"accuracy": macro, "total": all_total}
+    print(f"  [legal] macro balanced_acc: {macro:.3f} over {all_total} samples")
     return results
 
 
@@ -609,7 +871,7 @@ def eval_stepgame(model, tokenizer, use_chat, n=100):
     from datasets import load_dataset
 
     try:
-        ds = load_dataset("tasksource/stepgame", split="test")
+        ds = load_dataset("ZhengyanShi/StepGame", split="test")
     except Exception as e:
         return {"error": f"tasksource/stepgame load failed: {e}"}
     print(f"  [stepgame] loaded: {len(ds)} examples")
@@ -660,534 +922,85 @@ def eval_stepgame(model, tokenizer, use_chat, n=100):
     return results
 
 
-# ---------------- PlanBench Blocksworld ----------------
-
-def _eval_planbench_domain(model, tokenizer, use_chat, domain, n):
-    """Shared loader for any PlanBench task_1_plan_generation domain."""
-    from datasets import load_dataset
-    import re as _re
-    try:
-        ds = load_dataset("tasksource/planbench", "task_1_plan_generation", split="train")
-    except Exception as e:
-        return {"error": f"planbench load failed: {e}"}
-    matched = [ex for ex in ds if ex.get("domain") == domain][:n]
-    print(f"  [{domain}] {len(matched)} instances")
-
-    def _normalize_plan(text):
-        actions = []
-        for m in _re.finditer(r"\(([^)]+)\)", text):
-            tokens = m.group(1).lower().strip().split()
-            if tokens:
-                actions.append(tuple(tokens))
-        return actions
-
-    correct = 0
-    total = 0
-    n_actions_correct = 0
-    n_actions_total = 0
-    first_action_correct = 0
-    for ex in matched:
-        gold_actions = _normalize_plan(ex["ground_truth_plan"])
-        if not gold_actions:
-            continue
-        prompt = ex["query"]
-        pred_text = generate_chat(model, tokenizer, prompt, max_new_tokens=200, use_chat=use_chat)
-        pred_actions = _normalize_plan(pred_text)
-        _dbg_log_gen(f"{domain}:overall", prompt,
-                     " | ".join(" ".join(a) for a in gold_actions[:3]) + (" …" if len(gold_actions) > 3 else ""),
-                     pred_text,
-                     " | ".join(" ".join(a) for a in pred_actions[:3]) + (" …" if len(pred_actions) > 3 else ""))
-        if pred_actions == gold_actions:
-            correct += 1
-        if pred_actions and pred_actions[0] == gold_actions[0]:
-            first_action_correct += 1
-        total += 1
-        k = 0
-        while k < min(len(pred_actions), len(gold_actions)) and pred_actions[k] == gold_actions[k]:
-            k += 1
-        n_actions_correct += k
-        n_actions_total += len(gold_actions)
-
-    plan_acc = correct / total if total else 0.0
-    prefix_acc = n_actions_correct / n_actions_total if n_actions_total else 0.0
-    first_acc = first_action_correct / total if total else 0.0
-    print(f"  [{domain}] plan_exact={correct}/{total}={plan_acc:.1%}  "
-          f"first_action={first_action_correct}/{total}={first_acc:.1%}  "
-          f"prefix_match={prefix_acc:.1%}")
-    return {
-        domain: {
-            "correct": correct, "total": total,
-            "accuracy": plan_acc,
-            "first_action_accuracy": first_acc,
-            "prefix_match_rate": prefix_acc,
-        },
-        "overall": {
-            "correct": correct, "total": total,
-            "accuracy": plan_acc,
-            "first_action_accuracy": first_acc,
-        },
-    }
+# legal_gen merged into legal — the LegalBench canonical eval IS gen-based
+# (balanced_accuracy on normalized strings), no separate gen variant needed.
 
 
-@register("blocksworld")
-def eval_blocksworld(model, tokenizer, use_chat, n=50):
-    """PlanBench Blocksworld: plan generation task.
-
-    Uses tasksource/planbench task_1_plan_generation filtered to domain=blocksworld.
-    Model generates a plan as a sequence of (action arg1 arg2) tuples. We compare
-    against the gold plan via exact-match on normalized action sequences.
-
-    Scoring: exact-match plan accuracy. This is stricter than "did the plan
-    reach the goal" (which requires a simulator) — a model that produces a
-    different valid plan will score 0. Small models will mostly fail exact
-    match, but the differential between instruct_only and 6pct+search is
-    still informative.
-    """
-    from datasets import load_dataset
-    import re as _re
-
-    try:
-        ds = load_dataset("tasksource/planbench", "task_1_plan_generation", split="train")
-    except Exception as e:
-        return {"error": f"planbench load failed: {e}"}
-
-    bw = [ex for ex in ds if ex.get("domain") == "blocksworld"][:n]
-    print(f"  [blocksworld] {len(bw)} instances")
-
-    def _normalize_plan(text):
-        """Extract list of (action, *args) tuples from text."""
-        actions = []
-        for m in _re.finditer(r"\(([^)]+)\)", text):
-            tokens = m.group(1).lower().strip().split()
-            if tokens:
-                actions.append(tuple(tokens))
-        return actions
-
-    return _eval_planbench_domain(model, tokenizer, use_chat, "blocksworld", n)
-
-
-@register("mystery_blocksworld")
-def eval_mystery_blocksworld(model, tokenizer, use_chat, n=50):
-    """PlanBench Mystery-Blocksworld: same underlying planning structure as
-    blocksworld but with all predicate and action names obfuscated to
-    nonsense words (e.g., 'Paltry o1 o2 o3' instead of 'pick-up block1').
-
-    This is a crucial ablation: it tests whether the model has learned the
-    abstract planning structure vs. just memorized the blocksworld vocabulary.
-    A model that does well on blocksworld but poorly on mystery-blocksworld
-    is reciting surface patterns; one that does well on both has internalized
-    the state-space-search structure.
-
-    Scoring: same as blocksworld — exact-match on action sequence + prefix
-    match rate as partial credit.
-    """
-    return _eval_planbench_domain(model, tokenizer, use_chat, "mystery_blocksworld", n)
-
-
-@register("logistics")
-def eval_logistics(model, tokenizer, use_chat, n=50):
-    """PlanBench Logistics: classic AI planning benchmark for package delivery
-    across multiple cities using trucks and airplanes. Larger state space and
-    longer plans than blocksworld (~10-30 actions).
-    """
-    return _eval_planbench_domain(model, tokenizer, use_chat, "logistics", n)
-
-
-# ---------------- First-action variants (easier scoring) ----------------
-# Wrap the existing PlanBench evals and surface first_action_accuracy as the
-# headline `accuracy`. These give signal even when full-plan exact-match is 0%.
-
-def _planbench_first_action_wrapper(domain):
-    def _runner(model, tokenizer, use_chat, n=50):
-        result = _eval_planbench_domain(model, tokenizer, use_chat, domain, n)
-        if "error" in result:
-            return result
-        d = result.get(domain, {})
-        first = d.get("first_action_accuracy", 0.0)
-        return {
-            domain: {
-                "correct": int(first * d.get("total", 0)),
-                "total": d.get("total", 0),
-                "accuracy": first,
-                "exact_match_accuracy": d.get("accuracy", 0.0),
-            },
-            "overall": {
-                "correct": int(first * d.get("total", 0)),
-                "total": d.get("total", 0),
-                "accuracy": first,
-            },
-        }
-    return _runner
-
-@register("blocksworld_first")
-def eval_blocksworld_first(model, tokenizer, use_chat, n=50):
-    """First-action accuracy for blocksworld. Easier than full plan match —
-    scores 1 if the model's first emitted action matches the gold first action."""
-    return _planbench_first_action_wrapper("blocksworld")(model, tokenizer, use_chat, n)
-
-@register("mystery_blocksworld_first")
-def eval_mystery_blocksworld_first(model, tokenizer, use_chat, n=50):
-    """First-action accuracy for mystery_blocksworld."""
-    return _planbench_first_action_wrapper("mystery_blocksworld")(model, tokenizer, use_chat, n)
-
-@register("logistics_first")
-def eval_logistics_first(model, tokenizer, use_chat, n=50):
-    """First-action accuracy for logistics."""
-    return _planbench_first_action_wrapper("logistics")(model, tokenizer, use_chat, n)
-
-
-# ==========================================================
-# Log-probability variants for sequence-generation tasks
-# These score teacher-forced log p(gold_output | prompt), normalized by token
-# count. Higher (less negative) = model assigns more probability mass to the
-# correct answer. Not an accuracy metric, but the natural log-lik analog when
-# the output space is a sequence rather than a closed set of labels.
-# ==========================================================
-
-
-def _score_gold_logprob(model, tokenizer, prompt, gold, use_chat):
-    """Per-token mean log-probability of `gold` as completion of `prompt`."""
-    prefix = _chat_format(tokenizer, prompt) if use_chat else prompt
-    ll = _loglik_completion(model, tokenizer, prefix, gold)
-    n_toks = max(1, len(tokenizer.encode(gold, add_special_tokens=False)))
-    return ll / n_toks
-
-
-def _eval_planbench_logprob(model, tokenizer, use_chat, domain, n):
-    from datasets import load_dataset
-    try:
-        ds = load_dataset("tasksource/planbench", "task_1_plan_generation", split="train")
-    except Exception as e:
-        return {"error": f"load failed: {e}"}
-    matched = [ex for ex in ds if ex.get("domain") == domain][:n]
-    total_lp = 0.0
-    count = 0
-    for ex in matched:
-        lp = _score_gold_logprob(model, tokenizer, ex["query"], ex["ground_truth_plan"], use_chat)
-        _dbg_log_loglik(f"{domain}_logprob:overall", ex["query"], ex["ground_truth_plan"][:60],
-                        f"lp/tok={lp:.4f}", {"mean_logprob_per_token": lp})
-        total_lp += lp
-        count += 1
-    mean_lp = total_lp / count if count else 0.0
-    print(f"  [{domain}_logprob] n={count}  mean log-prob/token = {mean_lp:.4f}")
-    return {domain: {"n": count, "mean_logprob_per_token": mean_lp},
-            "overall": {"n": count, "mean_logprob_per_token": mean_lp}}
-
-
-@register("blocksworld_logprob")
-def eval_blocksworld_logprob(model, tokenizer, use_chat, n=50):
-    """Blocksworld: mean per-token log-prob of gold plan. Higher = better."""
-    return _eval_planbench_logprob(model, tokenizer, use_chat, "blocksworld", n)
-
-
-@register("mystery_blocksworld_logprob")
-def eval_mystery_blocksworld_logprob(model, tokenizer, use_chat, n=50):
-    return _eval_planbench_logprob(model, tokenizer, use_chat, "mystery_blocksworld", n)
-
-
-@register("logistics_logprob")
-def eval_logistics_logprob(model, tokenizer, use_chat, n=50):
-    return _eval_planbench_logprob(model, tokenizer, use_chat, "logistics", n)
-
-
-@register("chess_mate_logprob")
-def eval_chess_mate_logprob(model, tokenizer, use_chat, n=50):
-    """Chess mate-in-N: mean per-token log-prob of gold move sequence."""
-    # Streaming dataset — cap required. If main() passed n=None (full test set
-    # default), fall back to signature default so we have a termination condition.
-    n = n or 50
-    from datasets import load_dataset
-    try:
-        ds = load_dataset("Lichess/chess-puzzles", split="train", streaming=True)
-    except Exception as e:
-        return {"error": f"load failed: {e}"}
-
-    targets = {"mateIn1": [], "mateIn2": [], "mateIn3": []}
-
-    def _themes_list(t):
-        if isinstance(t, list): return t
-        if isinstance(t, str):
-            import ast
-            try:
-                v = ast.literal_eval(t)
-                if isinstance(v, list): return v
-            except Exception: pass
-            return t.split()
-        return []
-
-    for ex in ds:
-        themes = _themes_list(ex.get("Themes", []))
-        for key in list(targets.keys()):
-            if key in themes and len(targets[key]) < n:
-                targets[key].append(ex)
-        if all(len(v) >= n for v in targets.values()):
-            break
-
-    results = {}
-    for cat in ["mateIn1", "mateIn2", "mateIn3"]:
-        group = targets[cat][:n]
-        total_lp = 0.0; count = 0
-        for ex in group:
-            moves = ex["Moves"].split()
-            if len(moves) < 2: continue
-            setup, gold_seq = moves[0], " ".join(moves[1:])
-            prompt = (f"Chess puzzle in UCI notation.\n"
-                      f"Position (FEN): {ex['FEN']}\n"
-                      f"The opponent just played {setup}.\n"
-                      f"The forced mate sequence in UCI format is:")
-            lp = _score_gold_logprob(model, tokenizer, prompt, " " + gold_seq, use_chat)
-            _dbg_log_loglik(f"chess_mate_logprob:{cat}", prompt, gold_seq[:60],
-                            f"lp/tok={lp:.4f}", {"mean_logprob_per_token": lp})
-            total_lp += lp
-            count += 1
-        mean_lp = total_lp / count if count else 0.0
-        results[cat] = {"n": count, "mean_logprob_per_token": mean_lp}
-        print(f"  [chess_mate_logprob] {cat}: n={count} mean_lp={mean_lp:.4f}")
-    all_lp = sum(v["mean_logprob_per_token"] * v["n"] for v in results.values())
-    all_n = sum(v["n"] for v in results.values())
-    results["overall"] = {"n": all_n,
-                          "mean_logprob_per_token": all_lp / all_n if all_n else 0.0}
-    return results
-
-
-# Note: game24 has no canonical gold expression in the dataset, so a log-prob
-# variant would require a brute-force solver to pick a representative solution
-# per puzzle. Given the arbitrariness of which solution to choose, we omit
-# game24_logprob and keep only the exact-eval generation-based game24.
-
-
-# ==========================================================
-# Paper-matching variants: generation-based scoring with few-shot
-# These are alternatives to the log-lik variants above, scoring how closely
-# the authors' original evaluation method would rate the model.
-# Each emits a short generation and applies exact-match over expected labels.
-# ==========================================================
-
-
-def _extract_first_token_label(pred: str, candidates):
-    """Return the first candidate label that appears in pred (case-insensitive),
-    matching the paper convention of picking the first word after "A:"."""
-    pred_low = pred.strip().lower()
-    # Limit to first ~20 chars to avoid matching labels that appear later in prose
-    head = pred_low[:32]
-    # Sort by length desc so "upper-left" beats "left" when both appear
-    for cand in sorted(candidates, key=lambda s: -len(s)):
-        if cand.lower() in head:
-            return cand
-    return None
-
-
-@register("legal_gen")
-def eval_legal_gen(model, tokenizer, use_chat, n=100):
-    """LegalBench with paper-matching generation-based scoring (Guha 2023).
-    Same few-shot base_prompt templates; greedy generation; first-word Yes/No match."""
-    from datasets import load_dataset
-    results = {}
-    for task, spec in LEGAL_TASKS.items():
-        try:
-            ds = load_dataset("nguha/legalbench", task, split="test")
-        except Exception as e:
-            results[task] = {"error": str(e)}; continue
-        ans_col = spec["answer_col"]
-        if ans_col not in ds.column_names:
-            ans_col = "label" if "label" in ds.column_names else ds.column_names[-1]
-        correct = 0; total = 0
-        for ex in list(ds)[:n]:
-            text = ex.get(spec["input_col"])
-            gold = ex.get(ans_col)
-            if text is None or gold is None: continue
-            prompt = _legal_template(spec).format(input=text)
-            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=5, use_chat=use_chat)
-            pred_yn = _yesno(pred)
-            gold_yn = _yesno(str(gold))
-            _dbg_log_gen(f"legal_gen:{task}", prompt, gold, pred, pred_yn or "?")
-            if pred_yn == gold_yn and pred_yn: correct += 1
-            total += 1
-        acc = correct / total if total else 0.0
-        results[task] = {"correct": correct, "total": total, "accuracy": acc}
-        print(f"  [legal_gen:{task}]: {correct}/{total} = {acc:.1%}")
-    all_c = sum(v.get("correct", 0) for v in results.values())
-    all_t = sum(v.get("total", 0) for v in results.values())
-    # Macro-average across tasks (LegalBench convention)
-    per_task_accs = [v["accuracy"] for v in results.values() if "accuracy" in v]
-    macro_avg = sum(per_task_accs) / len(per_task_accs) if per_task_accs else 0.0
-    results["overall"] = {
-        "correct": all_c, "total": all_t,
-        "accuracy": macro_avg,
-        "micro_accuracy": all_c/all_t if all_t else 0.0,
-    }
-    print(f"  [legal_gen] macro-avg: {macro_avg:.3f}  (micro: "
-          f"{all_c/max(all_t,1):.3f} over {all_t} samples)")
-    return results
-
-
-@register("zebra_mc_gen")
-def eval_zebra_mc_gen(model, tokenizer, use_chat, n=100):
-    """ZebraLogic MC with generation-based scoring. Model generates an answer;
-    we match it against the enumerated choices via substring presence."""
-    from datasets import load_dataset
-    try:
-        ds = load_dataset("WildEval/ZebraLogic", "mc_mode", split="test")
-    except Exception as e:
-        return {"error": f"load failed: {e}"}
-    print(f"  [zebra_mc_gen] loaded {len(ds)} questions")
-
-    def extract_size(ex_id):
-        try: return ex_id.split("-")[2].replace("x", "*")
-        except: return "?"
-
-    by_size = {}
-    for ex in ds: by_size.setdefault(extract_size(ex["id"]), []).append(ex)
-
-    results = {}
-    for size in sorted(by_size.keys(), key=lambda s: tuple(int(x) for x in s.split("*")) if "*" in s else (99,99)):
-        group = by_size[size][:n]
-        correct = 0; total = 0
-        for ex in group:
-            prompt = (f"{ex['puzzle']}\n\nQuestion: {ex['question']}\n"
-                      f"Choices: {', '.join(str(c) for c in ex['choices'])}\n"
-                      f"Answer with only the chosen value.")
-            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=15, use_chat=use_chat)
-            pred_norm = pred.strip().lower().strip('."\'')
-            gold = str(ex["answer"]).strip().lower()
-            _dbg_log_gen(f"zebra_mc_gen:{size}", prompt, gold, pred, pred_norm[:32])
-            # Match if gold appears in first 32 chars of the prediction
-            if gold in pred_norm[:32]:
-                correct += 1
-            total += 1
-        results[size] = {"correct": correct, "total": total,
-                         "accuracy": correct/total if total else 0.0}
-        print(f"  [zebra_mc_gen] size={size:>5} n={total:>3} acc={results[size]['accuracy']:.1%}")
-    all_c = sum(v["correct"] for v in results.values() if "correct" in v)
-    all_t = sum(v["total"] for v in results.values() if "total" in v)
-    results["overall"] = {"correct": all_c, "total": all_t, "accuracy": all_c/all_t if all_t else 0.0}
-    return results
+# zebra_mc_gen merged into zebra_mc — fused scorer returns both metrics in one pass.
 
 
 def _proofwriter_few_shot_block(mode):
-    """Produce ProofWriter few-shot block. Either loaded from prompts/ or built
-    from the train split via _load_proofwriter_raw if USE_TRAIN_ICES=1.
+    """Produce ProofWriter few-shot block. Samples K balanced demos from
+    `meta-test.jsonl` of a depth different from the one being evaluated
+    (we eval on depth-5; demos come from depth-3). This avoids overlap with
+    the test sweep while keeping demos in the canonical AllenAI format.
 
+    Falls back to the static prompts/ .txt file if raw data isn't available.
     mode is 'OWA' or 'CWA'.
     """
     cache_key = f"proofwriter_{mode}"
     if cache_key in _train_ice_cache:
         return _train_ice_cache[cache_key]
     if not _USE_TRAIN_ICES:
-        path = f"proofwriter_{mode.lower()}_fewshot.txt"
-        block = _load_prompt(path)
-    else:
-        # Load first K from train split — call with depth-3 (medium) for diversity
-        root = _find_proofwriter_raw()
-        if root is None:
-            return _load_prompt(f"proofwriter_{mode.lower()}_fewshot.txt")
-        p = os.path.join(root, mode, "depth-3", "meta-train.jsonl")
-        if not os.path.isfile(p):
-            return _load_prompt(f"proofwriter_{mode.lower()}_fewshot.txt")
-        examples = []
-        label_counts = {"True": 0, "False": 0, "Unknown": 0}
-        want_per_label = _TRAIN_ICE_K // 3 + 1
-        with open(p) as f:
-            for line in f:
-                if all(c >= want_per_label for c in label_counts.values()):
-                    break
-                rec = json.loads(line)
-                theory = rec.get("theory", "")
-                for q in rec.get("questions", {}).values():
-                    ans = _normalize_pw_answer(q.get("answer"))
-                    if ans is None:
-                        continue
-                    if mode == "CWA" and ans not in ("True", "False"):
-                        continue
-                    if label_counts[ans] >= want_per_label:
-                        continue
-                    label_counts[ans] += 1
-                    examples.append((theory, q.get("question", ""), ans))
-                    if len(examples) >= _TRAIN_ICE_K:
-                        break
-        closed = " (closed-world assumption)" if mode == "CWA" else ""
-        tf_u = "true or false" if mode == "CWA" else "True, False, or Unknown"
-        blocks = []
-        for theory, qtext, ans in examples[:_TRAIN_ICE_K]:
-            blocks.append(
-                f"Facts and rules:\n{theory}\n"
-                f"Question: Based only on the facts and rules above{closed}, "
-                f"is the following statement {tf_u}?\n"
-                f"Statement: {qtext}\nAnswer: {ans}"
-            )
-        block = "\n\n".join(blocks) + "\n\n"
+        block = _load_prompt(f"proofwriter_{mode.lower()}_fewshot.txt")
+        _train_ice_cache[cache_key] = block
+        return block
+
+    root = _find_proofwriter_raw()
+    if root is None:
+        block = _load_prompt(f"proofwriter_{mode.lower()}_fewshot.txt")
+        _train_ice_cache[cache_key] = block
+        return block
+
+    # Try meta-train.jsonl first (canonical), fall back to meta-test.jsonl from
+    # depth-3 (we eval on depth-5 so no overlap).
+    p = None
+    for depth_dir in ("depth-3", "depth-2", "depth-1"):
+        for fname in ("meta-train.jsonl", "meta-test.jsonl"):
+            cand = os.path.join(root, mode, depth_dir, fname)
+            if os.path.isfile(cand):
+                p = cand
+                break
+        if p: break
+    if p is None:
+        block = _load_prompt(f"proofwriter_{mode.lower()}_fewshot.txt")
+        _train_ice_cache[cache_key] = block
+        return block
+
+    examples = []
+    label_counts = {"True": 0, "False": 0, "Unknown": 0}
+    want_per_label = _TRAIN_ICE_K // 3 + 1
+    with open(p) as f:
+        for line in f:
+            if all(c >= want_per_label for c in label_counts.values()):
+                break
+            rec = json.loads(line)
+            theory = rec.get("theory", "")
+            for q in rec.get("questions", {}).values():
+                ans = _normalize_pw_answer(q.get("answer"))
+                if ans is None: continue
+                if mode == "CWA" and ans not in ("True", "False"): continue
+                if label_counts[ans] >= want_per_label: continue
+                label_counts[ans] += 1
+                examples.append((theory, q.get("question", ""), ans))
+                if len(examples) >= _TRAIN_ICE_K: break
+    closed = " (closed-world assumption)" if mode == "CWA" else ""
+    tf_u = "true or false" if mode == "CWA" else "True, False, or Unknown"
+    blocks = [
+        f"Facts and rules:\n{theory}\n"
+        f"Question: Based only on the facts and rules above{closed}, "
+        f"is the following statement {tf_u}?\n"
+        f"Statement: {qtext}\nAnswer: {ans}"
+        for theory, qtext, ans in examples[:_TRAIN_ICE_K]
+    ]
+    block = "\n\n".join(blocks) + "\n\n"
     _train_ice_cache[cache_key] = block
     return block
 
 
-@register("proofwriter_gen")
-def eval_proofwriter_gen(model, tokenizer, use_chat, n=200):
-    """ProofWriter OWA with 3-shot generation (approximates paper setup for LLMs)."""
-    examples = _load_proofwriter_raw("OWA", "depth-5")
-    if examples is None:
-        return {"error": "proofwriter raw dataset not found"}
-    by_depth = {}
-    for ex in examples:
-        ans = _normalize_pw_answer(ex["answer"])
-        if ans not in ("True", "False", "Unknown"): continue
-        ex["answer"] = ans
-        by_depth.setdefault(ex["QDep"], []).append(ex)
-    results = {}
-    for depth in sorted(by_depth.keys()):
-        if depth is None or depth > 5: continue
-        correct = 0; total = 0
-        for ex in by_depth[depth][:n]:
-            prompt = (_proofwriter_few_shot_block("OWA") +
-                      f"Facts and rules:\n{ex['theory']}\n"
-                      f"Question: Based only on the facts and rules above, is the following "
-                      f"statement True, False, or Unknown?\n"
-                      f"Statement: {ex['question']}\n"
-                      f"Answer:")
-            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=5, use_chat=use_chat)
-            pl = pred.strip().lower()[:15]
-            pa = "Unknown" if "unknown" in pl else ("True" if "true" in pl else ("False" if "false" in pl else ""))
-            _dbg_log_gen(f"proofwriter_gen:depth_{depth}", prompt, ex["answer"], pred, pa or "?")
-            if pa == ex["answer"]: correct += 1
-            total += 1
-        acc = correct/total if total else 0.0
-        results[depth] = {"correct": correct, "total": total, "accuracy": acc}
-        print(f"  [proofwriter_gen] depth={depth}: {correct}/{total} = {acc:.1%}")
-    return results
-
-
-@register("proofwriter_cwa_gen")
-def eval_proofwriter_cwa_gen(model, tokenizer, use_chat, n=200):
-    """ProofWriter CWA with 3-shot generation."""
-    examples = _load_proofwriter_raw("CWA", "depth-5")
-    if examples is None:
-        return {"error": "proofwriter raw dataset not found"}
-    by_depth = {}
-    for ex in examples:
-        ans = _normalize_pw_answer(ex["answer"])
-        if ans not in ("True", "False"): continue
-        ex["answer"] = ans
-        by_depth.setdefault(ex["QDep"], []).append(ex)
-    results = {}
-    for depth in sorted(by_depth.keys()):
-        if depth is None or depth > 5: continue
-        correct = 0; total = 0
-        for ex in by_depth[depth][:n]:
-            prompt = (_proofwriter_few_shot_block("CWA") +
-                      f"Facts and rules:\n{ex['theory']}\n"
-                      f"Question: Based only on the facts and rules above (closed-world "
-                      f"assumption), is the following statement true or false?\n"
-                      f"Statement: {ex['question']}\n"
-                      f"Answer:")
-            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=5, use_chat=use_chat)
-            pl = pred.strip().lower()[:15]
-            pa = "True" if "true" in pl else ("False" if "false" in pl else "")
-            _dbg_log_gen(f"proofwriter_cwa_gen:depth_{depth}", prompt, ex["answer"], pred, pa or "?")
-            if pa == ex["answer"]: correct += 1
-            total += 1
-        acc = correct/total if total else 0.0
-        results[depth] = {"correct": correct, "total": total, "accuracy": acc}
-        print(f"  [proofwriter_cwa_gen] depth={depth}: {correct}/{total} = {acc:.1%}")
-    return results
+# proofwriter_gen + proofwriter_cwa_gen are merged into proofwriter / proofwriter_cwa
+# (see fused-scorer impl below). Each example now does ONE forward pass and the
+# adapter returns BOTH loglik_accuracy and gen_accuracy in its results dict.
 
 
 def _stepgame_few_shot_block():
@@ -1200,7 +1013,7 @@ def _stepgame_few_shot_block():
     else:
         from datasets import load_dataset
         try:
-            ds = load_dataset("tasksource/stepgame", split="train")
+            ds = load_dataset("ZhengyanShi/StepGame", split="train")
         except Exception:
             block = _load_prompt("stepgame_fewshot.txt")
             _train_ice_cache["stepgame"] = block
@@ -1225,374 +1038,13 @@ def _stepgame_few_shot_block():
         block = "\n\n".join(blocks) + "\n\n"
     _train_ice_cache["stepgame"] = block
     return block
-
-
-@register("stepgame_gen")
-def eval_stepgame_gen(model, tokenizer, use_chat, n=100):
-    """StepGame with 5-shot generation (approximates Li et al. 2024)."""
-    from datasets import load_dataset
-    try:
-        ds = load_dataset("tasksource/stepgame", split="test")
-    except Exception as e:
-        return {"error": f"load failed: {e}"}
-    by_hops = {}
-    for ex in ds: by_hops.setdefault(ex.get("config", "qa?"), []).append(ex)
-    def _hops(c):
-        try: return int(c.replace("qa",""))
-        except: return 99
-    results = {}
-    for cfg in sorted(by_hops.keys(), key=_hops):
-        group = by_hops[cfg][:n]
-        correct = 0; total = 0
-        for ex in group:
-            prompt = (_stepgame_few_shot_block() +
-                      f"Story: {ex['story']}\n"
-                      f"Question: {ex['question']}\n"
-                      f"Answer:")
-            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=6, use_chat=use_chat)
-            pred_lbl = _extract_first_token_label(pred, STEPGAME_LABELS)
-            gold = ex.get("label", "").strip().lower()
-            _dbg_log_gen(f"stepgame_gen:{cfg}", prompt, gold, pred, pred_lbl or "?")
-            if pred_lbl == gold: correct += 1
-            total += 1
-        acc = correct/total if total else 0.0
-        results[cfg] = {"correct": correct, "total": total, "accuracy": acc}
-        print(f"  [stepgame_gen] {cfg}: {correct}/{total} = {acc:.1%}")
-    all_c = sum(v["correct"] for v in results.values())
-    all_t = sum(v["total"] for v in results.values())
-    results["overall"] = {"correct": all_c, "total": all_t,
-                          "accuracy": all_c/all_t if all_t else 0.0}
-    return results
-
-
-# ---------------- Chess mate-in-N ----------------
-
-@register("chess_mate")
-def eval_chess_mate(model, tokenizer, use_chat, n=50):
-    """Chess mate-in-N puzzles from Lichess.
-
-    Streams the Lichess/chess-puzzles dataset, filters to mateIn1/2/3 puzzles.
-    For each: give the model the FEN and the opponent's setup move, ask for
-    the mating sequence in UCI format.
-
-    Scoring: exact-match on the solver's move sequence (UCI notation). Stratified
-    by mate depth. Random baseline is ~0% — chess has ~30 legal moves per position
-    so picking the right sequence by chance is vanishingly unlikely.
-
-    This is hard for a 0.6B model. Expect low numbers in absolute terms; the
-    differential between instruct_only and 6pct+search is the informative signal.
-    """
-    # Streaming dataset — cap required. If main() passed n=None, fall back to default.
-    n = n or 50
-    from datasets import load_dataset
-
-    try:
-        ds = load_dataset("Lichess/chess-puzzles", split="train", streaming=True)
-    except Exception as e:
-        return {"error": f"Lichess puzzles load failed: {e}"}
-
-    targets = {"mateIn1": [], "mateIn2": [], "mateIn3": []}
-    per_cat = max(n, 20)
-
-    def _themes_list(t):
-        if isinstance(t, list):
-            return t
-        if isinstance(t, str):
-            # Try ast.literal_eval, then fall back to whitespace split
-            import ast
-            try:
-                v = ast.literal_eval(t)
-                if isinstance(v, list):
-                    return v
-            except Exception:
-                pass
-            return t.split()
-        return []
-
-    for ex in ds:
-        themes = _themes_list(ex.get("Themes", []))
-        for key in list(targets.keys()):
-            if key in themes and len(targets[key]) < per_cat:
-                targets[key].append(ex)
-        if all(len(v) >= per_cat for v in targets.values()):
-            break
-
-    # If we couldn't find enough of some category, just use what we have
-    total_puzzles = sum(len(v) for v in targets.values())
-    print(f"  [chess_mate] collected: " +
-          ", ".join(f"{k}={len(v)}" for k, v in targets.items()) +
-          f"  total={total_puzzles}")
-
-    results = {}
-    for cat in ["mateIn1", "mateIn2", "mateIn3"]:
-        group = targets[cat][:n]
-        if not group:
-            continue
-        correct = 0
-        first_move_correct = 0
-        total = 0
-        for ex in group:
-            fen = ex["FEN"]
-            moves = ex["Moves"].split()
-            if len(moves) < 2:
-                continue
-            setup = moves[0]
-            gold_seq = moves[1:]  # solver's moves + forced replies
-
-            prompt = (
-                f"Chess puzzle in UCI notation.\n"
-                f"Position (FEN): {fen}\n"
-                f"The opponent just played {setup}.\n"
-                f"Find {cat.replace('mateIn','the forced mate in ')} moves. "
-                f"Output only the sequence of moves in UCI format, "
-                f"space-separated (e.g., 'e2e4 e7e5 g1f3'). Include the "
-                f"opponent's forced replies. No explanation."
-            )
-            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=40, use_chat=use_chat)
-
-            # Extract UCI-like tokens from the output (4-5 char alphanumeric)
-            import re as _re
-            pred_moves = _re.findall(r"\b[a-h][1-8][a-h][1-8][qrbn]?\b", pred.lower())
-            _dbg_log_gen(f"chess_mate:{cat}", prompt, " ".join(gold_seq), pred, " ".join(pred_moves))
-
-            if pred_moves == gold_seq:
-                correct += 1
-            if pred_moves and pred_moves[0] == gold_seq[0]:
-                first_move_correct += 1
-            total += 1
-        exact_acc = correct / total if total else 0.0
-        first_acc = first_move_correct / total if total else 0.0
-        results[cat] = {
-            "correct": correct, "total": total,
-            "accuracy": exact_acc,
-            "first_move_accuracy": first_acc,
-        }
-        print(f"  [chess_mate] {cat}: exact={correct}/{total}={exact_acc:.1%}  "
-              f"first_move={first_move_correct}/{total}={first_acc:.1%}")
-
-    all_correct = sum(v["correct"] for v in results.values())
-    all_total = sum(v["total"] for v in results.values())
-    all_first = sum(v.get("first_move_accuracy", 0) * v["total"] for v in results.values())
-    results["overall"] = {
-        "correct": all_correct, "total": all_total,
-        "accuracy": all_correct / all_total if all_total else 0.0,
-        "first_move_accuracy": all_first / all_total if all_total else 0.0,
-    }
-    return results
-
-
-@register("chess_mate_first")
-def eval_chess_mate_first(model, tokenizer, use_chat, n=50):
-    """First-move accuracy for chess mate-in-N. Easier than full mating sequence —
-    scores 1 if the model's first emitted move matches the gold first move.
-    Aligned with how Lichess scores their puzzles for smaller models."""
-    raw = eval_chess_mate(model, tokenizer, use_chat, n=n)
-    if "error" in raw:
-        return raw
-    out = {}
-    for cat in ["mateIn1", "mateIn2", "mateIn3"]:
-        if cat in raw:
-            d = raw[cat]
-            first = d.get("first_move_accuracy", 0.0)
-            out[cat] = {
-                "correct": int(first * d.get("total", 0)),
-                "total": d.get("total", 0),
-                "accuracy": first,
-                "exact_match_accuracy": d.get("accuracy", 0.0),
-            }
-    if "overall" in raw:
-        d = raw["overall"]
-        first = d.get("first_move_accuracy", 0.0)
-        out["overall"] = {
-            "correct": int(first * d.get("total", 0)),
-            "total": d.get("total", 0),
-            "accuracy": first,
-        }
-    return out
-
-
-# ---------------- lm-eval-harness adapter ----------------
-
-# 12 standard NLU tasks used in the paper
-STANDARD_TASKS = [
-    "hellaswag", "winogrande", "piqa", "arc_easy", "arc_challenge",
-    "boolq", "openbookqa", "sciq", "copa", "commonsense_qa",
-    "truthfulqa_mc1", "gsm8k",
-]
-
-# 11 BBH zero-shot reasoning subtasks used in the paper (same set as eval_bbh.sh)
-BBH_TASKS = [
-    "bbh_zeroshot_boolean_expressions",
-    "bbh_zeroshot_dyck_languages",
-    "bbh_zeroshot_formal_fallacies",
-    "bbh_zeroshot_logical_deduction_three_objects",
-    "bbh_zeroshot_logical_deduction_five_objects",
-    "bbh_zeroshot_logical_deduction_seven_objects",
-    "bbh_zeroshot_navigate",
-    "bbh_zeroshot_tracking_shuffled_objects_three_objects",
-    "bbh_zeroshot_tracking_shuffled_objects_five_objects",
-    "bbh_zeroshot_tracking_shuffled_objects_seven_objects",
-    "bbh_zeroshot_web_of_lies",
-]
-
-
-def _run_lm_eval(model, tokenizer, use_chat, task_list, n=None, num_fewshot=None):
-    """Run a list of lm-eval-harness tasks on an already-loaded model.
-
-    `num_fewshot=None` keeps each task's default (e.g. bbh_cot_fewshot_* default
-    is 3, matching Suzgun et al. 2023's paper-standard 3-shot CoT). Pass an
-    integer to override (e.g. 0 for forced zero-shot on tasks that allow it).
-
-    For Qwen3 models, monkey-patches tokenizer.apply_chat_template so every
-    chat-wrapping call forces enable_thinking=False.
-    """
-    from lm_eval import simple_evaluate
-    from lm_eval.models.huggingface import HFLM
-
-    if use_chat:
-        _orig = tokenizer.apply_chat_template
-        def _patched(*args, **kwargs):
-            kwargs.setdefault("enable_thinking", False)
-            return _orig(*args, **kwargs)
-        tokenizer.apply_chat_template = _patched
-
-    lm = HFLM(pretrained=model, tokenizer=tokenizer, batch_size=16)
-    se_kwargs = dict(model=lm, tasks=task_list, limit=n, apply_chat_template=use_chat)
-    if num_fewshot is not None:
-        se_kwargs["num_fewshot"] = num_fewshot
-    raw = simple_evaluate(**se_kwargs)
-
-    out = {}
-    for task_name, task_result in raw.get("results", {}).items():
-        # Prefer common accuracy keys, fall back to exact_match / first numeric
-        acc = (
-            task_result.get("acc,none")
-            or task_result.get("exact_match,none")
-            or task_result.get("acc_norm,none")
-        )
-        if acc is None:
-            for k, v in task_result.items():
-                if isinstance(v, (int, float)) and not k.endswith("_stderr,none"):
-                    acc = v
-                    break
-        out[task_name] = {"accuracy": acc, "total": task_result.get("samples", None)}
-        print(f"  [lm_eval:{task_name}]: {acc*100:.1f}%" if acc is not None else f"  [lm_eval:{task_name}]: ?")
-
-    # Macro-average across tasks
-    accs = [v["accuracy"] for v in out.values() if v.get("accuracy") is not None]
-    if accs:
-        out["overall"] = {"accuracy": sum(accs) / len(accs), "total": len(accs)}
-    return out
-
-
-@register("standard")
-def eval_standard(model, tokenizer, use_chat, n=None):
-    """12 standard NLU benchmarks via lm-eval-harness (same tasks as eval_benchmark.sh)."""
-    return _run_lm_eval(model, tokenizer, use_chat, STANDARD_TASKS, n=n)
-
-
-@register("bbh")
-def eval_bbh(model, tokenizer, use_chat, n=None):
-    """11 BBH zero-shot reasoning subtasks (`bbh_zeroshot_*`) via lm-eval-harness.
-
-    NOTE: literature does not standardly report zero-shot BBH for small (<3B)
-    models — they tend to score 0 because exact_match is too strict. We keep
-    this for completeness but recommend `bbh_cot` (3-shot CoT, matches Suzgun
-    et al. and Qwen/Llama/OLMo papers) as the headline."""
-    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_TASKS, n=n, num_fewshot=0)
-
-
-# Paper-matching variant: 3-shot CoT, as in Suzgun et al. 2023's headline eval.
-BBH_COT_TASKS = [t.replace("bbh_zeroshot_", "bbh_cot_fewshot_") for t in BBH_TASKS]
-
-
-@register("bbh_cot")
-def eval_bbh_cot(model, tokenizer, use_chat, n=None):
-    """11 BBH subtasks with 3-shot Chain-of-Thought (paper-standard).
-
-    Uses lm-eval-harness's `bbh_cot_fewshot_*` configs which default to 3-shot
-    with Suzgun et al. 2023's hand-written CoT exemplars. We pass `num_fewshot=None`
-    to preserve that default (was previously being clobbered to 0).
-
-    Forces `use_chat=False` because chat-template wrapping breaks the 3-shot
-    "Q:..A: Let's think...So the answer is X." format the regex filter expects."""
-    return _run_lm_eval(model, tokenizer, use_chat=False, task_list=BBH_COT_TASKS, n=n, num_fewshot=None)
-
-
-@register("bbh_cot_chat")
-def eval_bbh_cot_chat(model, tokenizer, use_chat, n=None):
-    """Same as bbh_cot but with apply_chat_template=True. Used to test whether
-    curriculum/instruct-tuned models recover BBH performance when given their
-    native chat-formatted input (single-turn wrap of the 3-shot prompt)."""
-    return _run_lm_eval(model, tokenizer, use_chat=True, task_list=BBH_COT_TASKS, n=n, num_fewshot=None)
-
-
-# ---------------- ProofWriter ----------------
-
-def _find_proofwriter_raw():
-    """Locate ProofWriter raw dataset: $DATA_DIR/proofwriter_raw/proofwriter-dataset-V2020.12.3."""
-    if DATA_DIR is None:
-        return None
-    p = os.path.join(DATA_DIR, "proofwriter_raw", "proofwriter-dataset-V2020.12.3")
-    if os.path.isdir(os.path.join(p, "CWA")) and os.path.isdir(os.path.join(p, "OWA")):
-        return p
-    return None
-
-
-def _load_proofwriter_raw(mode: str, depth_dir: str = "depth-5"):
-    """Load AllenAI ProofWriter meta-test.jsonl for a given assumption mode.
-
-    Flattens each record's nested questions into (theory, question, answer, QDep)
-    tuples. Uses the depth-5 directory by default so we get questions at all
-    QDep values (0 through 5) from theories that require up to 5-hop reasoning —
-    the most comprehensive single file available.
-    """
-    root = _find_proofwriter_raw()
-    if root is None:
-        return None
-    path = os.path.join(root, mode, depth_dir, "meta-test.jsonl")
-    if not os.path.isfile(path):
-        return None
-
-    examples = []
-    with open(path) as f:
-        for line in f:
-            rec = json.loads(line)
-            theory = rec.get("theory", "")
-            for qid, q in rec.get("questions", {}).items():
-                examples.append({
-                    "theory": theory,
-                    "question": q.get("question", ""),
-                    "answer": q.get("answer"),
-                    "QDep": q.get("QDep"),
-                })
-    return examples
-
-
-def _normalize_pw_answer(ans):
-    """ProofWriter answers are JSON booleans for True/False and the string
-    'Unknown' for the open-world case. Normalize to canonical strings."""
-    if ans is True:
-        return "True"
-    if ans is False:
-        return "False"
-    if isinstance(ans, str):
-        return ans
-    return None
-
-
 @register("proofwriter")
-def eval_proofwriter(model, tokenizer, use_chat, n=200):
-    """ProofWriter OWA 3-class classification (True / False / Unknown).
-
-    Loads AllenAI's raw ProofWriter zip (proofwriter-dataset-V2020.12.3/OWA/depth-5/
-    meta-test.jsonl). Groups questions by their own QDep level, so we get proper
-    per-depth breakdowns.
-
-    Each query has three possible answers: True, False, or Unknown (neither
-    provable nor disprovable from the theory under open-world semantics). Scored
-    via log-likelihood over all three candidates. Random-guess baseline = 33.3%.
+def eval_proofwriter(model, tokenizer, use_chat, n=None):
+    """ProofWriter OWA 3-class (True/False/Unknown). Single forward pass per
+    example returns BOTH log-lik and constrained-greedy gen accuracy.
+    Per-depth breakdown; n is total cap distributed evenly across depths.
     """
+    n = _clamp_n(n)
     examples = _load_proofwriter_raw("OWA", "depth-5")
     if examples is None:
         return {"error": "proofwriter raw dataset not found; run setup to extract"}
@@ -1605,56 +1057,77 @@ def eval_proofwriter(model, tokenizer, use_chat, n=200):
             continue
         ex["answer"] = ans
         by_depth.setdefault(ex["QDep"], []).append(ex)
+    depths = [d for d in sorted(by_depth.keys()) if d is not None and d <= 5]
+    sizes = [len(by_depth[d]) for d in depths]
+    caps = _distribute_n(n, len(depths), sizes)
 
-    class_label = {"true": "True", "false": "False", "unknown": "Unknown"}
+    # Content-free prompt for Contextual Calibration (Zhao et al. 2021)
+    cf_prompt = (f"Facts and rules:\nN/A\n\n"
+                 f"Based only on the facts and rules above, is the following "
+                 f"statement True, False, or Unknown (meaning it can be neither "
+                 f"proven nor disproven)?\nN/A\n"
+                 f"Answer with only True, False, or Unknown.")
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt,
+                                          ["True", "False", "Unknown"], use_chat)
+    print(f"  [proofwriter] content-free baseline logprobs: "
+          f"True={baseline_lp['True']:.3f} False={baseline_lp['False']:.3f} Unknown={baseline_lp['Unknown']:.3f}")
+
     results = {}
-    for depth in sorted(by_depth.keys()):
-        if depth is None or depth > 5:
-            continue
-        correct = 0
-        total = 0
+    for depth, cap in zip(depths, caps):
+        ll_c = gen_c = cal_c = total = 0
         by_class = {"True": [0, 0], "False": [0, 0], "Unknown": [0, 0]}
-        for ex in by_depth[depth][:n]:
+        for ex in _subsample(by_depth[depth], cap):
             answer = ex["answer"]
-            user_content = (
-                f"Facts and rules:\n{ex['theory']}\n\n"
-                f"Based only on the facts and rules above, is the following "
-                f"statement True, False, or Unknown (meaning it can be neither "
-                f"proven nor disproven)?\n"
-                f"{ex['question']}\n"
-                "Answer with only True, False, or Unknown."
-            )
-            pred = class_label[score_tfu(model, tokenizer, user_content, use_chat,
-                                         _dbg_label=f"proofwriter:depth_{depth}",
-                                         _dbg_gold=answer)]
+            prompt = (f"Facts and rules:\n{ex['theory']}\n\n"
+                      f"Based only on the facts and rules above, is the following "
+                      f"statement True, False, or Unknown (meaning it can be neither "
+                      f"proven nor disproven)?\n{ex['question']}\n"
+                      f"Answer with only True, False, or Unknown.")
+            out = _score_choices_fused(model, tokenizer, prompt,
+                                       ["True", "False", "Unknown"], use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"proofwriter:depth_{depth}", prompt, answer,
+                            out["loglik_pred"], out["logprobs"])
             by_class[answer][1] += 1
-            if pred == answer:
-                correct += 1
+            if out["loglik_pred"] == answer:
+                ll_c += 1
                 by_class[answer][0] += 1
+            if out["gen_pred"] == answer: gen_c += 1
+            if out["calibrated_pred"] == answer: cal_c += 1
             total += 1
-        acc = correct / total if total else 0.0
         results[depth] = {
-            "correct": correct, "total": total, "accuracy": acc,
-            "per_class": {
+            "loglik_accuracy":     ll_c/total if total else 0.0,
+            "gen_accuracy":        gen_c/total if total else 0.0,
+            "calibrated_accuracy": cal_c/total if total else 0.0,
+            "total": total,
+            "accuracy": ll_c/total if total else 0.0,
+            "per_class_loglik": {
                 cls: {"correct": c[0], "total": c[1],
-                      "accuracy": c[0] / c[1] if c[1] else 0.0}
-                for cls, c in by_class.items()
-            },
+                      "accuracy": c[0]/c[1] if c[1] else 0.0}
+                for cls, c in by_class.items()},
         }
-        per_class_str = "  ".join(f"{cls[:1]}={c[0]}/{c[1]}" for cls, c in by_class.items())
-        print(f"  [proofwriter] depth={depth}: {correct}/{total} = {acc:.1%}  ({per_class_str})")
+        print(f"  [proofwriter] depth={depth}: ll={ll_c}/{total}={ll_c/max(total,1):.1%}  "
+              f"gen={gen_c}/{total}={gen_c/max(total,1):.1%}  "
+              f"cal={cal_c}/{total}={cal_c/max(total,1):.1%}")
+    all_ll = sum(r["loglik_accuracy"] * r["total"] for r in results.values())
+    all_gen = sum(r["gen_accuracy"] * r["total"] for r in results.values())
+    all_cal = sum(r["calibrated_accuracy"] * r["total"] for r in results.values())
+    all_t = sum(r["total"] for r in results.values())
+    results["overall"] = {"loglik_accuracy":     all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":        all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
     return results
 
 
 @register("proofwriter_cwa")
-def eval_proofwriter_cwa(model, tokenizer, use_chat, n=200):
-    """ProofWriter CWA binary classification (True / False).
-
-    Uses the closed-world variant where the theory is assumed complete:
-    any statement that can't be proven true is False (negation-as-failure).
-    Each query has exactly two answers: True or False. Scored via log-likelihood
-    over both candidates. Random-guess baseline = 50%.
-    """
+def eval_proofwriter_cwa(model, tokenizer, use_chat, n=None):
+    """ProofWriter CWA binary (True/False). Single forward pass returns BOTH
+    log-lik and constrained-greedy gen accuracy. n is total cap distributed
+    across depths."""
+    n = _clamp_n(n)
     examples = _load_proofwriter_raw("CWA", "depth-5")
     if examples is None:
         return {"error": "proofwriter raw dataset not found; run setup to extract"}
@@ -1667,44 +1140,1605 @@ def eval_proofwriter_cwa(model, tokenizer, use_chat, n=200):
             continue
         ex["answer"] = ans
         by_depth.setdefault(ex["QDep"], []).append(ex)
+    depths = [d for d in sorted(by_depth.keys()) if d is not None and d <= 5]
+    sizes = [len(by_depth[d]) for d in depths]
+    caps = _distribute_n(n, len(depths), sizes)
+
+    cf_prompt = (f"Facts and rules:\nN/A\n\n"
+                 f"Based only on the facts and rules above, is the following "
+                 f"statement true or false? Assume anything not provable is False.\n"
+                 f"N/A\nAnswer with only True or False.")
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt,
+                                          ["True", "False"], use_chat)
+    print(f"  [proofwriter_cwa] baseline: True={baseline_lp['True']:.3f} False={baseline_lp['False']:.3f}")
 
     results = {}
-    for depth in sorted(by_depth.keys()):
-        if depth is None or depth > 5:
-            continue
-        correct = 0
-        total = 0
+    for depth, cap in zip(depths, caps):
+        ll_c = gen_c = cal_c = total = 0
         by_class = {"True": [0, 0], "False": [0, 0]}
-        for ex in by_depth[depth][:n]:
+        for ex in _subsample(by_depth[depth], cap):
             answer = ex["answer"]
-            user_content = (
-                f"Facts and rules:\n{ex['theory']}\n\n"
-                f"Based only on the facts and rules above, is the following "
-                f"statement true or false? Assume anything not provable is "
-                f"False.\n"
-                f"{ex['question']}\n"
-                "Answer with only True or False."
-            )
-            pred_tf = score_truefalse(model, tokenizer, user_content, use_chat,
-                                      _dbg_label=f"proofwriter_cwa:depth_{depth}",
-                                      _dbg_gold=answer)
-            pa = "True" if pred_tf == "true" else "False"
+            prompt = (f"Facts and rules:\n{ex['theory']}\n\n"
+                      f"Based only on the facts and rules above, is the following "
+                      f"statement true or false? Assume anything not provable is False.\n"
+                      f"{ex['question']}\nAnswer with only True or False.")
+            out = _score_choices_fused(model, tokenizer, prompt,
+                                       ["True", "False"], use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"proofwriter_cwa:depth_{depth}", prompt, answer,
+                            out["loglik_pred"], out["logprobs"])
             by_class[answer][1] += 1
-            if pa == answer:
-                correct += 1
+            if out["loglik_pred"] == answer:
+                ll_c += 1
                 by_class[answer][0] += 1
+            if out["gen_pred"] == answer: gen_c += 1
+            if out["calibrated_pred"] == answer: cal_c += 1
             total += 1
-        acc = correct / total if total else 0.0
         results[depth] = {
-            "correct": correct, "total": total, "accuracy": acc,
-            "per_class": {
+            "loglik_accuracy":     ll_c/total if total else 0.0,
+            "gen_accuracy":        gen_c/total if total else 0.0,
+            "calibrated_accuracy": cal_c/total if total else 0.0,
+            "total": total,
+            "accuracy": ll_c/total if total else 0.0,
+            "per_class_loglik": {
                 cls: {"correct": c[0], "total": c[1],
-                      "accuracy": c[0] / c[1] if c[1] else 0.0}
-                for cls, c in by_class.items()
-            },
+                      "accuracy": c[0]/c[1] if c[1] else 0.0}
+                for cls, c in by_class.items()},
         }
-        per_class_str = "  ".join(f"{cls[:1]}={c[0]}/{c[1]}" for cls, c in by_class.items())
-        print(f"  [proofwriter_cwa] depth={depth}: {correct}/{total} = {acc:.1%}  ({per_class_str})")
+        print(f"  [proofwriter_cwa] depth={depth}: ll={ll_c}/{total}={ll_c/max(total,1):.1%}  "
+              f"gen={gen_c}/{total}={gen_c/max(total,1):.1%}  "
+              f"cal={cal_c}/{total}={cal_c/max(total,1):.1%}")
+    all_ll = sum(r["loglik_accuracy"] * r["total"] for r in results.values())
+    all_gen = sum(r["gen_accuracy"] * r["total"] for r in results.values())
+    all_cal = sum(r["calibrated_accuracy"] * r["total"] for r in results.values())
+    all_t = sum(r["total"] for r in results.values())
+    results["overall"] = {"loglik_accuracy":     all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":        all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
+    return results
+
+
+# ==========================================================
+# FOLIO (Han et al., EMNLP 2024)
+# ==========================================================
+# 3-class FOL deduction (True/False/Uncertain). Paper protocol: 8-shot demos +
+# generation, extract "The answer is X". We provide both log-lik and gen variants.
+# Dataset: yale-nlp/FOLIO (gated; users must accept license on HF first).
+
+_FOLIO_FEW_SHOT_CACHE = None
+
+def _folio_few_shot_block(tokenizer, k=8):
+    """Build a k-shot demo block from FOLIO train split.
+    Demos formatted as: Premises, Conclusion, Answer."""
+    global _FOLIO_FEW_SHOT_CACHE
+    if _FOLIO_FEW_SHOT_CACHE is not None:
+        return _FOLIO_FEW_SHOT_CACHE
+    from datasets import load_dataset
+    try:
+        ds = load_dataset("yale-nlp/FOLIO", split="train")
+    except Exception as e:
+        try:
+            ds = load_dataset("tasksource/folio", split="train")
+        except Exception:
+            print(f"  [folio] Could not load train split for few-shot demos: {e}")
+            _FOLIO_FEW_SHOT_CACHE = ""
+            return ""
+    # Pick balanced demos (try to cover all 3 labels)
+    demos = []
+    seen = set()
+    for ex in ds:
+        lbl = str(ex.get("label", "")).strip().capitalize().replace("Unknown", "Uncertain")
+        if lbl not in FOLIO_LABELS or lbl in seen and len(seen) < 3:
+            continue
+        seen.add(lbl)
+        prem = ex.get("premises", [])
+        if isinstance(prem, list):
+            prem_text = "\n".join(prem)
+        else:
+            prem_text = str(prem)
+        conc = ex.get("conclusion", "")
+        demos.append(f"Premises:\n{prem_text}\nConclusion: {conc}\nAnswer: {lbl}")
+        if len(demos) >= k:
+            break
+    _FOLIO_FEW_SHOT_CACHE = "\n\n".join(demos) + "\n\n" if demos else ""
+    return _FOLIO_FEW_SHOT_CACHE
+
+
+def _folio_format_test(ex):
+    prem = ex.get("premises", [])
+    if isinstance(prem, list):
+        prem_text = "\n".join(prem)
+    else:
+        prem_text = str(prem)
+    return (f"Premises:\n{prem_text}\n"
+            f"Conclusion: {ex.get('conclusion','')}\nAnswer:")
+
+
+def _folio_load(split="validation"):
+    from datasets import load_dataset
+    for repo in ("yale-nlp/FOLIO", "tasksource/folio"):
+        try:
+            return load_dataset(repo, split=split)
+        except Exception:
+            continue
+    return None
+
+
+@register("folio")
+def eval_folio(model, tokenizer, use_chat, n=None):
+    """FOLIO — canonical 8-shot from train (Han et al. 2024 protocol).
+    Single forward pass returns BOTH log-lik and constrained-greedy gen
+    accuracy over {True, False, Uncertain}."""
+    n = _clamp_n(n)
+    ds = _folio_load("validation")
+    if ds is None: return {"error": "FOLIO load failed (try `huggingface-cli login`)"}
+    print(f"  [folio] loaded {len(ds)} validation examples")
+    fs = _folio_few_shot_block(tokenizer, k=8)
+    cf_prompt = fs + _folio_format_test({"premises": ["N/A"], "conclusion": "N/A"})
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, FOLIO_LABELS, use_chat)
+    print(f"  [folio] baseline: " + " ".join(f"{l}={baseline_lp[l]:.3f}" for l in FOLIO_LABELS))
+
+    ll_c = gen_c = cal_c = total = 0
+    by_label = {l: [0, 0] for l in FOLIO_LABELS}
+    for ex in _subsample(list(ds), n):
+        gold_raw = str(ex.get("label", "")).strip().capitalize()
+        gold = gold_raw.replace("Unknown", "Uncertain")
+        if gold not in FOLIO_LABELS: continue
+        prompt = fs + _folio_format_test(ex)
+        out = _score_choices_fused(model, tokenizer, prompt, FOLIO_LABELS, use_chat,
+                                   baseline_logprobs=baseline_lp)
+        _dbg_log_loglik("folio", prompt, gold, out["loglik_pred"], out["logprobs"])
+        by_label[gold][1] += 1
+        if out["loglik_pred"] == gold:
+            ll_c += 1
+            by_label[gold][0] += 1
+        if out["gen_pred"] == gold: gen_c += 1
+        if out["calibrated_pred"] == gold: cal_c += 1
+        total += 1
+    return {"loglik_accuracy":     ll_c/total if total else 0.0,
+            "gen_accuracy":        gen_c/total if total else 0.0,
+            "calibrated_accuracy": cal_c/total if total else 0.0,
+            "total": total,
+            "accuracy": ll_c/total if total else 0.0,
+            "per_label_loglik": {l: (c/t if t else 0.0) for l,(c,t) in by_label.items()},
+            "baseline_logprobs": baseline_lp}
+
+
+# ==========================================================
+# LogiQA (Liu et al., IJCAI 2020)
+# ==========================================================
+# 4-way multi-choice from civil servant exams. lm-eval-harness uses
+# log-likelihood as canonical (OpenLLM Leaderboard convention).
+
+def _logiqa_load():
+    """Load LogiQA test set. hails/agieval-logiqa-en is the only parquet-based
+    mirror still loadable (script-based EleutherAI/logiqa was deprecated)."""
+    from datasets import load_dataset
+    for repo in ("hails/agieval-logiqa-en",):
+        try:
+            return load_dataset(repo, split="test")
+        except Exception:
+            continue
+    return None
+
+
+def _logiqa_format(ex):
+    """Format LogiQA prompt. agieval-logiqa-en provides a pre-formatted `query`
+    field already ending with 'A: Among A through D, the answer is' — use it
+    directly to match canonical AGIEval evaluation. Falls back to building from
+    fields for other dataset versions."""
+    q = ex.get("query")
+    if q and "the answer is" in q.lower():
+        return q  # canonical agieval format, no extra trailing space
+    ctx = ex.get("context") or ex.get("passage", "")
+    qtext = q or ex.get("question", "")
+    opts = ex.get("options") or ex.get("choices", [])
+    if isinstance(opts, str):
+        try:
+            import ast
+            opts = ast.literal_eval(opts)
+        except Exception: opts = []
+    if isinstance(opts, dict):
+        opts = [opts.get(k, "") for k in sorted(opts.keys())]
+    while len(opts) < 4: opts.append("")
+    return (f"Passage: {ctx}\nQuestion: {qtext}\nChoices:\n"
+            f"A. {opts[0]}\nB. {opts[1]}\nC. {opts[2]}\nD. {opts[3]}\nAnswer:")
+
+
+def _logiqa_gold_letter(ex):
+    """Normalize gold to A/B/C/D. Handles agieval `gold` (list of int index)
+    plus older fields like `correct_option`, `label`, `answer`."""
+    g = ex.get("gold")
+    if g is None: g = ex.get("correct_option")
+    if g is None: g = ex.get("label")
+    if g is None: g = ex.get("answer")
+    if isinstance(g, str):
+        try:
+            import ast
+            g = ast.literal_eval(g)
+        except Exception: pass
+    if isinstance(g, list) and g:
+        g = g[0]
+    if isinstance(g, int): return "ABCD"[g] if 0 <= g < 4 else None
+    if isinstance(g, str):
+        g = g.strip().upper()
+        if g in "ABCD": return g
+        if g.isdigit() and int(g) < 4: return "ABCD"[int(g)]
+    return None
+
+
+@register("logiqa")
+def eval_logiqa(model, tokenizer, use_chat, n=None):
+    """LogiQA — single forward pass per example, returns BOTH log-lik and
+    constrained-greedy gen accuracy (single-token A/B/C/D labels).
+    0-shot, lm-eval-harness convention."""
+    n = _clamp_n(n)
+    ds = _logiqa_load()
+    if ds is None: return {"error": "LogiQA load failed"}
+    print(f"  [logiqa] loaded {len(ds)} test examples")
+    cf_ex = {"query": ("N/A\nQ: N/A Answer Choices: (A)N/A (B)N/A (C)N/A (D)N/A\n"
+                       "A: Among A through D, the answer is")}
+    cf_prompt = _logiqa_format(cf_ex)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, LOGIQA_LABELS, use_chat)
+    print(f"  [logiqa] baseline: " + " ".join(f"{l}={baseline_lp[l]:.3f}" for l in LOGIQA_LABELS))
+
+    ll_c = gen_c = cal_c = total = 0
+    for ex in _subsample(list(ds), n):
+        gold = _logiqa_gold_letter(ex)
+        if gold is None: continue
+        prompt = _logiqa_format(ex)
+        out = _score_choices_fused(model, tokenizer, prompt, LOGIQA_LABELS, use_chat,
+                                   baseline_logprobs=baseline_lp)
+        _dbg_log_loglik("logiqa", prompt, gold, out["loglik_pred"], out["logprobs"])
+        if out["loglik_pred"] == gold: ll_c += 1
+        if out["gen_pred"] == gold: gen_c += 1
+        if out["calibrated_pred"] == gold: cal_c += 1
+        total += 1
+    return {"loglik_accuracy":     ll_c/total if total else 0.0,
+            "gen_accuracy":        gen_c/total if total else 0.0,
+            "calibrated_accuracy": cal_c/total if total else 0.0,
+            "total": total,
+            "accuracy": ll_c/total if total else 0.0,
+            "baseline_logprobs": baseline_lp}
+
+
+# ==========================================================
+# RuleTaker (Clark et al., IJCAI 2020) — predecessor of ProofWriter
+# ==========================================================
+# 2-class True/False (entailment) per depth D0-D5.
+
+def _ruletaker_load_by_depth():
+    from datasets import load_dataset
+    by_depth = {}
+    try:
+        ds = load_dataset("tasksource/ruletaker", split="test")
+    except Exception as e:
+        try:
+            ds = load_dataset("hitachi-nlp/ruletaker", split="test")
+        except Exception as e2:
+            print(f"  [ruletaker] load failed: {e}; {e2}")
+            return None
+    cfg_field = "config" if "config" in ds.column_names else None
+    for ex in ds:
+        d = ex.get(cfg_field, "depth-?") if cfg_field else "depth-?"
+        by_depth.setdefault(str(d), []).append(ex)
+    return by_depth
+
+
+def _ruletaker_format(ex):
+    return (f"Rules and facts:\n{ex.get('context','')}\n\n"
+            f"Statement: {ex.get('question','')}\n"
+            f"Based only on the rules and facts above, is the statement true or false?\n"
+            f"Answer:")
+
+
+def _ruletaker_gold(ex):
+    lbl = str(ex.get("label", "")).strip().lower()
+    if lbl in ("true", "entailment", "1"): return "True"
+    if lbl in ("false", "not entailment", "not_entailment", "0"): return "False"
+    return None
+
+
+@register("ruletaker")
+def eval_ruletaker(model, tokenizer, use_chat, n=None):
+    """RuleTaker — single forward pass per example returns BOTH log-lik and
+    constrained-greedy gen accuracy over {True, False}. Per-depth breakdown;
+    n is total cap distributed evenly across depths."""
+    n = _clamp_n(n)
+    by_depth = _ruletaker_load_by_depth()
+    if by_depth is None: return {"error": "load failed"}
+    cfgs = sorted(by_depth.keys())
+    sizes = [len(by_depth[c]) for c in cfgs]
+    caps = _distribute_n(n, len(cfgs), sizes)
+
+    cf_ex = {"context": "N/A", "question": "N/A"}
+    cf_prompt = _ruletaker_format(cf_ex)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, RULETAKER_LABELS, use_chat)
+    print(f"  [ruletaker] baseline: True={baseline_lp['True']:.3f} False={baseline_lp['False']:.3f}")
+
+    results = {}
+    for cfg, cap in zip(cfgs, caps):
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(by_depth[cfg], cap):
+            gold = _ruletaker_gold(ex)
+            if gold is None: continue
+            prompt = _ruletaker_format(ex)
+            out = _score_choices_fused(model, tokenizer, prompt, RULETAKER_LABELS, use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"ruletaker:{cfg}", prompt, gold, out["loglik_pred"], out["logprobs"])
+            if out["loglik_pred"] == gold: ll_c += 1
+            if out["gen_pred"] == gold: gen_c += 1
+            if out["calibrated_pred"] == gold: cal_c += 1
+            total += 1
+        results[cfg] = {"loglik_accuracy":     ll_c/total if total else 0.0,
+                        "gen_accuracy":        gen_c/total if total else 0.0,
+                        "calibrated_accuracy": cal_c/total if total else 0.0,
+                        "total": total,
+                        "accuracy": ll_c/total if total else 0.0}
+        print(f"  [ruletaker] {cfg}: ll={ll_c}/{total}={ll_c/max(total,1):.1%}  "
+              f"gen={gen_c}/{total}={gen_c/max(total,1):.1%}  "
+              f"cal={cal_c}/{total}={cal_c/max(total,1):.1%}")
+    all_ll = sum(r["loglik_accuracy"] * r["total"] for r in results.values())
+    all_gen = sum(r["gen_accuracy"] * r["total"] for r in results.values())
+    all_cal = sum(r["calibrated_accuracy"] * r["total"] for r in results.values())
+    all_t = sum(r["total"] for r in results.values())
+    results["overall"] = {"loglik_accuracy":     all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":        all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
+    return results
+
+
+# ruletaker_gen merged into ruletaker (single forward pass, both metrics)
+
+
+# ==========================================================
+# CLUTRR (Sinha et al., EMNLP 2019)
+# ==========================================================
+# 21-class kinship inference. Per-k breakdown (k=2..10).
+
+def _clutrr_load():
+    """Load CLUTRR test split. kendrivp/CLUTRR_v1_extracted is the only
+    actively-maintained mirror with all task splits intact (k=2..10)."""
+    from datasets import load_dataset
+    for repo in ("kendrivp/CLUTRR_v1_extracted", "kliang5/CLUTRR_huggingface_dataset"):
+        try:
+            return load_dataset(repo, split="test")
+        except Exception:
+            continue
+    return None
+
+
+def _clutrr_extract_k(ex):
+    """k-hop count from task field (e.g. 'task_1.5' -> 5)."""
+    t = ex.get("task_name") or ex.get("task", "")
+    try:
+        return int(t.split(".")[-1])
+    except Exception:
+        return 0
+
+
+def _clutrr_format(ex):
+    story = ex.get("clean_story") or ex.get("story", "")
+    q = ex.get("query")
+    if isinstance(q, (list, tuple)):
+        a, b = q[0], q[1]
+    elif isinstance(q, str) and "(" in q:
+        # parse "('A', 'B')"
+        import ast
+        try:
+            t = ast.literal_eval(q)
+            a, b = t[0], t[1]
+        except Exception:
+            a, b = "?", "?"
+    else:
+        a, b = "?", "?"
+    return (f"{story}\n"
+            f"Question: How is {b} related to {a}?\n"
+            f"Answer:")
+
+
+@register("clutrr")
+def eval_clutrr(model, tokenizer, use_chat, n=None):
+    """CLUTRR log-lik over 21 kinship labels, per-k breakdown."""
+    n = _clamp_n(n)
+    ds = _clutrr_load()
+    if ds is None: return {"error": "CLUTRR load failed"}
+    by_k = {}
+    for ex in ds:
+        by_k.setdefault(_clutrr_extract_k(ex), []).append(ex)
+    print(f"  [clutrr] loaded {len(ds)} examples across k={sorted(by_k.keys())}")
+    ks = [k for k in sorted(by_k.keys()) if k > 0]
+    sizes = [len(by_k[k]) for k in ks]
+    caps = _distribute_n(n, len(ks), sizes)
+
+    cf_ex = {"clean_story": "N/A", "query": "('A', 'B')"}
+    cf_prompt = _clutrr_format(cf_ex)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, CLUTRR_LABELS, use_chat)
+
+    results = {}
+    for k, cap in zip(ks, caps):
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(by_k[k], cap):
+            gold = str(ex.get("target_text") or ex.get("target") or ex.get("answer") or "").strip().lower()
+            if gold not in CLUTRR_LABELS: continue
+            prompt = _clutrr_format(ex)
+            out = _score_choices_fused(model, tokenizer, prompt, CLUTRR_LABELS, use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"clutrr:k={k}", prompt, gold, out["loglik_pred"], out["logprobs"])
+            if out["loglik_pred"] == gold: ll_c += 1
+            if out["gen_pred"] == gold: gen_c += 1
+            if out["calibrated_pred"] == gold: cal_c += 1
+            total += 1
+        results[f"k={k}"] = {"loglik_accuracy":     ll_c/total if total else 0.0,
+                              "gen_accuracy":        gen_c/total if total else 0.0,
+                              "calibrated_accuracy": cal_c/total if total else 0.0,
+                              "total": total,
+                              "accuracy": ll_c/total if total else 0.0}
+        print(f"  [clutrr] k={k}: ll={ll_c}/{total}={ll_c/max(total,1):.1%}  "
+              f"gen={gen_c}/{total}={gen_c/max(total,1):.1%}  "
+              f"cal={cal_c}/{total}={cal_c/max(total,1):.1%}")
+    all_ll = sum(v["loglik_accuracy"] * v["total"] for v in results.values())
+    all_gen = sum(v["gen_accuracy"] * v["total"] for v in results.values())
+    all_cal = sum(v["calibrated_accuracy"] * v["total"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"loglik_accuracy":     all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":        all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
+    return results
+
+
+# clutrr_gen merged into clutrr (single forward pass, both metrics)
+
+
+# ==========================================================
+# PrOntoQA-OOD (Saparov et al., NeurIPS 2023)
+# ==========================================================
+# 8-shot CoT, generation, parse final True/False from CoT chain.
+# Loads from extracted JSON files in DATA_DIR/prontoqa_ood/.
+
+def _prontoqa_ood_ensure_data():
+    """Auto-download generated_ood_data.zip from asaparov/prontoqa GitHub on
+    first call and extract into $DATA_DIR/prontoqa_ood/."""
+    import os, urllib.request, zipfile
+    if DATA_DIR is None: return None
+    base = os.path.join(DATA_DIR, "prontoqa_ood")
+    if os.path.isdir(base) and any(f.endswith(".json") for f in os.listdir(base)):
+        return base
+    os.makedirs(base, exist_ok=True)
+    zip_path = os.path.join(base, "generated_ood_data.zip")
+    url = "https://github.com/asaparov/prontoqa/raw/main/generated_ood_data.zip"
+    try:
+        print(f"  [prontoqa_ood] downloading {url} (~5MB)")
+        urllib.request.urlretrieve(url, zip_path)
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(base)
+        os.remove(zip_path)
+        return base
+    except Exception as e:
+        print(f"  [prontoqa_ood] download failed: {e}")
+        return None
+
+
+def _prontoqa_ood_load():
+    """Load all PrOntoQA-OOD JSON variants. Returns dict: {variant: examples}.
+    Auto-downloads from GitHub on first call."""
+    import os, json, glob
+    base = _prontoqa_ood_ensure_data()
+    if base is None: return None
+    out = {}
+    for fpath in sorted(glob.glob(os.path.join(base, "*.json"))):
+        name = os.path.splitext(os.path.basename(fpath))[0]
+        try:
+            d = json.load(open(fpath))
+            out[name] = d
+        except Exception: pass
+    return out if out else None
+
+
+def _prontoqa_ood_gold_label(query, chain):
+    """Derive the gold True/False label for a PrOntoQA-OOD example.
+
+    The query is "Prove: <statement>." and the chain_of_thought is a sequence
+    of derivation steps. If the final step matches the queried statement (proof
+    succeeded), label is True; otherwise the proof failed/contradicted → False.
+    Handles "ProofByContra" variants where the chain ends with a contradiction
+    derivation and the answer is also derived by chain match.
+    """
+    if not chain or not query: return "False"
+    target = query.strip()
+    for prefix in ("Prove:", "prove:"):
+        if target.startswith(prefix):
+            target = target[len(prefix):].strip()
+            break
+    target = target.rstrip(".").strip().lower()
+    last = chain[-1].strip().rstrip(".").strip().lower()
+    return "True" if last == target else "False"
+
+
+def _prontoqa_ood_iter_examples(d):
+    """Iterate over (prompt, gold_chain, gold_label) tuples from one variant.
+    NO COT: demos show only Q + final True/False label (not the reasoning chain).
+    Deviates from canonical 8-shot CoT protocol (Saparov 2023); we strip CoT
+    from demos to avoid conflating prompting capability with model reasoning."""
+    for ex_key in d:
+        ex = d[ex_key]
+        in_context = []
+        for k in sorted(ex.keys()):
+            if k.startswith("in_context_example"):
+                ic = ex[k]
+                ic_label = _prontoqa_ood_gold_label(ic.get("query", ""),
+                                                     ic.get("chain_of_thought", []))
+                in_context.append(f"Q: {ic['question']}\n{ic.get('query','')}\n"
+                                  f"A: {ic_label}")
+        test = ex.get("test_example", {})
+        prompt = "\n\n".join(in_context) + "\n\n" + \
+                 f"Q: {test.get('question','')}\n{test.get('query','')}\nA:"
+        gold_chain = test.get("chain_of_thought", [])
+        gold_label = _prontoqa_ood_gold_label(test.get("query", ""), gold_chain)
+        yield prompt, gold_chain, gold_label
+
+
+@register("prontoqa_ood")
+def eval_prontoqa_ood(model, tokenizer, use_chat, n=None):
+    """PrOntoQA-OOD — 8-shot WITHOUT CoT. Single forward pass returns BOTH
+    log-lik and constrained-greedy gen accuracy over single-token True/False.
+    n is total cap distributed across the 79 variants.
+
+    Deviation from canonical protocol: paper uses 8-shot CoT (Saparov 2023);
+    we strip the reasoning chain from demos and the model emits only True/False
+    directly. This avoids conflating prompting capability with model reasoning.
+    """
+    n = _clamp_n(n)
+    variants = _prontoqa_ood_load()
+    if variants is None:
+        return {"error": "PrOntoQA-OOD data not found at $DATA_DIR/prontoqa_ood/"}
+    vnames = sorted(variants.keys())
+    # We don't know exact per-variant size without iterating; assume ~100/variant
+    sizes = [100] * len(vnames)
+    caps = _distribute_n(n, len(vnames), sizes)
+    print(f"  [prontoqa_ood] loaded {len(vnames)} variants, ~{caps[0]} samples/variant "
+          f"(~{sum(caps)} total)")
+    results = {}
+    for vname, cap in zip(vnames, caps):
+        examples = list(_prontoqa_ood_iter_examples(variants[vname]))
+        sampled = _subsample(examples, cap)
+        # Per-variant baseline: take the demo block (shared across examples in
+        # this variant) + a content-free test query.
+        first_prompt = examples[0][0] if examples else ""
+        # The demo block ends at the last "\n\nQ:" before the final test query.
+        # Replace test-query content with N/A to get content-free version.
+        demo_end = first_prompt.rfind("\n\nQ: ")
+        cf_prompt = (first_prompt[:demo_end + 2] + "Q: N/A\nN/A\nA:") if demo_end > 0 else "Q: N/A\nN/A\nA:"
+        baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, ["True", "False"], use_chat)
+
+        ll_c = gen_c = cal_c = total = 0
+        for prompt, gold_chain, gold_label in sampled:
+            out = _score_choices_fused(model, tokenizer, prompt, ["True", "False"], use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"prontoqa_ood:{vname}", prompt, gold_label,
+                            out["loglik_pred"], out["logprobs"])
+            if out["loglik_pred"] == gold_label: ll_c += 1
+            if out["gen_pred"] == gold_label: gen_c += 1
+            if out["calibrated_pred"] == gold_label: cal_c += 1
+            total += 1
+        results[vname] = {"loglik_accuracy":     ll_c/total if total else 0.0,
+                          "gen_accuracy":        gen_c/total if total else 0.0,
+                          "calibrated_accuracy": cal_c/total if total else 0.0,
+                          "total": total,
+                          "accuracy": ll_c/total if total else 0.0}
+    all_ll = sum(v["loglik_accuracy"] * v["total"] for v in results.values())
+    all_gen = sum(v["gen_accuracy"] * v["total"] for v in results.values())
+    all_cal = sum(v["calibrated_accuracy"] * v["total"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"loglik_accuracy":     all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":        all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0}
+    print(f"  [prontoqa_ood] overall: ll={all_ll/max(all_t,1):.1%}  "
+          f"gen={all_gen/max(all_t,1):.1%}  cal={all_cal/max(all_t,1):.1%}  (n={all_t})")
+    return results
+
+
+# ==========================================================
+# LogicBench (Parmar et al., ACL 2024)
+# ==========================================================
+# Zero-shot CoT trigger, 25 inference rules (BQA Yes/No or MCQA).
+
+def _logicbench_ensure_repo():
+    """Clone Mihir3009/LogicBench (canonical author repo) to $DATA_DIR.
+    Returns the local repo root or None on failure."""
+    import os, subprocess
+    if DATA_DIR is None: return None
+    base = os.path.join(DATA_DIR, "logicbench", "LogicBench")
+    if os.path.isdir(os.path.join(base, "data")):
+        return base
+    parent = os.path.dirname(base)
+    os.makedirs(parent, exist_ok=True)
+    try:
+        subprocess.check_call(
+            ["git", "clone", "--depth=1",
+             "https://github.com/Mihir3009/LogicBench.git", base],
+            cwd=parent, timeout=120)
+        return base
+    except Exception as e:
+        print(f"  [logicbench] clone failed: {e}")
+        return None
+
+
+def _logicbench_load_bqa():
+    """Load all LogicBench(Eval) BQA data_instances.json into list of
+    {context, qa_pairs[{question, answer}], logic_type, axiom}."""
+    import os, json, glob
+    base = _logicbench_ensure_repo()
+    if base is None: return None
+    pat = os.path.join(base, "data", "LogicBench(Eval)", "BQA", "*", "*",
+                       "data_instances.json")
+    out = []
+    for fpath in sorted(glob.glob(pat)):
+        try:
+            d = json.load(open(fpath))
+        except Exception: continue
+        for s in d.get("samples", []):
+            out.append({"context": s.get("context", ""),
+                        "qa_pairs": s.get("qa_pairs", []),
+                        "logic_type": d.get("type", ""),
+                        "axiom": d.get("axiom", "")})
+    print(f"  [logicbench:BQA] loaded {len(out)} samples")
+    return out if out else None
+
+
+def _logicbench_load_mcqa():
+    """Load LogicBench(Eval) MCQA data. MCQA samples are flat (no qa_pairs
+    nesting): each sample has {context, question, choices, answer}. We wrap
+    as a single-element qa_pairs list to match the BQA iter pattern."""
+    import os, json, glob
+    base = _logicbench_ensure_repo()
+    if base is None: return None
+    pat = os.path.join(base, "data", "LogicBench(Eval)", "MCQA", "*", "*",
+                       "data_instances.json")
+    out = []
+    for fpath in sorted(glob.glob(pat)):
+        try:
+            d = json.load(open(fpath))
+        except Exception: continue
+        for s in d.get("samples", []):
+            out.append({"context": s.get("context", ""),
+                        "qa_pairs": [{"question": s.get("question", ""),
+                                       "choices": s.get("choices", {}),
+                                       "answer": s.get("answer", "")}],
+                        "logic_type": d.get("type", ""),
+                        "axiom": d.get("axiom", "")})
+    print(f"  [logicbench:MCQA] loaded {len(out)} samples")
+    return out if out else None
+
+
+def _logicbench_format_bqa(ex, cot=True):
+    ctx = ex.get("context", "")
+    q = ex.get("question", "")
+    cot_trigger = "Let's think step by step. " if cot else ""
+    return (f"Context: {ctx}\n"
+            f"Question: {q}\n"
+            f"Answer the question ONLY in 'yes' or 'no'.\n"
+            f"{cot_trigger}Answer:")
+
+
+def _logicbench_iter_bqa(items):
+    """Each item has multiple qa_pairs."""
+    for ex in items:
+        ctx = ex.get("context", "")
+        for qp in ex.get("qa_pairs", []):
+            yield {"context": ctx, "question": qp.get("question", ""),
+                   "answer": qp.get("answer", "")}
+
+
+_LOGICBENCH_BQA_FS = None
+_LOGICBENCH_MCQA_FS = None
+
+def _logicbench_few_shot_block_bqa(items, k=3):
+    """Build k-shot Direct demo block for BQA. Picks the first k yes/no-balanced
+    examples from the dataset; demos are returned as a string AND the set of
+    used (context, question) pairs to exclude from the test sweep.
+
+    Matches Parmar et al. 2024's "Few-shot Direct" condition (3-shot, no CoT).
+    """
+    global _LOGICBENCH_BQA_FS
+    if _LOGICBENCH_BQA_FS is not None:
+        return _LOGICBENCH_BQA_FS
+    half = max(1, k // 2)
+    picked = {"yes": [], "no": []}
+    used_keys = set()
+    for ex in _logicbench_iter_bqa(items):
+        gold = _yesno(str(ex.get("answer", "")))
+        if not gold or len(picked[gold]) >= (k - half if gold == "no" else half):
+            continue
+        if sum(len(v) for v in picked.values()) >= k:
+            break
+        picked[gold].append(ex)
+        used_keys.add((ex["context"], ex["question"]))
+    demos = []
+    for ex in picked["yes"] + picked["no"]:
+        demos.append(_logicbench_format_bqa(ex, cot=False) + " " +
+                     _yesno(str(ex.get("answer", ""))))
+    _LOGICBENCH_BQA_FS = ("\n\n".join(demos) + "\n\n", used_keys)
+    return _LOGICBENCH_BQA_FS
+
+
+@register("logicbench_bqa")
+def eval_logicbench_bqa(model, tokenizer, use_chat, n=None):
+    """LogicBench BQA — canonical 3-shot Direct (Parmar et al. 2024 FS-Direct).
+    One forward pass per example, returns BOTH log-lik and constrained-greedy
+    gen accuracy over single-token Yes/No labels."""
+    n = _clamp_n(n)
+    items = _logicbench_load_bqa()
+    if items is None: return {"error": "load failed"}
+    fs_block, demo_keys = _logicbench_few_shot_block_bqa(items, k=3)
+    all_examples = [ex for ex in _logicbench_iter_bqa(items)
+                     if (ex["context"], ex["question"]) not in demo_keys
+                     and _yesno(str(ex.get("answer", "")))]
+    sampled = _subsample(all_examples, n)
+
+    cf_ex = {"context": "N/A", "question": "N/A"}
+    cf_prompt = fs_block + _logicbench_format_bqa(cf_ex, cot=False)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, ["Yes", "No"], use_chat)
+    print(f"  [logicbench_bqa] baseline: Yes={baseline_lp['Yes']:.3f} No={baseline_lp['No']:.3f}")
+
+    ll_c = gen_c = cal_c = total = 0
+    for ex in sampled:
+        gold = _yesno(str(ex.get("answer", "")))
+        prompt = fs_block + _logicbench_format_bqa(ex, cot=False)
+        out = _score_choices_fused(model, tokenizer, prompt, ["Yes", "No"], use_chat,
+                                   baseline_logprobs=baseline_lp)
+        ll_pred = out["loglik_pred"].lower()
+        gen_pred = out["gen_pred"].lower()
+        cal_pred = (out["calibrated_pred"] or "").lower()
+        _dbg_log_loglik("logicbench_bqa", prompt, gold, ll_pred, out["logprobs"])
+        if ll_pred == gold: ll_c += 1
+        if gen_pred == gold: gen_c += 1
+        if cal_pred == gold: cal_c += 1
+        total += 1
+    return {"loglik_accuracy":     ll_c/total if total else 0.0,
+            "gen_accuracy":        gen_c/total if total else 0.0,
+            "calibrated_accuracy": cal_c/total if total else 0.0,
+            "total": total,
+            "accuracy": ll_c/total if total else 0.0,
+            "baseline_logprobs": baseline_lp}
+
+
+def _logicbench_format_mcqa(ex, cot=True):
+    ctx = ex.get("context", "")
+    q = ex.get("question", "")
+    choices = ex.get("choices", {}) or {}
+    cs = "\n".join(f"({chr(64+i)}) {choices.get(f'choice_{i}','')}"
+                   for i in range(1, 5) if f"choice_{i}" in choices)
+    cot_trigger = "Let's think step by step. " if cot else ""
+    return (f"Context: {ctx}\n"
+            f"Question: {q}\n"
+            f"Choices:\n{cs}\n"
+            f"{cot_trigger}Answer:")
+
+
+def _logicbench_iter_mcqa(items):
+    for ex in items:
+        ctx = ex.get("context", "")
+        for qp in ex.get("qa_pairs", []):
+            yield {"context": ctx, "question": qp.get("question", ""),
+                   "choices": qp.get("choices", {}),
+                   "answer": qp.get("answer", "")}
+
+
+def _logicbench_mcqa_gold_letter(ex):
+    g = str(ex.get("answer", "")).strip().lower()
+    if "choice_" in g:
+        try: return "ABCD"[int(g.split("_")[-1]) - 1]
+        except Exception: pass
+    return None
+
+
+def _logicbench_few_shot_block_mcqa(items, k=3):
+    """k-shot Direct demos for MCQA — picks first k examples covering distinct
+    gold letters where possible. Returns (block_string, used_keys)."""
+    global _LOGICBENCH_MCQA_FS
+    if _LOGICBENCH_MCQA_FS is not None:
+        return _LOGICBENCH_MCQA_FS
+    picked = []
+    seen_letters = set()
+    used_keys = set()
+    for ex in _logicbench_iter_mcqa(items):
+        gold = _logicbench_mcqa_gold_letter(ex)
+        if gold is None: continue
+        # Prefer letter diversity, but accept duplicates if needed
+        if len(picked) >= k: break
+        if gold in seen_letters and len(picked) + (k - len(seen_letters)) > k:
+            continue
+        seen_letters.add(gold)
+        picked.append((ex, gold))
+        used_keys.add((ex["context"], ex["question"]))
+    demos = [_logicbench_format_mcqa(ex, cot=False) + " " + gold
+             for ex, gold in picked]
+    _LOGICBENCH_MCQA_FS = ("\n\n".join(demos) + "\n\n", used_keys)
+    return _LOGICBENCH_MCQA_FS
+
+
+@register("logicbench_mcqa")
+def eval_logicbench_mcqa(model, tokenizer, use_chat, n=None):
+    """LogicBench MCQA — canonical 3-shot Direct (Parmar et al. 2024 FS-Direct).
+    Single forward pass returns BOTH log-lik and constrained-greedy gen
+    accuracy over single-token A/B/C/D labels."""
+    n = _clamp_n(n)
+    items = _logicbench_load_mcqa()
+    if items is None: return {"error": "load failed"}
+    fs_block, demo_keys = _logicbench_few_shot_block_mcqa(items, k=3)
+    all_examples = []
+    for ex in _logicbench_iter_mcqa(items):
+        if (ex["context"], ex["question"]) in demo_keys: continue
+        if _logicbench_mcqa_gold_letter(ex) is None: continue
+        all_examples.append(ex)
+    sampled = _subsample(all_examples, n)
+
+    cf_ex = {"context": "N/A", "question": "N/A",
+             "choices": {"choice_1": "N/A", "choice_2": "N/A",
+                         "choice_3": "N/A", "choice_4": "N/A"}}
+    cf_prompt = fs_block + _logicbench_format_mcqa(cf_ex, cot=False)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, LOGIQA_LABELS, use_chat)
+    print(f"  [logicbench_mcqa] baseline: " +
+          " ".join(f"{l}={baseline_lp[l]:.3f}" for l in LOGIQA_LABELS))
+
+    ll_c = gen_c = cal_c = total = 0
+    for ex in sampled:
+        gold = _logicbench_mcqa_gold_letter(ex)
+        prompt = fs_block + _logicbench_format_mcqa(ex, cot=False)
+        out = _score_choices_fused(model, tokenizer, prompt, LOGIQA_LABELS, use_chat,
+                                   baseline_logprobs=baseline_lp)
+        _dbg_log_loglik("logicbench_mcqa", prompt, gold, out["loglik_pred"], out["logprobs"])
+        if out["loglik_pred"] == gold: ll_c += 1
+        if out["gen_pred"] == gold: gen_c += 1
+        if out["calibrated_pred"] == gold: cal_c += 1
+        total += 1
+    return {"loglik_accuracy":     ll_c/total if total else 0.0,
+            "gen_accuracy":        gen_c/total if total else 0.0,
+            "calibrated_accuracy": cal_c/total if total else 0.0,
+            "total": total,
+            "accuracy": ll_c/total if total else 0.0,
+            "baseline_logprobs": baseline_lp}
+
+
+# ==========================================================
+# MultiLogiEval (Patel et al., EMNLP 2024)
+# ==========================================================
+# Zero-shot CoT, Yes/No, per-depth d1-d5 × {prop, FOL, NM}.
+# Loads from cloned GitHub repo (auto-downloads to $DATA_DIR/multilogieval).
+
+def _multilogieval_ensure_data():
+    import os, subprocess
+    if DATA_DIR is None: return None
+    base = os.path.join(DATA_DIR, "multilogieval", "Multi-LogiEval")
+    if os.path.isdir(os.path.join(base, "data")): return base
+    parent = os.path.dirname(base)
+    os.makedirs(parent, exist_ok=True)
+    try:
+        subprocess.check_call(
+            ["git", "clone", "--depth=1",
+             "https://github.com/Mihir3009/Multi-LogiEval.git", base],
+            cwd=parent, timeout=120)
+        return base
+    except Exception as e:
+        print(f"  [multilogieval] clone failed: {e}")
+        return None
+
+
+def _multilogieval_load_all():
+    """Load all (depth, logic, rule, examples) tuples from cloned repo."""
+    import os, glob, json
+    base = _multilogieval_ensure_data()
+    if base is None: return None
+    out = []
+    for ddir in sorted(glob.glob(os.path.join(base, "data", "d*_Data"))):
+        depth = os.path.basename(ddir).split("_")[0]  # d1, d2, ...
+        for logic_dir in sorted(os.listdir(ddir)):
+            ldir = os.path.join(ddir, logic_dir)
+            if not os.path.isdir(ldir): continue
+            for fpath in sorted(glob.glob(os.path.join(ldir, "*.json"))):
+                rule = os.path.splitext(os.path.basename(fpath))[0]
+                try:
+                    items = json.load(open(fpath))
+                    if isinstance(items, dict):
+                        items = items.get("samples", []) or list(items.values())
+                    out.append((depth, logic_dir, rule, items))
+                except Exception: pass
+    return out
+
+
+@register("multilogieval")
+def eval_multilogieval(model, tokenizer, use_chat, n=None):
+    """Multi-LogiEval — zero-shot Direct (no CoT). Single forward pass per
+    example returns BOTH log-lik and constrained-greedy gen accuracy over
+    Yes/No labels. n is total cap distributed across (depth, logic) buckets.
+
+    Deviation from canonical: Patel et al. 2024 evaluate with zero-shot CoT
+    only. We strip the CoT trigger since it conflicts with our paper framing.
+    """
+    n = _clamp_n(n)
+    data = _multilogieval_load_all()
+    if data is None: return {"error": "Multi-LogiEval data load failed"}
+    bucket = {}
+    for depth, logic, rule, items in data:
+        bucket.setdefault((depth, logic), []).extend(items)
+    keys = sorted(bucket.keys())
+    sizes = [len(bucket[k]) for k in keys]
+    caps = _distribute_n(n, len(keys), sizes)
+
+    cf_prompt = ("Given the context and question, answer ONLY in 'yes' or 'no'.\n\n"
+                 "Context: N/A\nQuestion: N/A\nAnswer:")
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, ["Yes", "No"], use_chat)
+    print(f"  [multilogieval] baseline: Yes={baseline_lp['Yes']:.3f} No={baseline_lp['No']:.3f}")
+
+    results = {}
+    for (depth, logic), cap in zip(keys, caps):
+        items = bucket[(depth, logic)]
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(items, cap):
+            ctx = ex.get("context", "")
+            q = ex.get("question", "")
+            gold = str(ex.get("answer", "")).strip().lower()
+            if gold not in ("yes", "no"): continue
+            prompt = (f"Given the context and question, answer ONLY in 'yes' or 'no'.\n\n"
+                      f"Context: {ctx}\nQuestion: {q}\nAnswer:")
+            out = _score_choices_fused(model, tokenizer, prompt, ["Yes", "No"], use_chat,
+                                       baseline_logprobs=baseline_lp)
+            ll_pred = out["loglik_pred"].lower()
+            gen_pred = out["gen_pred"].lower()
+            cal_pred = (out["calibrated_pred"] or "").lower()
+            _dbg_log_loglik(f"multilogieval:{depth}_{logic}", prompt, gold, ll_pred,
+                            out["logprobs"])
+            if ll_pred == gold: ll_c += 1
+            if gen_pred == gold: gen_c += 1
+            if cal_pred == gold: cal_c += 1
+            total += 1
+        if total:
+            results[f"{depth}_{logic}"] = {"loglik_accuracy":     ll_c/total,
+                                             "gen_accuracy":        gen_c/total,
+                                             "calibrated_accuracy": cal_c/total,
+                                             "total": total,
+                                             "accuracy": ll_c/total}
+            print(f"  [multilogieval] {depth}_{logic}: ll={ll_c}/{total}={ll_c/total:.1%}  "
+                  f"gen={gen_c}/{total}={gen_c/total:.1%}  "
+                  f"cal={cal_c}/{total}={cal_c/total:.1%}")
+    all_ll = sum(v["loglik_accuracy"] * v["total"] for v in results.values())
+    all_gen = sum(v["gen_accuracy"] * v["total"] for v in results.values())
+    all_cal = sum(v["calibrated_accuracy"] * v["total"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"loglik_accuracy":     all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":        all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
+    return results
+
+
+# ==========================================================
+# NLGraph (Wang et al., NeurIPS 2023 Spotlight)
+# ==========================================================
+# 8 graph-algorithm tasks in NL. Per-task generation + regex. 0-shot here.
+
+NLGRAPH_TASKS = ["connectivity", "cycle", "shortest_path", "flow",
+                 "hamilton", "matching", "topology", "GNN"]
+
+
+def _nlgraph_ensure_repo():
+    """Clone the official Arthur-Heng/NLGraph repo to $DATA_DIR/nlgraph/NLGraph
+    on first call. Returns the local path to the NLGraph/ subdir, or None on
+    failure."""
+    import os, subprocess
+    if DATA_DIR is None: return None
+    base = os.path.join(DATA_DIR, "nlgraph", "NLGraph")
+    if os.path.isdir(os.path.join(base, "NLGraph", "connectivity")):
+        return os.path.join(base, "NLGraph")
+    parent = os.path.dirname(base)
+    os.makedirs(parent, exist_ok=True)
+    try:
+        subprocess.check_call(
+            ["git", "clone", "--depth=1",
+             "https://github.com/Arthur-Heng/NLGraph.git", base],
+            cwd=parent, timeout=120)
+        return os.path.join(base, "NLGraph")
+    except Exception as e:
+        print(f"  [nlgraph] clone failed: {e}")
+        return None
+
+
+def _nlgraph_load():
+    """Load all 8 NLGraph tasks from the official repo. Returns a list of
+    {'task','question','answer','difficulty'} dicts (1000 total). Falls back
+    to the (subset) tasksource/nlgraph HF mirror if the clone fails."""
+    import os, json
+    base = _nlgraph_ensure_repo()
+    if base is None:
+        from datasets import load_dataset
+        try:
+            return list(load_dataset("tasksource/nlgraph", split="test"))
+        except Exception as e:
+            print(f"  [nlgraph] HF fallback load failed: {e}")
+            return None
+    out = []
+    for task in NLGRAPH_TASKS:
+        fpath = os.path.join(base, task, "test.json")
+        if not os.path.isfile(fpath): continue
+        try:
+            d = json.load(open(fpath))
+        except Exception as e:
+            print(f"  [nlgraph:{task}] load failed: {e}")
+            continue
+        items = d.values() if isinstance(d, dict) else d
+        for ex in items:
+            out.append({"task": task,
+                        "question": ex.get("question", ""),
+                        "answer": ex.get("answer", ""),
+                        "difficulty": ex.get("difficulty", "")})
+    print(f"  [nlgraph] loaded {len(out)} examples across {len(NLGRAPH_TASKS)} tasks")
+    return out
+
+
+_NLGRAPH_KSHOT_CACHE = {}
+
+def _nlgraph_kshot_prompt(task):
+    """Load the canonical k-shot Direct prompt (Wang et al. 2023) for a task.
+    Prefers the local cloned NLGraph repo (populated by _nlgraph_ensure_repo);
+    falls back to GitHub download only if the local file is missing."""
+    if task in _NLGRAPH_KSHOT_CACHE:
+        return _NLGRAPH_KSHOT_CACHE[task]
+    # Try local cloned repo first
+    text = None
+    base = _nlgraph_ensure_repo()
+    if base is not None:
+        p = os.path.join(base, task, "prompt", "k-shot-prompt.txt")
+        if os.path.isfile(p):
+            try:
+                with open(p) as f:
+                    text = f.read()
+            except Exception: pass
+    if text is None:
+        import urllib.request
+        url = (f"https://raw.githubusercontent.com/Arthur-Heng/NLGraph/main/"
+               f"NLGraph/{task}/prompt/k-shot-prompt.txt")
+        try:
+            text = urllib.request.urlopen(url, timeout=20).read().decode("utf-8")
+        except Exception as e:
+            print(f"  [nlgraph:{task}] k-shot prompt fetch failed: {e}; falling back to 0-shot")
+            text = ""
+    if text and not text.endswith("\n\n"):
+        text = text.rstrip("\n") + "\n\n"
+    _NLGRAPH_KSHOT_CACHE[task] = text
+    return text
+
+
+def _nlgraph_parse_edges(question_text):
+    """Parse '(i,j)' edges from an NLGraph question. Returns list of (u,v) ints."""
+    import re as _re
+    return [(int(a), int(b)) for a, b in
+            _re.findall(r"\((\d+)\s*,\s*(\d+)\)", question_text)]
+
+
+def _nlgraph_parse_query_pair(question_text):
+    """Extract the queried node pair from connectivity-style questions, e.g.
+    'Is there a path between node 8 and node 2?' → (8, 2)."""
+    import re as _re
+    m = _re.search(r"node\s+(\d+).*?node\s+(\d+)", question_text)
+    if m: return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _nlgraph_score_per_task(task, pred_text, gold_text, question_text=""):
+    """Canonical per-task scoring matching Arthur-Heng/NLGraph evaluation/*.py.
+
+    For boolean tasks (connectivity/cycle/hamilton): match yes/no AND, where
+    applicable, validate the structured answer (path, etc.) per canonical eval.
+    """
+    import re as _re
+    pl = pred_text.lower()
+    gl = str(gold_text).lower()
+
+    def _has_yes(text):
+        return "the answer is yes" in text or _re.search(r"\byes\b", text[:50]) is not None
+
+    def _has_no(text):
+        return ("the answer is no" in text or
+                _re.search(r"\b(no|not)\b", text[:50]) is not None)
+
+    if task == "connectivity":
+        # Canonical: connectivity.py uses substring "the answer is yes" OR
+        # "there is a path between node X and node Y" for yes; inverse for no.
+        gold_yes = "yes" in gl
+        pair = _nlgraph_parse_query_pair(question_text)
+        path_phrase = ""
+        if pair:
+            path_phrase = f"there is a path between node {pair[0]} and node {pair[1]}"
+        if gold_yes:
+            return 1.0 if (("the answer is yes" in pl) or
+                           (path_phrase and path_phrase in pl)) else 0.0
+        # gold_no
+        return 1.0 if (("the answer is no" in pl) or
+                       (path_phrase and path_phrase not in pl and
+                        ("the answer is yes" not in pl))) else 0.0
+
+    if task == "cycle":
+        return 1.0 if (_has_yes(pl) if "yes" in gl else _has_no(pl)) else 0.0
+
+    if task == "hamilton":
+        # Canonical hamilton.py validates the path: parse "the path can be: X,Y,Z..."
+        # check length == #nodes, each consecutive pair is an edge, no duplicates.
+        gold_yes = "yes" in gl
+        if not gold_yes:
+            return 1.0 if _has_no(pl) else 0.0
+        # gold says yes — model must output a valid Hamiltonian path
+        edges = _nlgraph_parse_edges(question_text)
+        if not edges: return 0.0
+        nodes = set()
+        for u, v in edges: nodes.add(u); nodes.add(v)
+        n = len(nodes)
+        # Find "the path can be" or "the path is" then parse subsequent ints
+        m = _re.search(r"the path (?:can be|is)[:\s]*", pl)
+        if not m: return 0.0
+        seq_str = pl[m.end():m.end() + 400]
+        path = [int(x) for x in _re.findall(r"\d+", seq_str)][:n]
+        if len(path) != n: return 0.0
+        # All nodes distinct
+        if len(set(path)) != n: return 0.0
+        # Each consecutive pair is an edge (undirected)
+        edge_set = set()
+        for u, v in edges:
+            edge_set.add((u, v)); edge_set.add((v, u))
+        for i in range(n - 1):
+            if (path[i], path[i+1]) not in edge_set: return 0.0
+        return 1.0
+
+    if task == "shortest_path":
+        # Canonical shortest_path.py: compare extracted "weight of N" values.
+        gold_w = _re.search(r"weight of (\d+)", gl)
+        pred_w = _re.search(r"weight of (\d+)|total weight[: ]+(\d+)", pl)
+        if gold_w and pred_w:
+            gw = int(gold_w.group(1))
+            pw = int(pred_w.group(1) or pred_w.group(2))
+            return 1.0 if pw == gw else 0.0
+        return 0.0
+
+    if task == "flow":
+        # Canonical flow.py: exact-match the maximum-flow value.
+        gold_v = _re.search(r"is\s+(\d+)", gl)
+        pred_v = _re.search(r"is\s+(\d+)|flow[: ]+(\d+)", pl)
+        if gold_v and pred_v:
+            gv = int(gold_v.group(1))
+            pv = int(pred_v.group(1) or pred_v.group(2))
+            return 1.0 if pv == gv else 0.0
+        return 0.0
+
+    if task == "matching":
+        # Canonical matching.py: extract "N applicants" count, exact match.
+        gold_n = _re.search(r"(\d+)\s+applicants", gl)
+        pred_n = _re.search(r"(\d+)\s+applicants", pl)
+        if gold_n and pred_n and int(pred_n.group(1)) == int(gold_n.group(1)):
+            return 1.0
+        return 0.0
+
+    if task == "topology":
+        # Canonical topology.py: extract integer ordering, validate consistency
+        # with the partial-order constraints. Simplified here to exact-prefix
+        # match against gold ordering.
+        gold_seq = _re.findall(r"\d+", gl)
+        pred_seq = _re.findall(r"\d+", pl[:500])
+        if gold_seq and pred_seq[:len(gold_seq)] == gold_seq: return 1.0
+        return 0.0
+
+    if task == "GNN":
+        # Canonical gnn.py: per-node embedding exact match. Approximation: check
+        # all "node K: [a,b]" lines in pred match gold.
+        gold_pairs = dict(_re.findall(r"node\s*(\d+)\s*:\s*\[(\d+\s*,\s*\d+)\]", gl))
+        pred_pairs = dict(_re.findall(r"node\s*(\d+)\s*:\s*\[(\d+\s*,\s*\d+)\]", pl))
+        if not gold_pairs: return 0.0
+        norm = lambda s: s.replace(" ", "")
+        correct = sum(1 for k, v in gold_pairs.items()
+                      if k in pred_pairs and norm(pred_pairs[k]) == norm(v))
+        return correct / len(gold_pairs)
+
+    return 0.0
+
+
+@register("nlgraph_gen")
+def eval_nlgraph_gen(model, tokenizer, use_chat, n=None):
+    """NLGraph generation per-task — canonical 4-shot Direct (Wang et al. 2023).
+
+    Uses the official `k-shot-prompt.txt` from Arthur-Heng/NLGraph for each task
+    (4 demos, no CoT). Scoring uses the canonical per-task scorer (path
+    validation for hamilton, weight match for shortest_path, etc.) ported from
+    Arthur-Heng/NLGraph evaluation/*.py. n is total cap distributed across the
+    8 tasks.
+    """
+    n = _clamp_n(n)
+    ds = _nlgraph_load()
+    if ds is None: return {"error": "load failed"}
+    by_task = {}
+    for ex in ds:
+        by_task.setdefault(ex.get("task", "?"), []).append(ex)
+    tasks = sorted(by_task.keys())
+    sizes = [len(by_task[t]) for t in tasks]
+    caps = _distribute_n(n, len(tasks), sizes)
+
+    results = {}
+    for task, cap in zip(tasks, caps):
+        group = _subsample(by_task[task], cap)
+        score_sum = 0.0; total = 0
+        fs_block = _nlgraph_kshot_prompt(task)
+        for ex in group:
+            question = ex.get("question", "")
+            prompt = fs_block + question
+            gold = ex.get("answer", "")
+            pred = generate_chat(model, tokenizer, prompt, max_new_tokens=200,
+                                 use_chat=use_chat)
+            score = _nlgraph_score_per_task(task, pred, gold, question)
+            _dbg_log_gen(f"nlgraph:{task}", prompt, gold, pred, f"score={score:.2f}")
+            score_sum += score
+            total += 1
+        avg = score_sum / total if total else 0.0
+        results[task] = {"score_sum": score_sum, "total": total, "accuracy": avg}
+        print(f"  [nlgraph_gen] {task}: {score_sum:.1f}/{total} = {avg:.1%}")
+    all_s = sum(v["score_sum"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"score_sum": all_s, "total": all_t,
+                          "accuracy": all_s/all_t if all_t else 0.0}
+    return results
+
+
+# ==========================================================
+# Few-shot variants of the 0-shot benchmarks.
+#
+# Rationale: the primary adapters use 0-shot for benchmarks where that's either
+# canonical (logiqa/AGIEval) or no canonical LLM method exists (clutrr, ruletaker,
+# multilogieval, zebra_mc). A few-shot variant is provided alongside to test
+# whether format-teaching helps the model escape class-collapse.
+#
+# Demos for each benchmark are built by seeded random sampling from the same
+# pool as eval (excluded from the test sweep). Prompts are identical to the
+# 0-shot versions but with K demos prepended.
+# ==========================================================
+
+
+def _fewshot_block_from_pool(pool, k, prompt_fn, gold_fn, seed=1234, balance_by_gold=True):
+    """Return (demo_block_str, used_keys_set). `prompt_fn(ex)` produces the
+    per-example prompt ending with 'Answer:' (or similar); `gold_fn(ex)` produces
+    the gold label string. If balance_by_gold, picks demos round-robin over
+    distinct gold values.
+    """
+    import random as _random
+    rng = _random.Random(seed)
+    shuffled = list(pool)
+    rng.shuffle(shuffled)
+    picked, seen_golds = [], []
+    for ex in shuffled:
+        g = gold_fn(ex)
+        if g is None: continue
+        if balance_by_gold:
+            if g in seen_golds and len(seen_golds) < k and len(picked) + (k - len(seen_golds)) > k:
+                continue
+            if g not in seen_golds: seen_golds.append(g)
+        picked.append((ex, g))
+        if len(picked) >= k: break
+    blocks = [f"{prompt_fn(ex)} {g}" for ex, g in picked]
+    used_keys = {id(ex) for ex, _ in picked}  # use id() since structures are unhashable
+    return "\n\n".join(blocks) + ("\n\n" if blocks else ""), used_keys
+
+
+@register("ruletaker_fs")
+def eval_ruletaker_fs(model, tokenizer, use_chat, n=None):
+    """RuleTaker — 5-shot Direct variant. Same prompt + scoring as `ruletaker`
+    but with 5 balanced True/False demos from the eval pool, excluded from
+    the test sweep."""
+    n = _clamp_n(n)
+    by_depth = _ruletaker_load_by_depth()
+    if by_depth is None: return {"error": "load failed"}
+    cfgs = sorted(by_depth.keys())
+
+    # Build demo pool from a mix across depths (so demos cover curriculum range)
+    all_pool = [ex for cfg in cfgs for ex in by_depth[cfg]]
+    fs_block, demo_ids = _fewshot_block_from_pool(all_pool, k=5,
+        prompt_fn=_ruletaker_format, gold_fn=_ruletaker_gold)
+
+    sizes = [sum(1 for ex in by_depth[c] if id(ex) not in demo_ids) for c in cfgs]
+    caps = _distribute_n(n, len(cfgs), sizes)
+
+    cf_ex = {"context": "N/A", "question": "N/A"}
+    cf_prompt = fs_block + _ruletaker_format(cf_ex)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, RULETAKER_LABELS, use_chat)
+    print(f"  [ruletaker_fs] 5-shot baseline: True={baseline_lp['True']:.3f} False={baseline_lp['False']:.3f}")
+
+    results = {}
+    for cfg, cap in zip(cfgs, caps):
+        pool = [ex for ex in by_depth[cfg] if id(ex) not in demo_ids]
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(pool, cap):
+            gold = _ruletaker_gold(ex)
+            if gold is None: continue
+            prompt = fs_block + _ruletaker_format(ex)
+            out = _score_choices_fused(model, tokenizer, prompt, RULETAKER_LABELS, use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"ruletaker_fs:{cfg}", prompt, gold, out["loglik_pred"], out["logprobs"])
+            if out["loglik_pred"] == gold: ll_c += 1
+            if out["gen_pred"] == gold: gen_c += 1
+            if out["calibrated_pred"] == gold: cal_c += 1
+            total += 1
+        results[cfg] = {"loglik_accuracy": ll_c/total if total else 0.0,
+                        "gen_accuracy":    gen_c/total if total else 0.0,
+                        "calibrated_accuracy": cal_c/total if total else 0.0,
+                        "total": total,
+                        "accuracy": ll_c/total if total else 0.0}
+        print(f"  [ruletaker_fs] {cfg}: ll={ll_c}/{total}={ll_c/max(total,1):.1%}  "
+              f"gen={gen_c}/{total}={gen_c/max(total,1):.1%}  "
+              f"cal={cal_c}/{total}={cal_c/max(total,1):.1%}")
+    all_ll = sum(r["loglik_accuracy"] * r["total"] for r in results.values())
+    all_gen = sum(r["gen_accuracy"] * r["total"] for r in results.values())
+    all_cal = sum(r["calibrated_accuracy"] * r["total"] for r in results.values())
+    all_t = sum(r["total"] for r in results.values())
+    results["overall"] = {"loglik_accuracy": all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":    all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
+    return results
+
+
+@register("clutrr_fs")
+def eval_clutrr_fs(model, tokenizer, use_chat, n=None):
+    """CLUTRR — 5-shot Direct variant. Demos sampled with diverse k-hop
+    settings and kinship labels; excluded from test sweep."""
+    n = _clamp_n(n)
+    ds = _clutrr_load()
+    if ds is None: return {"error": "CLUTRR load failed"}
+    by_k = {}
+    for ex in ds:
+        by_k.setdefault(_clutrr_extract_k(ex), []).append(ex)
+
+    gold_fn = lambda ex: str(ex.get("target_text") or ex.get("target") or ex.get("answer") or "").strip().lower() or None
+    all_pool = [ex for k in sorted(by_k.keys()) if k > 0 for ex in by_k[k]]
+    fs_block, demo_ids = _fewshot_block_from_pool(all_pool, k=5,
+        prompt_fn=_clutrr_format, gold_fn=gold_fn)
+
+    ks = [k for k in sorted(by_k.keys()) if k > 0]
+    sizes = [sum(1 for ex in by_k[k] if id(ex) not in demo_ids) for k in ks]
+    caps = _distribute_n(n, len(ks), sizes)
+
+    cf_ex = {"clean_story": "N/A", "query": "('A', 'B')"}
+    cf_prompt = fs_block + _clutrr_format(cf_ex)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, CLUTRR_LABELS, use_chat)
+
+    results = {}
+    for k, cap in zip(ks, caps):
+        pool = [ex for ex in by_k[k] if id(ex) not in demo_ids]
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(pool, cap):
+            gold = gold_fn(ex)
+            if gold not in CLUTRR_LABELS: continue
+            prompt = fs_block + _clutrr_format(ex)
+            out = _score_choices_fused(model, tokenizer, prompt, CLUTRR_LABELS, use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"clutrr_fs:k={k}", prompt, gold, out["loglik_pred"], out["logprobs"])
+            if out["loglik_pred"] == gold: ll_c += 1
+            if out["gen_pred"] == gold: gen_c += 1
+            if out["calibrated_pred"] == gold: cal_c += 1
+            total += 1
+        results[f"k={k}"] = {"loglik_accuracy": ll_c/total if total else 0.0,
+                              "gen_accuracy":    gen_c/total if total else 0.0,
+                              "calibrated_accuracy": cal_c/total if total else 0.0,
+                              "total": total,
+                              "accuracy": ll_c/total if total else 0.0}
+        print(f"  [clutrr_fs] k={k}: ll={ll_c}/{total}={ll_c/max(total,1):.1%}  "
+              f"cal={cal_c}/{total}={cal_c/max(total,1):.1%}")
+    all_ll = sum(v["loglik_accuracy"] * v["total"] for v in results.values())
+    all_gen = sum(v["gen_accuracy"] * v["total"] for v in results.values())
+    all_cal = sum(v["calibrated_accuracy"] * v["total"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"loglik_accuracy": all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":    all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
+    return results
+
+
+@register("logiqa_fs")
+def eval_logiqa_fs(model, tokenizer, use_chat, n=None):
+    """LogiQA — 3-shot Direct variant (deviates from AGIEval 0-shot canonical).
+    Demos sampled with diverse A/B/C/D gold letters from the test split,
+    excluded from the eval sweep."""
+    n = _clamp_n(n)
+    ds = _logiqa_load()
+    if ds is None: return {"error": "LogiQA load failed"}
+    all_pool = list(ds)
+    fs_block, demo_ids = _fewshot_block_from_pool(all_pool, k=3,
+        prompt_fn=_logiqa_format, gold_fn=_logiqa_gold_letter)
+
+    pool = [ex for ex in all_pool if id(ex) not in demo_ids]
+
+    cf_ex = {"query": ("N/A\nQ: N/A Answer Choices: (A)N/A (B)N/A (C)N/A (D)N/A\n"
+                       "A: Among A through D, the answer is")}
+    cf_prompt = fs_block + _logiqa_format(cf_ex)
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, LOGIQA_LABELS, use_chat)
+    print(f"  [logiqa_fs] 3-shot baseline: " + " ".join(f"{l}={baseline_lp[l]:.3f}" for l in LOGIQA_LABELS))
+
+    ll_c = gen_c = cal_c = total = 0
+    for ex in _subsample(pool, n):
+        gold = _logiqa_gold_letter(ex)
+        if gold is None: continue
+        prompt = fs_block + _logiqa_format(ex)
+        out = _score_choices_fused(model, tokenizer, prompt, LOGIQA_LABELS, use_chat,
+                                   baseline_logprobs=baseline_lp)
+        _dbg_log_loglik("logiqa_fs", prompt, gold, out["loglik_pred"], out["logprobs"])
+        if out["loglik_pred"] == gold: ll_c += 1
+        if out["gen_pred"] == gold: gen_c += 1
+        if out["calibrated_pred"] == gold: cal_c += 1
+        total += 1
+    return {"loglik_accuracy": ll_c/total if total else 0.0,
+            "gen_accuracy":    gen_c/total if total else 0.0,
+            "calibrated_accuracy": cal_c/total if total else 0.0,
+            "total": total,
+            "accuracy": ll_c/total if total else 0.0,
+            "baseline_logprobs": baseline_lp}
+
+
+@register("multilogieval_fs")
+def eval_multilogieval_fs(model, tokenizer, use_chat, n=None):
+    """Multi-LogiEval — 3-shot Direct variant. Demos sampled balanced yes/no
+    from the same pool, excluded from test sweep."""
+    n = _clamp_n(n)
+    data = _multilogieval_load_all()
+    if data is None: return {"error": "Multi-LogiEval data load failed"}
+    bucket = {}
+    for depth, logic, rule, items in data:
+        bucket.setdefault((depth, logic), []).extend(items)
+
+    def _fmt(ex):
+        return (f"Given the context and question, answer ONLY in 'yes' or 'no'.\n\n"
+                f"Context: {ex.get('context','')}\nQuestion: {ex.get('question','')}\nAnswer:")
+    def _gold(ex):
+        g = str(ex.get('answer','')).strip().lower()
+        return g.capitalize() if g in ('yes','no') else None
+
+    all_pool = [ex for items in bucket.values() for ex in items]
+    fs_block, demo_ids = _fewshot_block_from_pool(all_pool, k=3,
+        prompt_fn=_fmt, gold_fn=_gold)
+
+    keys = sorted(bucket.keys())
+    sizes = [sum(1 for ex in bucket[k] if id(ex) not in demo_ids) for k in keys]
+    caps = _distribute_n(n, len(keys), sizes)
+
+    cf_prompt = fs_block + ("Given the context and question, answer ONLY in 'yes' or 'no'.\n\n"
+                             "Context: N/A\nQuestion: N/A\nAnswer:")
+    baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, ["Yes", "No"], use_chat)
+    print(f"  [multilogieval_fs] 3-shot baseline: Yes={baseline_lp['Yes']:.3f} No={baseline_lp['No']:.3f}")
+
+    results = {}
+    for (depth, logic), cap in zip(keys, caps):
+        pool = [ex for ex in bucket[(depth, logic)] if id(ex) not in demo_ids]
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(pool, cap):
+            gold = str(ex.get('answer','')).strip().lower()
+            if gold not in ("yes", "no"): continue
+            prompt = fs_block + _fmt(ex)
+            out = _score_choices_fused(model, tokenizer, prompt, ["Yes", "No"], use_chat,
+                                       baseline_logprobs=baseline_lp)
+            ll_pred = out["loglik_pred"].lower()
+            gen_pred = out["gen_pred"].lower()
+            cal_pred = (out["calibrated_pred"] or "").lower()
+            _dbg_log_loglik(f"multilogieval_fs:{depth}_{logic}", prompt, gold, ll_pred, out["logprobs"])
+            if ll_pred == gold: ll_c += 1
+            if gen_pred == gold: gen_c += 1
+            if cal_pred == gold: cal_c += 1
+            total += 1
+        if total:
+            results[f"{depth}_{logic}"] = {"loglik_accuracy": ll_c/total,
+                                             "gen_accuracy": gen_c/total,
+                                             "calibrated_accuracy": cal_c/total,
+                                             "total": total,
+                                             "accuracy": ll_c/total}
+    all_ll = sum(v["loglik_accuracy"] * v["total"] for v in results.values())
+    all_gen = sum(v["gen_accuracy"] * v["total"] for v in results.values())
+    all_cal = sum(v["calibrated_accuracy"] * v["total"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"loglik_accuracy": all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":    all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0,
+                           "baseline_logprobs": baseline_lp}
+    return results
+
+
+@register("zebra_mc_fs")
+def eval_zebra_mc_fs(model, tokenizer, use_chat, n=None):
+    """ZebraLogic mc_mode — 3-shot Direct variant. Demos sampled from the
+    dataset (excluded from eval). Choice set is per-example so we use per-example
+    calibration (same as `zebra_mc`)."""
+    from datasets import load_dataset
+    n = _clamp_n(n)
+    try:
+        ds = load_dataset("WildEval/ZebraLogic", "mc_mode", split="test")
+    except Exception as e:
+        return {"error": f"load_dataset failed: {e}"}
+    print(f"  [zebra_mc_fs] loaded {len(ds)} questions")
+
+    def extract_size(ex_id):
+        try: return ex_id.split("-")[2].replace("x", "*")
+        except Exception: return "?"
+
+    by_size = {}
+    for ex in ds:
+        by_size.setdefault(extract_size(ex["id"]), []).append(ex)
+
+    # Build 3 demos from smaller puzzles (2*2, 2*3) to minimize prompt length
+    def _zebra_fmt(ex): return f"{ex['puzzle']}\n\nQuestion: {ex['question']}\nAnswer:"
+    demo_pool = (by_size.get("2*2", []) or []) + (by_size.get("2*3", []) or [])
+    # Pick 3 diverse demos
+    import random as _random
+    rng = _random.Random(1234)
+    rng.shuffle(demo_pool)
+    demos = []
+    seen_answers = []
+    for ex in demo_pool:
+        a = str(ex["answer"])
+        if a in seen_answers and len(demos) + 1 < 3: continue
+        seen_answers.append(a)
+        demos.append(f"{_zebra_fmt(ex)} {a}")
+        if len(demos) >= 3: break
+    fs_block = ("\n\n".join(demos) + "\n\n") if demos else ""
+    demo_ids = {id(ex) for ex in demo_pool[:3]}
+
+    sizes = sorted(by_size.keys(), key=lambda s: tuple(int(x) for x in s.split("*")) if "*" in s else (99,99))
+    size_counts = [sum(1 for ex in by_size[s] if id(ex) not in demo_ids) for s in sizes]
+    caps = _distribute_n(n, len(sizes), size_counts)
+
+    results = {}
+    for size, cap in zip(sizes, caps):
+        pool = [ex for ex in by_size[size] if id(ex) not in demo_ids]
+        ll_c = gen_c = cal_c = total = 0
+        for ex in _subsample(pool, cap):
+            prompt = fs_block + _zebra_fmt(ex)
+            choices = [str(c) for c in ex["choices"]]
+            cf_prompt = fs_block + f"N/A\n\nQuestion: N/A\nAnswer:"
+            baseline_lp = _content_free_baseline(model, tokenizer, cf_prompt, choices, use_chat)
+            out = _score_choices_fused(model, tokenizer, prompt, choices, use_chat,
+                                       baseline_logprobs=baseline_lp)
+            _dbg_log_loglik(f"zebra_mc_fs:{size}", prompt, ex["answer"],
+                            out["loglik_pred"], out["logprobs"])
+            if out["loglik_pred"] == ex["answer"]: ll_c += 1
+            if out["gen_pred"] == ex["answer"]: gen_c += 1
+            if out["calibrated_pred"] == ex["answer"]: cal_c += 1
+            total += 1
+        results[size] = {"loglik_accuracy": ll_c/total if total else 0.0,
+                          "gen_accuracy":    gen_c/total if total else 0.0,
+                          "calibrated_accuracy": cal_c/total if total else 0.0,
+                          "total": total,
+                          "accuracy": ll_c/total if total else 0.0}
+        print(f"  [zebra_mc_fs] size={size:>5} n={total:>3}  ll={ll_c/max(total,1):.1%}  "
+              f"cal={cal_c/max(total,1):.1%}")
+    all_ll = sum(v["loglik_accuracy"] * v["total"] for v in results.values())
+    all_gen = sum(v["gen_accuracy"] * v["total"] for v in results.values())
+    all_cal = sum(v["calibrated_accuracy"] * v["total"] for v in results.values())
+    all_t = sum(v["total"] for v in results.values())
+    results["overall"] = {"loglik_accuracy": all_ll/all_t if all_t else 0.0,
+                           "gen_accuracy":    all_gen/all_t if all_t else 0.0,
+                           "calibrated_accuracy": all_cal/all_t if all_t else 0.0,
+                           "total": all_t,
+                           "accuracy": all_ll/all_t if all_t else 0.0}
     return results
 
 

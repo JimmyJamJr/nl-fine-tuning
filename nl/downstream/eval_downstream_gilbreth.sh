@@ -11,55 +11,63 @@
 #SBATCH -p a30
 #SBATCH -q standby
 
+# Gilbreth launcher (A30 GPUs, standby QoS 4h walltime).
+# Scratch is NOT shared with Gautschi — checkpoints must be rsync'd to Gilbreth
+# separately, and model aliases use explicit `name=/scratch/gilbreth/...` paths
+# (MODEL_REGISTRY's job_<id>/ references won't resolve here).
+
 set -euo pipefail
 module load conda
 conda activate search
 
-# Gilbreth-local scratch (Gautschi scratch is NOT shared across clusters)
 export SCRATCH="/scratch/gilbreth/$USER"
 export HF_HOME="$SCRATCH/model_cache"
+# Cache-only (pre-populated by cache_datasets.sh on Gilbreth).
+export HF_DATASETS_OFFLINE=1
 export HF_HUB_OFFLINE=0
 export TRITON_CACHE_DIR="$SCRATCH/triton_cache"
 mkdir -p slurm_logs "$SCRATCH/triton_cache" "$SCRATCH/model_cache"
 export PYTHONUNBUFFERED=1
+
+# Propagate HF auth so streaming datasets (Lichess/FOLIO gated) don't hit
+# anonymous rate limits / auth errors.
+if [ -f "$HOME/.cache/huggingface/token" ]; then
+    export HF_TOKEN="$(cat "$HOME/.cache/huggingface/token")"
+    export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+fi
 if [ -f "$(dirname "$0")/.env" ]; then
     source "$(dirname "$0")/.env"
 fi
 
 cd "$SCRATCH/nl_eval"
 
-# Default models use explicit 'name=path' aliases pointing at the Gilbreth-local
-# copies that were rsync'd in from Gautschi. Override via env var.
-MODELS="${MODELS:-base instruct_only=$SCRATCH/models/instruct_only 6pct_L16=$SCRATCH/models/6pct_L16 6pct_L75=$SCRATCH/models/6pct_L75}"
-BENCHMARKS="${BENCHMARKS:-zebra_mc legal}"
-# Full test set by default. Only cap the slow generation-heavy benchmarks.
-N_OVERRIDES="${N_OVERRIDES:-blocksworld=50 blocksworld_first=50 mystery_blocksworld=50 mystery_blocksworld_first=50 logistics=50 logistics_first=50 chess_mate=50 chess_mate_first=50 stepgame_gen=100 proofwriter_gen=200 proofwriter_cwa_gen=200}"
-DEBUG_SAMPLES="${DEBUG_SAMPLES:-0}"  # set to e.g. 3 to print sample model outputs per benchmark
+# Default models: explicit name=path aliases pointing at Gilbreth-local copies.
+# Override via env var. Use the same alias names the paper tables use so output
+# JSONs are directly comparable across clusters.
+MODELS="${MODELS:-base instruct_only=$SCRATCH/models/instruct_only 6pct_L16=$SCRATCH/models/6pct_L16 6pct_L32=$SCRATCH/models/6pct_L32 6pct_L75=$SCRATCH/models/6pct_L75}"
+
+# Default benchmarks: all 14 primary + 5 few-shot variants.
+BENCHMARKS="${BENCHMARKS:-proofwriter proofwriter_cwa prontoqa_ood clutrr clutrr_fs stepgame folio logiqa logiqa_fs ruletaker ruletaker_fs logicbench_bqa logicbench_mcqa multilogieval multilogieval_fs nlgraph_gen legal zebra_mc zebra_mc_fs}"
+
+N="${N:-1000}"
+DEBUG_SAMPLES="${DEBUG_SAMPLES:-1}"
 OUTPUT="${OUTPUT:-results/eval_gilbreth_${SLURM_JOB_ID}.json}"
 
-# Cluster-specific paths
 HF_CACHE="${HF_CACHE:-$SCRATCH/model_cache}"
 PROMPTS_DIR="${PROMPTS_DIR:-$SCRATCH/nl_eval/prompts}"
-# NOTE: MODEL_REGISTRY aliases rely on job_<id>/ dirs under this root. Gilbreth
-# doesn't mount Gautschi's nl_output tree, so we use explicit name=/path aliases
-# for MODELS instead (see above). CHECKPOINTS_ROOT is still passed in case a
-# registry alias ever gets used here — point it at whatever exists locally.
 CHECKPOINTS_ROOT="${CHECKPOINTS_ROOT:-$SCRATCH/nl_output/search}"
 DATA_DIR="${DATA_DIR:-$SCRATCH/nl_eval}"
 
-echo "Models:           $MODELS"
-echo "Benchmarks:       $BENCHMARKS"
-echo "n_overrides:      $N_OVERRIDES"
-echo "Output:           $OUTPUT"
-echo "hf_cache:         $HF_CACHE"
-echo "prompts_dir:      $PROMPTS_DIR"
-echo "checkpoints_root: $CHECKPOINTS_ROOT"
-echo "data_dir:         $DATA_DIR"
+echo "Models:      $MODELS"
+echo "Benchmarks:  $BENCHMARKS"
+echo "n:           $N"
+echo "Output:      $OUTPUT"
+echo "data_dir:    $DATA_DIR"
 
 python eval_downstream.py \
     --models $MODELS \
     --benchmarks $BENCHMARKS \
-    --n-per-benchmark $N_OVERRIDES \
+    --n "$N" \
     --debug-samples "$DEBUG_SAMPLES" \
     --output "$OUTPUT" \
     --hf-cache "$HF_CACHE" \

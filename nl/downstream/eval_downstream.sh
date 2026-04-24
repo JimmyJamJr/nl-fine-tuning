@@ -17,28 +17,38 @@ conda activate search
 
 export SCRATCH="${SCRATCH:-/scratch/gautschi/$USER}"
 export HF_HOME="$SCRATCH/model_cache"
+# Use cached datasets only (pre-populated by setup_cache_datasets.py).
+export HF_DATASETS_OFFLINE=1
 export HF_HUB_OFFLINE=0
 export TRITON_CACHE_DIR="$SCRATCH/triton_cache"
 mkdir -p "$SCRATCH/triton_cache" "$SCRATCH/model_cache"
 export PYTHONUNBUFFERED=1
+# Propagate HF auth so streaming datasets don't hit anonymous rate limits.
+if [ -f "$HOME/.cache/huggingface/token" ]; then
+    export HF_TOKEN="$(cat "$HOME/.cache/huggingface/token")"
+    export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+fi
 if [ -f "$(dirname "$0")/.env" ]; then
     source "$(dirname "$0")/.env"
 fi
 
 cd /home/huan2073/nl-fine-tuning/nl/downstream
 
-# Defaults: base + instruct + 6% low-L + 6% high-L on zebra + legal
-MODELS="${MODELS:-base instruct_only 6pct_L16 6pct_L75}"
-BENCHMARKS="${BENCHMARKS:-zebra_mc legal}"
-# Full test set by default. Only cap the slow generation-heavy benchmarks.
-# Override via env.
-N_OVERRIDES="${N_OVERRIDES:-blocksworld=50 blocksworld_first=50 mystery_blocksworld=50 mystery_blocksworld_first=50 logistics=50 logistics_first=50 chess_mate=50 chess_mate_first=50 stepgame_gen=100 proofwriter_gen=200 proofwriter_cwa_gen=200}"
-DEBUG_SAMPLES="${DEBUG_SAMPLES:-0}"  # set to e.g. 3 to print sample model outputs per benchmark
+# Legacy Gautschi h100 launcher. For current runs prefer eval_full_n1000.sh
+# (smallgpu, 1 GPU, 8h walltime, takes $MODEL env var, one model per job).
+# This script is a multi-model runner kept for ad-hoc sweeps.
+
+# Defaults: base + instruct + a curriculum-depth sweep
+MODELS="${MODELS:-base instruct_only 6pct_L8 6pct_L16 6pct_L32 6pct_L48 6pct_L64 6pct_L75}"
+# Default to the 14 primary benchmarks + 5 few-shot variants (19 total).
+BENCHMARKS="${BENCHMARKS:-proofwriter proofwriter_cwa prontoqa_ood clutrr clutrr_fs stepgame folio logiqa logiqa_fs ruletaker ruletaker_fs logicbench_bqa logicbench_mcqa multilogieval multilogieval_fs nlgraph_gen legal zebra_mc zebra_mc_fs}"
+N="${N:-1000}"
+DEBUG_SAMPLES="${DEBUG_SAMPLES:-1}"  # print 1 sample per subtask for inspection
 OUTPUT="${OUTPUT:-results/eval_${SLURM_JOB_ID}.json}"
 
 # Cluster-specific paths (override via env if layout changes)
 HF_CACHE="${HF_CACHE:-$SCRATCH/model_cache}"
-PROMPTS_DIR="${PROMPTS_DIR:-$(dirname "$0")/prompts}"
+PROMPTS_DIR="${PROMPTS_DIR:-/home/huan2073/nl-fine-tuning/nl/downstream/prompts}"
 CHECKPOINTS_ROOT="${CHECKPOINTS_ROOT:-$SCRATCH/nl_output/search}"
 DATA_DIR="${DATA_DIR:-$SCRATCH/nl_eval}"
 
@@ -54,7 +64,7 @@ echo "data_dir:         $DATA_DIR"
 python eval_downstream.py \
     --models $MODELS \
     --benchmarks $BENCHMARKS \
-    --n-per-benchmark $N_OVERRIDES \
+    --n "$N" \
     --debug-samples "$DEBUG_SAMPLES" \
     --output "$OUTPUT" \
     --hf-cache "$HF_CACHE" \
