@@ -224,6 +224,19 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     if [ $EXIT_CODE -eq 0 ]; then
         echo "SUCCESS $(date)"
         rm -f "$RESTART_FLAG"
+
+        # Auto-shutdown the RunPod pod on successful completion.
+        # Set SHUTDOWN_ON_SUCCESS=false to disable. 60s grace period for any
+        # tail logs / final rsync to flush.
+        if [ "${SHUTDOWN_ON_SUCCESS:-true}" = "true" ]; then
+            if [ -n "${RUNPOD_POD_ID:-}" ] && command -v runpodctl >/dev/null 2>&1; then
+                echo "[SHUTDOWN] Training complete — stopping pod $RUNPOD_POD_ID in 60s. Cancel with Ctrl-C."
+                sleep 60
+                runpodctl stop pod "$RUNPOD_POD_ID" || echo "[SHUTDOWN] runpodctl stop failed"
+            else
+                echo "[SHUTDOWN] Skipping auto-shutdown (RUNPOD_POD_ID unset or runpodctl missing)"
+            fi
+        fi
         exit 0
     elif [ -f "$RESTART_FLAG" ]; then
         echo "[OOM] Restarting with reduced batch size..."
