@@ -115,14 +115,20 @@ USE_LIGER=false               # Pythia not supported
 USE_CHUNKED_CE=true
 CE_CHUNK_SIZE=4096
 
-# Evaluation
+# Evaluation — all in-training evals OFF; eval checkpoints offline instead.
+# Stage advancement is driven by accuracy_threshold + recent_losses, independent
+# of these flags. stage_checkpoints/ and persistent_checkpoints/ still written.
 EVAL_SAMPLES=500
-PRINT_EVAL_EXAMPLES=5
-DO_BASELINE=true
-DO_FINAL_EVAL=true
-DO_REDACTED_EVAL=true
-DO_SEEN_EVAL=true
-DO_STAGE_EVAL=true
+PRINT_EVAL_EXAMPLES=0
+DO_BASELINE=false
+DO_FINAL_EVAL=false
+DO_REDACTED_EVAL=false
+DO_SEEN_EVAL=false
+DO_STAGE_EVAL=false
+
+# Rolling checkpoint window. stage_checkpoints/ + persistent_checkpoints/ are
+# kept indefinitely; this only limits the regular checkpoint-XXXXX/ dirs.
+SAVE_TOTAL_LIMIT="${SAVE_TOTAL_LIMIT:-2}"
 
 PREV_JOB_ID="${PREV_JOB_ID:-}"
 
@@ -177,6 +183,7 @@ ARGS=(
 
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
+    --save_total_limit "$SAVE_TOTAL_LIMIT"
 
     --use_packing
 

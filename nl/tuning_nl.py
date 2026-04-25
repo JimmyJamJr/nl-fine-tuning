@@ -2959,6 +2959,8 @@ def main():
                    help="Run greedy eval every N steps (0=disabled, useful for no-curriculum runs)")
     p.add_argument("--persist_every", type=int, default=2000,
                    help="Save persistent checkpoint every N steps (not rotated by save_total_limit). 0=disabled.")
+    p.add_argument("--save_total_limit", type=int, default=20,
+                   help="Number of rolling checkpoint-* dirs to keep. stage_checkpoints/ and persistent_checkpoints/ are unaffected.")
     p.add_argument("--lr_reset_on_stage", action="store_true",
                    help="[DEPRECATED: use --stage_schedule warmup_reset] Reset LR scheduler on stage advance")
     p.add_argument("--lr_reset_warmup", type=int, default=50,
@@ -3575,7 +3577,7 @@ def main():
         report_to="none",
         save_strategy="steps",
         save_steps=500,
-        save_total_limit=20,
+        save_total_limit=args.save_total_limit,
         save_safetensors=True,
         bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
