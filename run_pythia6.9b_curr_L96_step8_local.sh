@@ -1,11 +1,11 @@
 #!/bin/bash
 # ============================================================================
 # Local (non-SLURM) launcher for Pythia 6.9B curriculum training.
-# Adapted from run_pythia1.4b_curr_L64_step8_local.sh for a 2x H200 141GB pod.
+# Adapted from run_pythia1.4b_curr_L64_step8_local.sh for a 4x H200 141GB pod.
 #
 # Target: L=96 step=8 (matches Pythia 160M/410M/1B paper runs for direct
 # apples-to-apples scaling comparison).
-# Effective batch: 2 GPU x 24 x 8 = 384 (matches other Pythia scales).
+# Effective batch: 4 GPU x 24 x 4 = 384 (matches other Pythia scales).
 # LR: 2e-5 (scaled down from 5e-5 at smaller scales).
 #
 # Usage:
@@ -44,7 +44,7 @@ export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
 # ========== Hardware ==========
-GPUS_PER_NODE="${GPUS_PER_NODE:-2}"
+GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
 TOTAL_CPUS="$(nproc)"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
 export MKL_NUM_THREADS="$OMP_NUM_THREADS"
@@ -81,9 +81,9 @@ nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 TASK="search"
 MODEL_NAME="EleutherAI/pythia-6.9b"
 
-# Training — eff_batch = 2 GPU x 24 x 8 = 384 (matches Pythia 1B/1.4B optimal).
-BATCH_SIZE=24
-GRADIENT_ACCUMULATION_STEPS=8
+# Training — eff_batch = 4 GPU x 24 x 4 = 384 (matches Pythia 1B/1.4B optimal).
+BATCH_SIZE="${BATCH_SIZE:-24}"
+GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-4}"
 LEARNING_RATE=2e-5
 WARMUP_STEPS=400
 SEED=1234
