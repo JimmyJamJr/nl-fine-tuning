@@ -17,6 +17,15 @@ import numpy as np
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 
+# PyTorch 2.6+ defaults torch.load to weights_only=True, which rejects the
+# numpy RNG state pickled by HF Trainer in rng_state_*.pth. We trust our own
+# checkpoints, so override the default to keep resume working.
+_torch_load_orig = torch.load
+def _torch_load_compat(*args, **kwargs):
+    kwargs.setdefault("weights_only", False)
+    return _torch_load_orig(*args, **kwargs)
+torch.load = _torch_load_compat
+
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
