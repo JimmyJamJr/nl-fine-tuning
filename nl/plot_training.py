@@ -1484,13 +1484,13 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
         baseline_label = labels_list[0]
         # baseline_L -> first_pflops dict for quick lookup
         baseline_stages = {L: pf for pf, L in per_run_stages[baseline_label]["pflops"]
-                           if L > 0}
+                           if L > 0 and pf > 0}
         fig, ax = plt.subplots(figsize=(14, 7))
         bar_width = 0
         # Collect all variant L values to size bars proportionally
         for v_idx, label in enumerate(labels_list[1:], start=1):
             md = runs[label]
-            v_stages = {L: pf for pf, L in per_run_stages[label]["pflops"] if L > 0}
+            v_stages = {L: pf for pf, L in per_run_stages[label]["pflops"] if L > 0 and pf > 0}
             shared_Ls = sorted(set(v_stages.keys()) & set(baseline_stages.keys()))
             if not shared_Ls:
                 continue
