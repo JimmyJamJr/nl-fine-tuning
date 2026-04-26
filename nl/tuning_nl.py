@@ -3603,6 +3603,8 @@ def main():
         gradient_checkpointing_kwargs={"use_reentrant": False} if args.gradient_checkpointing else None,
 
         ignore_data_skip=True,
+
+        average_tokens_across_devices=False,
     )
 
     # Baseline runner uses pre-generated eval data

@@ -1,0 +1,10 @@
+{
+  "job_id": "local_20260417_132548",
+  "scratch_dir": "/home/ray/scratch",
+  "created_at": "2026-04-17T16:01:57.582378",
+  "resume_from": "/home/ray/scratch/nl_output/search/job_local_20260417_132548/checkpoint-11000",
+  "cli": "tuning_nl.py --task search --model_name EleutherAI/pythia-1.4b --cache_dir /home/ray/scratch/model_cache --output_dir /home/ray/scratch/nl_output --scratch_dir /home/ray/scratch --job_id local_20260417_132548 --batch_size 96 --gradient_accumulation_steps 1 --learning_rate 5e-5 --warmup_steps 200 --seed 1234 --num_shots 0 --first_token_soft_weight 0.0 --n_stages 8 --base_alpha 0.1 --max_alpha 1.0 --accuracy_threshold 0.98 --min_steps_per_stage 200 --check_every 25 --accuracy_window 200 --eval_every_steps 1000 --max_input_size 384 --max_lookahead 64 --max_frontier_size 12 --max_branch_size 12 --requested_backtrack 3 --eval_samples 500 --print_eval_examples 5 --use_packing --linear_lookahead --base_lookahead 8 --lookahead_step 8 --gradient_checkpointing --use_chunked_ce --ce_chunk_size 4096 --do_baseline --do_final_eval --do_redacted_eval --do_seen_eval --do_stage_eval",
+  "world_size": 4,
+  "eval_fingerprint_hard": "f737678f1df7",
+  "eval_fingerprint_easy": "77a2a2e72b64"
+}
