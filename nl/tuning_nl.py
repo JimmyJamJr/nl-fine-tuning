@@ -341,6 +341,8 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
             if not (h.get("resume") and h.get("tokens", -1) == 0)
         ]
         rank_print(f"[CURRICULUM] Restored {len(curriculum.loss_history)} loss records from JSONL (truncated to step {resume_step_from_ckpt})")
+        # Restore cumulative_tokens for PFLOPS-milestone tracking
+        curriculum._cumulative_tokens = sum(int(h.get("tokens", 0)) for h in curriculum.loss_history)
     else:
         # Fall back to loss_history.json
         loss_path = os.path.join(output_dir, "loss_history.json")
@@ -355,6 +357,7 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
                     and not (h.get("resume") and h.get("tokens", -1) == 0)
                 ]
                 rank_print(f"[CURRICULUM] Restored {len(curriculum.loss_history)} loss records from JSON")
+                curriculum._cumulative_tokens = sum(int(h.get("tokens", 0)) for h in curriculum.loss_history)
             except Exception as e:
                 rank_print(f"[CURRICULUM][WARN] Failed to restore loss history: {e}")
 
@@ -1944,6 +1947,12 @@ class FirstTokenCurriculum(TrainerCallback):
         self.persist_every = persist_every
         self._last_persist_step = 0
 
+        # Cumulative PFLOPS milestones: save checkpoint at each, then optionally stop
+        self.pflops_milestones = []  # list of float PFLOPS thresholds (sorted)
+        self.pflops_milestones_done = set()  # set of milestones already saved
+        self.max_total_pflops = 0.0  # 0 = disabled
+        self._cumulative_tokens = 0  # restored from loss_history on resume
+
         # Resume tracking (resume markers are real entries with "resume" flag, not fake data)
         self.resume_points = []  # List of step numbers where resumes occurred
         self._mark_next_as_resume = False  # Flag to mark next entry as resume point
@@ -2305,6 +2314,44 @@ class FirstTokenCurriculum(TrainerCallback):
                 except Exception:
                     pass
 
+        # PFLOPS milestone checkpoints + max_total_pflops stop
+        if (self.pflops_milestones or self.max_total_pflops > 0) and self.flops_per_token:
+            cum_pflops = self._cumulative_tokens * self.flops_per_token / 1e15
+            for m in sorted(self.pflops_milestones):
+                if m not in self.pflops_milestones_done and cum_pflops >= m:
+                    m_dir = os.path.join(args.output_dir, "pflops_checkpoints", f"pflops_{int(m)}")
+                    # If checkpoint already saved (e.g., from a prior run that crossed this milestone), skip.
+                    if os.path.isdir(m_dir) and os.path.isfile(os.path.join(m_dir, "model.safetensors.index.json")) or \
+                       os.path.isdir(m_dir) and os.path.isfile(os.path.join(m_dir, "model.safetensors")):
+                        if is_main_process():
+                            rank_print(f"[PFLOPS] Milestone {int(m)} already saved at {m_dir} — skipping")
+                        self.pflops_milestones_done.add(m)
+                        continue
+                    try:
+                        if is_main_process():
+                            rank_print(f"[PFLOPS] Reached {cum_pflops:.0f} PFLOPS — saving checkpoint at milestone {int(m)} → {m_dir}")
+                        self.trainer.save_model(m_dir)
+                        barrier()
+                        if is_main_process():
+                            _save_curriculum_state(m_dir, self.dataset.stage,
+                                                   self.stage_start_step, current_wall_time,
+                                                   first_token_correct=self.trainer.first_token_correct,
+                                                   full_word_correct=self.trainer.full_word_correct,
+                                                   recent_losses=self.trainer.recent_losses,
+                                                   samples_this_stage=self.samples_this_stage,
+                                                   tokens_this_stage=self.tokens_this_stage)
+                    except Exception as e:
+                        rank_print(f"[PFLOPS] Warning: could not save milestone {int(m)}: {e}")
+                    self.pflops_milestones_done.add(m)
+            if self.max_total_pflops > 0 and cum_pflops >= self.max_total_pflops:
+                if is_main_process():
+                    rank_print(f"[PFLOPS] Reached {cum_pflops:.0f} PFLOPS ≥ max {self.max_total_pflops:.0f} — stopping training")
+                # Force a FULL HF Trainer checkpoint so resume can extend max_total_pflops cleanly
+                # without losing the last save_steps worth of training.
+                control.should_save = True
+                control.should_training_stop = True
+                self.finished = True
+
         # Persistent checkpoint (not rotated by save_total_limit)
         if (self.persist_every > 0
                 and state.global_step >= self._last_persist_step + self.persist_every):
@@ -2526,6 +2573,7 @@ class FirstTokenCurriculum(TrainerCallback):
                 self._mark_next_as_resume = False
 
             self.loss_history.append(entry)
+            self._cumulative_tokens += int(entry.get("tokens", 0))
 
             # JSONL incremental persistence (survives preemption between checkpoints)
             if is_main_process():
@@ -2714,6 +2762,10 @@ class FirstTokenCurriculum(TrainerCallback):
                                                                                                   'linear_lookahead',
                                                                                                   False)
                               else "[FINISHED] Curriculum complete")
+                    # Force a FULL HF Trainer checkpoint (model + optimizer + scheduler + rng + trainer_state)
+                    # so future runs can resume training cleanly without losing optimizer state.
+                    # Stage_checkpoints/ above is model-only (via save_model); this gives a full resume target.
+                    control.should_save = True
                     control.should_training_stop = True
                     self.finished = True
                 else:
@@ -2968,6 +3020,11 @@ def main():
                    help="Run greedy eval every N steps (0=disabled, useful for no-curriculum runs)")
     p.add_argument("--persist_every", type=int, default=2000,
                    help="Save persistent checkpoint every N steps (not rotated by save_total_limit). 0=disabled.")
+    p.add_argument("--save_pflops_milestones", type=str, default="",
+                   help="Comma-separated PFLOPS values; save persistent checkpoint when cumulative compute first crosses each. "
+                        "Saved to pflops_checkpoints/pflops_<int>/. e.g. '5362,25273,83770'.")
+    p.add_argument("--max_total_pflops", type=float, default=0.0,
+                   help="Stop training when cumulative compute reaches this many PFLOPS. 0=disabled.")
     p.add_argument("--save_total_limit", type=int, default=20,
                    help="Number of rolling checkpoint-* dirs to keep. stage_checkpoints/ and persistent_checkpoints/ are unaffected.")
     p.add_argument("--lr_reset_on_stage", action="store_true",
@@ -3384,6 +3441,17 @@ def main():
         plateau_threshold=getattr(args, 'plateau_threshold', 0.02),
         plateau_cooldown=getattr(args, 'plateau_cooldown', 10000),
     )
+
+    # Wire up PFLOPS milestones + max_total_pflops from CLI args
+    if getattr(args, 'save_pflops_milestones', '').strip():
+        try:
+            curriculum.pflops_milestones = sorted({float(x) for x in args.save_pflops_milestones.split(',') if x.strip()})
+            rank_print(f"[PFLOPS] Will save milestones at: {curriculum.pflops_milestones}")
+        except Exception as e:
+            rank_print(f"[PFLOPS] Failed to parse --save_pflops_milestones={args.save_pflops_milestones!r}: {e}")
+    if getattr(args, 'max_total_pflops', 0.0) > 0:
+        curriculum.max_total_pflops = float(args.max_total_pflops)
+        rank_print(f"[PFLOPS] Will stop training at {curriculum.max_total_pflops} PFLOPS")
 
     if resume_ckpt:
         if _try_restore_curriculum_state(resume_ckpt, dataset, curriculum):
