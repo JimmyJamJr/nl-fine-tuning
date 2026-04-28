@@ -1141,11 +1141,14 @@ class PackedSequenceTrainer(Trainer):
     Supports Qwen and GPT-NeoX (Pythia) architectures.
     """
 
-    def __init__(self, *args, first_token_soft_weight=0.3, accuracy_window=200, ce_chunk_size=4096, **kwargs):
+    def __init__(self, *args, first_token_soft_weight=0.3, accuracy_window=1000, ce_chunk_size=4096, **kwargs):
         super().__init__(*args, **kwargs)
         self.first_token_soft_weight = first_token_soft_weight
         self.ce_chunk_size = ce_chunk_size
         self.recent_losses = deque(maxlen=100)
+        # accuracy_window is the *global* sample count (total across ranks).
+        # Predictions are all-gathered across ranks each microbatch so all ranks
+        # see the same deque state, eliminating GPU-count-dependent staleness.
         self.first_token_correct = deque(maxlen=accuracy_window)
         self.full_word_correct = deque(maxlen=accuracy_window)
         self._last_search_loss = None
@@ -1586,12 +1589,13 @@ class PackedSequenceTrainer(Trainer):
                 pred_matches_cpu = pred_matches.cpu()
                 valid_mask_cpu = valid_mask.cpu()
 
-                # First-token accuracy (pure Python loop, no GPU sync)
-                for j, si in enumerate(first_si_list):
-                    self.first_token_correct.append(first_pred_list[j] in sequence_info[si]["valid_first_targets"])
+                # First-token accuracy: build local per-sequence boolean list
+                local_first = [first_pred_list[j] in sequence_info[si]["valid_first_targets"]
+                               for j, si in enumerate(first_si_list)]
 
-                # Full-word accuracy (pure Python loop on CPU tensors)
+                # Full-word accuracy: build local per-sequence boolean list
                 is_search_cpu = is_search.cpu()
+                local_full = []
                 for si in range(S):
                     if not is_search_cpu[si]:
                         continue  # skip pretrain samples
@@ -1600,8 +1604,23 @@ class PackedSequenceTrainer(Trainer):
                         continue
                     span_valid = valid_mask_cpu[s:e]
                     if span_valid.any():
-                        self.full_word_correct.append(pred_matches_cpu[s:e][span_valid].all().item())
+                        local_full.append(pred_matches_cpu[s:e][span_valid].all().item())
                     # If no valid labels in span, skip (don't inflate accuracy)
+
+                # All-gather predictions across ranks so the rolling buffers are
+                # GPU-count independent (full eff_batch's predictions per microbatch).
+                # Tiny payload (a few hundred bools), negligible overhead.
+                if torch.distributed.is_available() and torch.distributed.is_initialized():
+                    ws = torch.distributed.get_world_size()
+                    g_first = [None] * ws
+                    g_full = [None] * ws
+                    torch.distributed.all_gather_object(g_first, local_first)
+                    torch.distributed.all_gather_object(g_full, local_full)
+                    self.first_token_correct.extend(b for sl in g_first for b in sl)
+                    self.full_word_correct.extend(b for sl in g_full for b in sl)
+                else:
+                    self.first_token_correct.extend(local_first)
+                    self.full_word_correct.extend(local_full)
         else:
             loss = torch.tensor(0.0, device=device, requires_grad=True)
 
@@ -2993,8 +3012,8 @@ def main():
     p.add_argument("--accuracy_threshold", type=float, default=0.98)
     p.add_argument("--min_steps_per_stage", type=int, default=500)
     p.add_argument("--check_every", type=int, default=50)
-    p.add_argument("--accuracy_window", type=int, default=200,
-                   help="Rolling window size (per GPU) for advancement accuracy check")
+    p.add_argument("--accuracy_window", type=int, default=1000,
+                   help="Rolling window size (TOTAL across ranks, after all-gather) for advancement accuracy check. Default 1000 gives ~±0.9pp noise at p=0.98.")
 
     # Task params
     p.add_argument("--max_input_size", type=int, default=256)
