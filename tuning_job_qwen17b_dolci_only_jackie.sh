@@ -65,8 +65,11 @@ ulimit -n 131072 || true
 TASK="search"   # task name unchanged for code path; with ratio=1.0 it's pure pretrain
 MODEL_NAME="Qwen/Qwen3-1.7B"
 
-BATCH_SIZE="${BATCH_SIZE:-32}"
-GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-4}"
+# bs=64, ga=2 (eff=768): kernel-launch + occupancy gain over bs=32 ga=4 with GC
+# on (~5–10% throughput). Memory ~42 GiB peak per A100 80GB (was ~31 GiB at
+# bs=32). Override via env if you need to revert (e.g. on smaller GPUs).
+BATCH_SIZE="${BATCH_SIZE:-64}"
+GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-2}"
 LEARNING_RATE=5e-5
 WARMUP_STEPS=100
 SEED=1234
