@@ -1400,17 +1400,15 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
             sm_stride = max(len(md["h"]) // 10000, 1)
             ax.plot(x_sm[::sm_stride], md["smoothed"][::sm_stride], linewidth=1.5,
                     color=md["color"], label=label)
-            # Auto-pick label density: ≤16 stages = label all, more = downsample to ~16
-            n_stages = len(md["transitions"])
-            labeled_every = max(1, n_stages // 16)
-            # Alternate above/below per run so labels from different runs don't collide
+            # Label only the last reached L per run, alternating above/below to reduce overlap
             place_above = (r_idx % 2 == 0)
-            for idx, L in md["transitions"]:
-                if labeled_every > 1 and L % labeled_every != 0:
-                    continue
+            if md["transitions"]:
+                idx, L = md["transitions"][-1]
                 y_text = md["smoothed"][idx] * (1.3 if place_above else 0.75)
-                ax.text(x_sm[idx], y_text, f"L={L}", fontsize=6, color=md["color"],
-                        ha="center", va="bottom" if place_above else "top")
+                ax.text(x_sm[idx], y_text, f"L={L}", fontsize=7, color=md["color"],
+                        ha="center", va="bottom" if place_above else "top",
+                        bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=md["color"],
+                                  lw=0.5, alpha=0.9))
         ax.set_xlabel(xlabel)
         ax.set_ylabel('Loss')
         ax.set_yscale('log')
@@ -1441,17 +1439,16 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
         per_run_stages[label] = {"pflops": stages_pflops, "gpu_hours": stages_gpuh}
 
     def _annotate_stages_boxed(ax, stages, color, labeled_every=1, y_offset=0.5):
-        """plot_step_comparison-style boxed L=N labels with white bg + colored border."""
-        Ls = sorted({L for _, L in stages if L > 0})
-        for L in Ls:
-            if labeled_every > 1 and L % labeled_every != 0:
-                continue
-            # Find x for first occurrence of this L
-            x = next(x for x, l in stages if l == L)
-            ax.text(x, L + y_offset, f"L={L}", fontsize=7, color=color,
-                    ha="center", va="bottom",
-                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color,
-                              lw=0.5, alpha=0.9))
+        """Boxed L=N label only at the highest L reached (last point of the chain)."""
+        valid = [(x, L) for x, L in stages if L > 0]
+        if not valid:
+            return
+        # Last achieved L (final point of the trace)
+        x, L = valid[-1]
+        ax.text(x, L + y_offset, f"L={L}", fontsize=7, color=color,
+                ha="center", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color,
+                          lw=0.5, alpha=0.9))
 
     for axis_key, xlabel, fname in [
         ("pflops",    "Cumulative Compute (PFLOPs)", "lookahead_vs_flops.png"),
