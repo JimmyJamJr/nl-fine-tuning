@@ -1,28 +1,43 @@
 #!/usr/bin/env bash
-# Periodic sync of a training run dir to GCS (uses Application Default Credentials;
-# defaults to repo-local gcs-bucket-sa.json when GOOGLE_APPLICATION_CREDENTIALS is unset).
+# Periodic sync of a training run dir to GCS.
+#
+# Auth: uses GOOGLE_APPLICATION_CREDENTIALS if set, otherwise auto-picks the
+# repo-local gcs-bucket-sa.json. Activates that service-account up front so
+# callers don't have to.
+#
+# GCS layout (matches existing convention in
+# gs://jackierwzhang-purdue-research-curriculum/):
+#   gs://<BUCKET>/<MODEL_TAG>/<RUN_NAME>/...
+#     ^ bucket            ^ kebab-case model+run-flavor (e.g. qwen17b-6pct-dolci-stage32-L48)
+#                                       ^ basename(RUN_DIR), already includes the JOB_ID timestamp
+#                                         (e.g. job_local_20260426_172317_qwen17b_6pct_L48)
+# RUN_NAME is taken from basename(RUN_DIR); the JOB_ID timestamp baked into it
+# satisfies the "subdir should be timestamped" requirement.
 #
 # Two modes:
-#   MIRROR=1                  : full recursive rsync of RUN_DIR -> DEST.
-#                               Anything that's ever appeared locally stays in GCS,
-#                               even after the trainer rotates it locally.
-#   MIRROR=0 (default)        : "rolling" mode. All non-checkpoint artifacts are mirrored.
-#                               Every local checkpoint-* is rsync'd to GCS, then only the
-#                               KEEP_N highest-step dirs are kept on GCS. Optionally (default
-#                               on) older local checkpoint-* dirs are removed after a successful
-#                               upload + quiet period so disk does not fill (see PRUNE_* below).
+#   MIRROR=1            : full recursive rsync of RUN_DIR -> DEST.
+#                         Anything that's ever appeared locally stays in GCS,
+#                         even after the trainer rotates it locally.
+#   MIRROR=0 (default)  : "rolling" mode. All non-checkpoint artifacts (loss
+#                         history, plots, persistent_checkpoints/, stage_checkpoints/,
+#                         logs, manifest) are mirrored. Rolling checkpoint-NNNN
+#                         dirs are uploaded, then only the KEEP_N highest-step
+#                         dirs are kept on GCS. Older local checkpoint-* dirs
+#                         are pruned after a successful upload + quiet period
+#                         so the local disk does not fill.
 #
-# Rolling env (optional):
-#   PRUNE_LOCAL_CHECKPOINTS=1 (default)  Remove local checkpoint-* not in top KEEP_N after
-#                                        upload + safety checks. Set 0 to disable.
-#   LOCAL_PRUNE_MIN_AGE_MIN=10 (default) Skip removing a dir if any file was modified within
-#                                        this many minutes (Trainer may still be writing).
+# Defaults (match what the user wants for the 6%-mix L=48 resume run):
+#   INTERVAL_SEC=600           every 10 minutes
+#   KEEP_N=2                   only keep last 2 rolling checkpoints on GCS
+#   PRUNE_LOCAL_CHECKPOINTS=1  safely prune older local checkpoint-* dirs after upload
+#   LOCAL_PRUNE_MIN_AGE_MIN=10 skip pruning a dir if files were modified within last 10m
+#                              (Trainer may still be writing)
 #
 # Usage:
-#   one-shot:   RUN_DIR=/path/to/run ./sync_to_gcs.sh
-#   loop 10m:   LOOP=1 INTERVAL_SEC=600 RUN_DIR=/path/to/run ./sync_to_gcs.sh
-#   full mirror: MIRROR=1 RUN_DIR=/path/to/run ./sync_to_gcs.sh
-#   custom path: DEST_PREFIX=my-experiment/run-a RUN_DIR=/path/to/run ./sync_to_gcs.sh
+#   one-shot:   RUN_DIR=/path/to/run MODEL_TAG=qwen17b-6pct-dolci-stage32-L48 ./sync_to_gcs.sh
+#   loop 10m:   LOOP=1 INTERVAL_SEC=600 RUN_DIR=/path/to/run MODEL_TAG=... ./sync_to_gcs.sh
+#   full mirror: MIRROR=1 RUN_DIR=... MODEL_TAG=... ./sync_to_gcs.sh
+#   override:    DEST_PREFIX=my-experiment/run-a RUN_DIR=... ./sync_to_gcs.sh
 #
 # Per-run lock + log: derived from basename(RUN_DIR) so multiple loops can coexist.
 
@@ -45,13 +60,25 @@ if [ -d "/home/ray/google-cloud-sdk/bin" ]; then
 fi
 command -v gcloud >/dev/null 2>&1 || { echo "gcloud not on PATH" >&2; exit 1; }
 
+# Activate the service account once up-front; idempotent + silent.
+if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ] && [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ]; then
+  gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" --quiet >/dev/null 2>&1 || true
+fi
+
 RUN_DIR="${RUN_DIR:?must set RUN_DIR=/abs/path/to/run}"
 RUN_NAME=$(basename "$RUN_DIR")
 BUCKET="${BUCKET:-jackierwzhang-purdue-research-curriculum}"
-# Default GCS prefix matches bucket style (e.g. qwen3-0.6b-curr-L256-step16/, pythia-1.4b-curr-*).
-# This run family: Qwen3 0.6B curriculum to L=256, lookahead step 1. For step=8 continuation
-# or other sweeps, set DEST_PREFIX explicitly (e.g. qwen3-0.6b-curr-L256-step8/<job_id>).
-DEST_PREFIX="${DEST_PREFIX:-qwen3-0.6b-curr-L256-step1/${RUN_NAME}}"
+# DEST is gs://<BUCKET>/<MODEL_TAG>/<RUN_NAME>. Either DEST_PREFIX (full
+# "<top-dir>/<sub-dir>") or MODEL_TAG (just the top-level model-flavor dir)
+# must be provided so we don't silently back up to a wrong/stale folder.
+if [ -z "${DEST_PREFIX:-}" ]; then
+  if [ -z "${MODEL_TAG:-}" ]; then
+    echo "Must set MODEL_TAG (e.g. qwen17b-6pct-dolci-stage32-L48) or DEST_PREFIX (e.g. <model-tag>/<run-name>)." >&2
+    echo "MODEL_TAG should be a kebab-case top-level dir matching others in gs://${BUCKET}/" >&2
+    exit 1
+  fi
+  DEST_PREFIX="${MODEL_TAG}/${RUN_NAME}"
+fi
 DEST="gs://${BUCKET}/${DEST_PREFIX}"
 TRAIN_LOG="${TRAIN_LOG:-}"
 SYNC_LOG="${SYNC_LOG:-/tmp/nl_gcs_sync_${RUN_NAME}.log}"
