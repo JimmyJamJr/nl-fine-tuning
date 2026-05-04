@@ -590,11 +590,22 @@ class NaturalLanguageGraphGenerator:
             max_prefix_vertices = kwargs.get('max_prefix_vertices', self.max_input_size)
             alpha = kwargs.get('alpha', 1.0)
 
-            inputs, outputs, labels, _ = generator.generate_training_set(
-                self.max_input_size, batch_size, max_lookahead,
-                max_edges, reserved_inputs, distance_from_start,
-                max_prefix_vertices, True, alpha
-            )
+            fixed_vocab = bool(kwargs.get('fixed_vocab', False))
+            try:
+                inputs, outputs, labels, _ = generator.generate_training_set(
+                    self.max_input_size, batch_size, max_lookahead,
+                    max_edges, reserved_inputs, distance_from_start,
+                    max_prefix_vertices, True, alpha, fixed_vocab
+                )
+            except TypeError:
+                # Older compiled generator without fixed_vocab support.
+                if fixed_vocab:
+                    print("WARNING: compiled generator lacks fixed_vocab support; falling back to default. Recompile generator.cpp.")
+                inputs, outputs, labels, _ = generator.generate_training_set(
+                    self.max_input_size, batch_size, max_lookahead,
+                    max_edges, reserved_inputs, distance_from_start,
+                    max_prefix_vertices, True, alpha
+                )
 
         elif task == 'dfs':
             requested_backtrack = kwargs.get('requested_backtrack', -1)
@@ -664,11 +675,22 @@ class NaturalLanguageGraphGenerator:
             max_prefix_vertices = kwargs.get('max_prefix_vertices', self.max_input_size)
             alpha = kwargs.get('alpha', 1.0)
 
-            inputs, outputs, labels, _ = generator.generate_training_set(
-                self.max_input_size, batch_size, max_lookahead,
-                max_edges, reserved_inputs, distance_from_start,
-                max_prefix_vertices, True, alpha
-            )
+            fixed_vocab = bool(kwargs.get('fixed_vocab', False))
+            try:
+                inputs, outputs, labels, _ = generator.generate_training_set(
+                    self.max_input_size, batch_size, max_lookahead,
+                    max_edges, reserved_inputs, distance_from_start,
+                    max_prefix_vertices, True, alpha, fixed_vocab
+                )
+            except TypeError:
+                # Older compiled generator without fixed_vocab support.
+                if fixed_vocab:
+                    print("WARNING: compiled generator lacks fixed_vocab support; falling back to default. Recompile generator.cpp.")
+                inputs, outputs, labels, _ = generator.generate_training_set(
+                    self.max_input_size, batch_size, max_lookahead,
+                    max_edges, reserved_inputs, distance_from_start,
+                    max_prefix_vertices, True, alpha
+                )
 
         elif task == 'dfs':
             requested_backtrack = kwargs.get('requested_backtrack', -1)

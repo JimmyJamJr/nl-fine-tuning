@@ -45,14 +45,24 @@ from peft import LoraConfig, get_peft_model, TaskType
 
 from nl_generator import NaturalLanguageGraphGenerator
 
-# Check for flash-attn availability
+# Check for flash-attn availability (FA3 first, fall back to FA2 for non-Hopper GPUs like A100)
 try:
-    from flash_attn import flash_attn_varlen_func
-
+    from flash_attn_interface import flash_attn_varlen_func as _fa3_varlen
+    def flash_attn_varlen_func(*args, **kwargs):
+        out = _fa3_varlen(*args, **kwargs)
+        if isinstance(out, tuple):
+            out = out[0]
+        return out
     FLASH_ATTN_AVAILABLE = True
+    print("[FA3] Using flash_attn_3 (FA3) varlen kernel")
 except ImportError:
-    FLASH_ATTN_AVAILABLE = False
-    flash_attn_varlen_func = None
+    try:
+        from flash_attn import flash_attn_varlen_func
+        FLASH_ATTN_AVAILABLE = True
+        print("[FA2] Using flash_attn_2 varlen kernel (FA3 unavailable)")
+    except ImportError:
+        FLASH_ATTN_AVAILABLE = False
+        flash_attn_varlen_func = None
 
 warnings.filterwarnings("ignore")
 hf_logging.set_verbosity_error()
@@ -3121,6 +3131,8 @@ def main():
                    help="Max sequence length for pretraining samples (default: 2048)")
     p.add_argument("--use_chat_template", action="store_true",
                    help="Wrap search data in chat template (enable_thinking=False)")
+    p.add_argument("--optim", type=str, default="adamw_torch_fused",
+                   help="Optimizer name passed to HF TrainingArguments (e.g. adamw_torch_fused, adamw_bnb_8bit, paged_adamw_8bit)")
 
     global args
     args = p.parse_args()
@@ -3215,7 +3227,7 @@ def main():
         "cache_dir": args.cache_dir,
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        "attn_implementation": "flash_attention_2",
+        "attn_implementation": "sdpa",
     }
 
     # Apply Liger fused ops (NOT cross entropy) — architecture-dependent
@@ -3679,7 +3691,7 @@ def main():
         save_safetensors=True,
         bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
-        optim="adamw_torch_fused",
+        optim=args.optim,
         dataloader_num_workers=num_workers,
         dataloader_prefetch_factor=2 if num_workers > 0 else None,
         dataloader_persistent_workers=num_workers > 0,

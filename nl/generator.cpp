@@ -544,7 +544,7 @@ bool has_path(const node* start, const node* end)
 	return false;
 }
 
-py::tuple generate_training_set(const unsigned int max_input_size, const uint64_t dataset_size, int max_lookahead, const unsigned int max_edges_input, const py::object& reserved_inputs, const int distance_from_start, const int max_prefix_vertices, const bool quiet=false, float alpha=1.0)
+py::tuple generate_training_set(const unsigned int max_input_size, const uint64_t dataset_size, int max_lookahead, const unsigned int max_edges_input, const py::object& reserved_inputs, const int distance_from_start, const int max_prefix_vertices, const bool quiet=false, float alpha=1.0, bool fixed_vocab=false)
 {
 	const unsigned int QUERY_PREFIX_TOKEN = (max_input_size-5) / 3 + 4;
 	const unsigned int PADDING_TOKEN = (max_input_size-5) / 3 + 3;
@@ -554,7 +554,9 @@ py::tuple generate_training_set(const unsigned int max_input_size, const uint64_
 	// Apply alpha scaling to control graph complexity
 	unsigned int max_edges = (unsigned int)(alpha * max_edges_input);
 	unsigned int max_vertices = (unsigned int)(alpha * ((max_input_size - 5) / 3));
-	unsigned int max_vertex_id = max_edges + 1;  // Based on max_edges like SI and DFS
+	// Ablation: when fixed_vocab=true, max_vertex_id stays at the un-alpha-scaled
+	// maximum so the vertex ID pool (and thus active vocab) does NOT grow with curriculum.
+	unsigned int max_vertex_id = fixed_vocab ? (max_edges_input + 1) : (max_edges + 1);
 
     // Clamp max_vertices and max_edges
     if (max_vertices < 4) max_vertices = 4;
@@ -736,7 +738,7 @@ py::tuple generate_training_set(const unsigned int max_input_size, const uint64_
 		}
 
 		if (!quiet && num_generated > 0 && (num_generated % 1000 == 0 || num_generated >= dataset_size)) {
-			printf("%d examples generated (alpha=%.2f, max_edges=%d, max_vertices=%d).\n", num_generated, alpha, max_edges, max_vertices);
+			printf("%d examples generated (alpha=%.2f, max_edges=%d, max_vertices=%d, max_vertex_id=%d, fixed_vocab=%d).\n", num_generated, alpha, max_edges, max_vertices, max_vertex_id, (int)fixed_vocab);
 
 			printf("Lookahead steps histogram:\n");
 			printf("[");
@@ -2507,7 +2509,12 @@ inline bool has_visited_parent(const node* v, const core::array<const node*>& pa
 }
 
 PYBIND11_MODULE(generator, m) {
-	m.def("generate_training_set", &generate_training_set);
+	m.def("generate_training_set", &generate_training_set,
+	      py::arg("max_input_size"), py::arg("dataset_size"), py::arg("max_lookahead"),
+	      py::arg("max_edges_input"), py::arg("reserved_inputs"),
+	      py::arg("distance_from_start"), py::arg("max_prefix_vertices"),
+	      py::arg("quiet") = false, py::arg("alpha") = 1.0f,
+	      py::arg("fixed_vocab") = false);
 	m.def("generate_reachable_training_set", &generate_reachable_training_set);
 	m.def("generate_dfs_training_set", &generate_dfs_training_set);
 	m.def("generate_si_training_set", &generate_si_training_set);
