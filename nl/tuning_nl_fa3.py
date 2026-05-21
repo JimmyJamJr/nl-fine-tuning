@@ -1874,6 +1874,7 @@ class FirstTokenCurriculum(TrainerCallback):
             # Stage eval config
             do_stage_eval: bool = False,
             stage_eval_every: int = 1,  # Run stage eval every N stage advancements (1=every stage)
+            skip_stage_alpha_eval: bool = False,
             eval_every_steps: int = 0,
             eval_inputs_hard: List[str] = None,
             eval_labels_hard: List[List[str]] = None,
@@ -1952,6 +1953,7 @@ class FirstTokenCurriculum(TrainerCallback):
         # Stage eval config
         self.do_stage_eval = do_stage_eval
         self.stage_eval_every = stage_eval_every
+        self.skip_stage_alpha_eval = skip_stage_alpha_eval
         self.eval_every_steps = eval_every_steps
         self.eval_inputs_hard = eval_inputs_hard
         self.eval_labels_hard = eval_labels_hard
@@ -2467,7 +2469,7 @@ class FirstTokenCurriculum(TrainerCallback):
             stage_alpha = self.dataset._stage_alpha()
             max_alpha_L = self.dataset.task_kwargs.get("max_lookahead")
             is_full_difficulty = (target_L is not None and target_L >= (max_alpha_L or 256))
-            if not is_full_difficulty and stage_alpha < 1.0:
+            if not is_full_difficulty and stage_alpha < 1.0 and not self.skip_stage_alpha_eval:
                 rank_print(f"[STAGE-EVAL] Also evaluating at stage alpha={stage_alpha:.4f} (L={effective_L})...")
                 # Generate stage-difficulty eval data on the fly
                 stage_eval_inputs, stage_eval_labels = None, None
@@ -3047,6 +3049,8 @@ def main():
                    help="Run stage eval every N lookahead units (e.g. 8 = eval only when L is multiple of 8)")
     p.add_argument("--do_stage_eval", action="store_true",
                    help="Run TF+greedy eval at alpha=1.0 after each stage advancement")
+    p.add_argument("--skip_stage_alpha_eval", action="store_true",
+                   help="Skip the secondary eval at the current stage's alpha (only run alpha=1.0 eval)")
     p.add_argument("--eval_every_steps", type=int, default=0,
                    help="Run greedy eval every N steps (0=disabled, useful for no-curriculum runs)")
     p.add_argument("--persist_every", type=int, default=2000,
@@ -3444,6 +3448,7 @@ def main():
         use_packing=args.use_packing,
         # Stage eval config
         do_stage_eval=args.do_stage_eval,
+        skip_stage_alpha_eval=args.skip_stage_alpha_eval,
         stage_eval_every=getattr(args, 'stage_eval_every', 1),
         eval_every_steps=args.eval_every_steps,
         eval_inputs_hard=eval_inputs_hard,

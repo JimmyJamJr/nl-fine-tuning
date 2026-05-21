@@ -126,6 +126,20 @@ def find_checkpoints(job_ids: List[str], base_dir: str, mode: str, step_interval
                             "step": step,
                         }))
 
+        elif mode == "persistent":
+            # Persistent checkpoints: persistent_checkpoints/step_XXXXX/
+            persist_dir = os.path.join(job_dir, "persistent_checkpoints")
+            if os.path.isdir(persist_dir):
+                for name in sorted(os.listdir(persist_dir)):
+                    m = re.match(r"step_(\d+)$", name)
+                    if m:
+                        step = int(m.group(1))
+                        ckpt_path = os.path.join(persist_dir, name)
+                        checkpoints.append((ckpt_path, {
+                            "job_id": jid,
+                            "step": step,
+                        }))
+
     # Sort by step, deduplicate (later jobs override earlier for same step)
     checkpoints.sort(key=lambda x: x[1]["step"])
     seen_steps = {}
@@ -197,6 +211,35 @@ def load_model(checkpoint_path, model_name, use_lora, cache_dir, device):
     model.eval()
     model.to(device)
     return model
+
+
+@torch.no_grad()
+def evaluate_tf_loss(model, tokenizer, inputs, labels, device, seed=0):
+    """Compute average teacher-forced CE loss on eval set (single GPU)."""
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    from tuning_nl import _tokenize_leading_space, _determine_task_type, _get_end_tokens
+    rng = random.Random(seed + 777)
+    total_loss = 0.0
+    count = 0
+
+    for x, ys in zip(inputs, labels):
+        ys = ys if isinstance(ys, list) else [ys]
+        chosen = rng.choice(ys)
+        task_type = _determine_task_type("search", x)
+        prompt_ids = tokenizer(x, add_special_tokens=True, truncation=False)["input_ids"]
+        ans_ids = _tokenize_leading_space(tokenizer, chosen)
+        end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+
+        input_ids = torch.tensor([prompt_ids + ans_ids + end_ids], device=device)
+        label_ids = torch.tensor([[-100] * len(prompt_ids) + ans_ids + end_ids], device=device)
+
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            out = model(input_ids=input_ids, labels=label_ids)
+        total_loss += out.loss.item()
+        count += 1
+    return total_loss / count if count else 0.0
 
 
 def evaluate_greedy(model, tokenizer, inputs, labels, device, print_mistakes=0):
@@ -281,7 +324,7 @@ def main():
     parser.add_argument("--use_lora", action="store_true", default=None,
                         help="Model uses LoRA adapters (auto-detected if omitted)")
     parser.add_argument("--cache_dir", type=str, default=None, help="HF cache dir")
-    parser.add_argument("--checkpoint_mode", choices=["stage", "regular"], default="stage",
+    parser.add_argument("--checkpoint_mode", choices=["stage", "regular", "persistent"], default="stage",
                         help="Which checkpoints to evaluate")
     parser.add_argument("--step_interval", type=int, default=2000,
                         help="Step interval for regular checkpoint mode")
@@ -376,11 +419,14 @@ def main():
             model = load_model(ckpt_path, args.model_name, args.use_lora, args.cache_dir, device)
             metrics = evaluate_greedy(model, tokenizer, eval_inputs, eval_labels, device,
                                       print_mistakes=args.print_mistakes)
+            tf_loss = evaluate_tf_loss(model, tokenizer, eval_inputs, eval_labels, device,
+                                       seed=args.eval_seed)
+            metrics["tf_loss"] = tf_loss
 
             result = {**meta, **metrics, "checkpoint_path": ckpt_path}
             results.append(result)
 
-            print(f"  Result: first={metrics['first_token_acc']:.1%} full={metrics['full_word_acc']:.1%}")
+            print(f"  Result: first={metrics['first_token_acc']:.1%} full={metrics['full_word_acc']:.1%} tf_loss={tf_loss:.4f}")
 
             # Free GPU memory
             del model
