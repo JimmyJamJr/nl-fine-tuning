@@ -24,19 +24,21 @@ set -euo pipefail
 WORKDIR="$HOME/qwen_scaling"                  # outputs, HF cache, triton cache live here
 CODE_DIR="$WORKDIR/nl-fine-tuning/nl"         # where tuning_nl.py lives (clone this repo)
 CONDA_ENV="search"                            # env with FA2/3, transformers, liger, chunked_ce
-NUM_GPUS=8                                    # set to whatever this node has
+NUM_GPUS=4
 SLURM_JOBID=""                                # if running inside a reservation, set to fire srun --overlap
 MASTER_PORT=29501
 ############################################
 
 ############################################
 # >>> EDIT THESE 4 PER MODEL SIZE <<<
-# Defaults below are Qwen3-1.7B. Keep eff_batch = NUM_GPUS * BATCH_SIZE * GA = 768.
-# (0.6B is already done — see header note.)
-MODEL_NAME="Qwen/Qwen3-1.7B"                  # 4B: Qwen/Qwen3-4B, 8B: Qwen/Qwen3-8B
-BATCH_SIZE=48                                 # drop for larger models if OOM (1.7B: 48, 4B: 24, 8B: 12)
-GRADIENT_ACCUMULATION_STEPS=2                 # bump to keep eff_batch=768 at NUM_GPUS=8 (1.7B: 2, 4B: 4, 8B: 8)
-GRADIENT_CHECKPOINTING=true                   # keep on for larger models; can turn off for 1.7B if memory is ample
+# Defaults below replicate the Qwen3-0.6B paper config exactly (4 GPUs, bs=96,
+# GA=2, GC=on, eff_batch=768). For 1.7B / 4B / 8B, Max will need to tune
+# BATCH_SIZE and GRADIENT_ACCUMULATION_STEPS for memory while preserving
+# eff_batch = NUM_GPUS * BATCH_SIZE * GA = 768.
+MODEL_NAME="Qwen/Qwen3-0.6B"
+BATCH_SIZE=96
+GRADIENT_ACCUMULATION_STEPS=2
+GRADIENT_CHECKPOINTING=true
 ############################################
 
 # Common Qwen 0.6B optimal hypers (DON'T change these for the scaling experiment)
