@@ -9,6 +9,10 @@ chunked loop, verbatim):
       agrees to 1e-5, and gradients through both paths agree;
   (d) head_rows is n_valid in sparse mode and Tm1 in full mode; chunking the sparse rows (chunk_size < n_valid) gives
       the same result; the pretrain-style case where every row is labelled also agrees.
+  (e) the achieved_tflops accounting helpers: estimate_head_params on fake Qwen-like (tied lm_head) and NeoX-like
+      (separate embed_out) models, estimate_flops_per_token counting the tied weight once, executed_flops (full =
+      6N * tokens exactly, sparse = 6N * tokens - 6 * N_head * (tokens - head_rows), clamped, no-op without N_head)
+      and _entry_head_mode (tag honoured; inferred from head_rows / tokens; missing head_rows = full).
 Run: /home/huan2073/.conda/envs/search/bin/python bench/test_sparse_head.py   (no GPU, no flash-attn needed)
 """
 import os
@@ -21,7 +25,8 @@ os.environ.setdefault("NL_PACKING", "hf")
 import torch
 import torch.nn as nn
 
-from tuning_nl import _head_ce_and_preds, _blend_first_token_ce, NL_HEAD
+from tuning_nl import (_head_ce_and_preds, _blend_first_token_ce, NL_HEAD, estimate_flops_per_token,
+                       estimate_head_params, executed_flops, _entry_head_mode)
 
 TOL = 1e-5
 
@@ -117,6 +122,56 @@ def check_case(seed, chunk_full, chunk_sparse, all_valid=False):
     return n_valid, Tm1, loss_s.item()
 
 
+class _FakeQwen(nn.Module):
+    """Shape of Qwen3ForCausalLM as resolve_model_parts sees it: .model.embed_tokens / .layers and .lm_head tied."""
+    def __init__(self, V=50, H=16):
+        super().__init__()
+        self.model = nn.Module()
+        self.model.embed_tokens = nn.Embedding(V, H)
+        self.model.layers = nn.ModuleList([nn.Linear(H, H)])
+        self.lm_head = nn.Linear(H, V, bias=False)
+        self.lm_head.weight = self.model.embed_tokens.weight   # tied, as in Qwen3-0.6B
+
+
+class _FakeNeoX(nn.Module):
+    """Shape of GPTNeoXForCausalLM: .gpt_neox.embed_in / .layers and a separate .embed_out (Pythia, untied)."""
+    def __init__(self, V=50, H=16):
+        super().__init__()
+        self.gpt_neox = nn.Module()
+        self.gpt_neox.embed_in = nn.Embedding(V, H)
+        self.gpt_neox.layers = nn.ModuleList([nn.Linear(H, H)])
+        self.embed_out = nn.Linear(H, V, bias=False)
+
+
+def check_accounting(V=50, H=16):
+    """(e) the achieved_tflops helpers (CPU, no model weights)."""
+    body = H * H + H                                   # the one fake layer
+    n_head = V * H
+    qwen, neox = _FakeQwen(V, H), _FakeNeoX(V, H)
+    # N_head is the head's own count on both architectures; N counts the tied Qwen weight once, Pythia's twice.
+    assert estimate_head_params(qwen) == n_head and estimate_head_params(neox) == n_head
+    assert estimate_flops_per_token(qwen) == 6 * (n_head + body), estimate_flops_per_token(qwen)
+    assert estimate_flops_per_token(neox) == 6 * (2 * n_head + body), estimate_flops_per_token(neox)
+    assert estimate_head_params(nn.Linear(2, 2)) == 0          # unresolvable head -> 0, never raises
+    fpt, fph = 6 * (n_head + body), 6 * n_head
+    tokens, head_rows = 10_000, 100
+    # full head: 6N * tokens exactly, whatever head_rows says (full logs head_rows >= tokens - 1 per micro-batch)
+    assert executed_flops(tokens, tokens + 7, fpt, fph, "full") == tokens * fpt
+    assert executed_flops(tokens, head_rows, fpt, fph, "full") == tokens * fpt
+    # sparse head: the body on every token, the head on head_rows rows only
+    assert executed_flops(tokens, head_rows, fpt, fph, "sparse") == 6 * body * tokens + fph * head_rows
+    assert executed_flops(tokens, tokens + 7, fpt, fph, "sparse") == tokens * fpt   # clamped, never above 6N*tokens
+    assert executed_flops(tokens, head_rows, fpt, None, "sparse") == tokens * fpt   # N_head unknown -> 6N*tokens
+    # entry head mode: tag first, then the head_rows/tokens ratio, missing head_rows = pre-sparse full head
+    assert _entry_head_mode({"head": "full", "tokens": tokens, "head_rows": head_rows}) == "full"
+    assert _entry_head_mode({"head": "sparse", "tokens": tokens, "head_rows": tokens}) == "sparse"
+    assert _entry_head_mode({"tokens": tokens, "head_rows": head_rows}) == "sparse"
+    assert _entry_head_mode({"tokens": tokens, "head_rows": tokens + 7}) == "full"
+    assert _entry_head_mode({"tokens": tokens}) == "full"
+    assert _entry_head_mode({"tokens": 0, "head_rows": 0}) == "full"
+    print(f"case 5: accounting helpers (N_head={n_head}, tied Qwen / untied NeoX, executed_flops, entry head mode)  OK")
+
+
 def main():
     torch.manual_seed(0)
     print(f"NL_HEAD (module default) = {NL_HEAD}")
@@ -142,6 +197,8 @@ def main():
         raise AssertionError("bogus mode must raise")
     except ValueError:
         pass
+    # 5) the achieved_tflops accounting helpers
+    check_accounting()
     print("ALL OK")
 
 

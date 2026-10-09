@@ -21,6 +21,11 @@ Environment flags
                                 quarter of all FLOPs per step at 156M head / 596M params. full: the pre-2026-10-09
                                 chunked loop over every row. Forced to full under NL_PACKING=custom so the legacy
                                 path stays bit-identical to the archived behaviour. Same loss up to GEMM rounding.
+                                Every loss_history entry carries head_rows and a "head" tag; achieved_tflops counts
+                                the FLOPs executed (executed_flops), the cumulative PFLOPs accounting stays
+                                6N * tokens (estimate_flops_per_token). bench/run_arm.sh does not set NL_HEAD, so
+                                re-running the pre-sparse full-head hf arms (hf_fa3_det, hf_fa2_det, hf_fa3, hf_fa2)
+                                needs NL_HEAD=full exported; bench/sparse_arms.sh exports NL_HEAD=sparse itself.
   NL_ATTN_KERNEL=auto|fa3|fa2   flash-attention family. auto = FA3 only on Hopper (sm90), FA2 elsewhere; fa3/fa2
                                 force. hf mode: selects attn_implementation=flash_attention_3|flash_attention_2 at
                                 model load. custom mode: selects the kernel legacy_varlen_forward imports. In-run
@@ -229,15 +234,58 @@ def _dataloader_worker_init(worker_id: int) -> None:
 def estimate_flops_per_token(model) -> int:
     """Estimate FLOPs per token (6N approximation per Kaplan et al.)
 
-    Left at 6N on purpose, for comparability with every past run. With NL_HEAD=sparse (default since 2026-10-09)
-    the lm_head only runs on the labelled rows, so the true cost of a step is
+    Left at 6N on purpose, for comparability with every past run: the cumulative PFLOPs accounting (milestones,
+    max_total_pflops, the loss-vs-PFLOPs plots) is 6N * tokens everywhere. With NL_HEAD=sparse (default since
+    2026-10-09) the lm_head only runs on the labelled rows, so the FLOPs actually executed in a step are
         6 * (N - N_head) * tokens + 6 * N_head * head_rows
-    with N_head the lm_head parameter count (tied to the embedding) and head_rows the per-step count written to
-    loss_history next to "tokens" (FirstTokenCurriculum.on_step_end). The reported 6N * tokens therefore OVERSTATES
-    the sparse-head cost by about 6 * N_head * (tokens - head_rows), roughly a quarter of the total at 156M / 596M.
+    with N_head the output-head parameter count (estimate_head_params: lm_head, which shares the embedding weight,
+    for Qwen3; embed_out, a separate weight, for Pythia) and head_rows the per-step count written to loss_history
+    next to "tokens" (FirstTokenCurriculum.on_step_end). 6N * tokens therefore OVERSTATES the sparse-head cost by
+    about 6 * N_head * (tokens - head_rows), roughly a quarter of the total at 156M / 596M. Only the per-step
+    throughput diagnostic achieved_tflops (loss_history and the [Stage] log line) uses the executed count
+    (executed_flops); the cumulative accounting does not, pending the paper-side decision.
+
+    loss_history conventions: entries without a head_rows key predate the sparse head and ran the full head, treat
+    head_rows = tokens; entries since 2026-10-09 carry head_rows, and since the same-day fix a "head" tag
+    (sparse|full) as well (_entry_head_mode resolves the mode of any entry).
     """
     total_params = sum(p.numel() for p in model.parameters())
     return 6 * total_params
+
+
+def estimate_head_params(model) -> int:
+    """N_head for the sparse-head cost formula in estimate_flops_per_token: the parameter count of the output head
+    that _head_ce_and_preds runs (resolve_model_parts: lm_head for Qwen3, where it shares the embedding weight and so
+    enters N once; embed_out for Pythia, a separate weight that enters N next to embed_in). 0 when the head cannot
+    be resolved (then achieved_tflops falls back to 6N * tokens and the caller warns)."""
+    try:
+        return int(sum(p.numel() for p in resolve_model_parts(model)['lm_head'].parameters()))
+    except Exception:
+        return 0
+
+
+def executed_flops(tokens: int, head_rows: int, flops_per_token: int, flops_per_head_row, head: str) -> float:
+    """FLOPs actually executed for `tokens` packed tokens of which `head_rows` went through the lm_head, for the
+    achieved_tflops diagnostic only (see estimate_flops_per_token). head='full' (or N_head unknown): 6N * tokens,
+    exactly as always. head='sparse': 6N * tokens - 6 * N_head * (tokens - head_rows); head_rows counts the
+    labelled rows plus the soft blend's first rows, never more than tokens on that path (clamped anyway)."""
+    flops = tokens * flops_per_token
+    if head == "sparse" and flops_per_head_row:
+        flops -= flops_per_head_row * max(0, tokens - head_rows)
+    return flops
+
+
+def _entry_head_mode(h: Dict[str, Any]) -> str:
+    """Head mode ('sparse'|'full') of one loss_history entry: its "head" tag when present; otherwise inferred from
+    head_rows / tokens (the sparse head logs about 1% of tokens, the full head at least tokens - 1 per micro-batch);
+    entries without head_rows predate the sparse head and ran the full head (estimate_flops_per_token)."""
+    head = h.get("head")
+    if head in ("sparse", "full"):
+        return head
+    tokens = int(h.get("tokens", 0) or 0)
+    if tokens <= 0 or h.get("head_rows") is None:
+        return "full"
+    return "sparse" if int(h["head_rows"]) < 0.5 * tokens else "full"
 
 
 # Function for setting seed across libraries and GPUs
@@ -538,6 +586,17 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
 
         # Set _last_persist_step so we don't re-persist old steps on resume
         curriculum._last_persist_step = curriculum.loss_history[-1].get("step", 0)
+
+        # NL_HEAD provenance of the resumed lineage (2026-10-09): NL_HEAD defaults to sparse for every launch, so a
+        # pre-sparse-head lineage resumed by an unchanged job script silently switches head mode here. Print only.
+        last = curriculum.loss_history[-1]
+        if last.get("head") in ("sparse", "full") or int(last.get("tokens", 0) or 0) > 0:
+            prev_head = _entry_head_mode(last)
+            if prev_head != NL_HEAD:
+                rank_print(f"[HEAD][WARN] resumed lineage last ran NL_HEAD={prev_head} (step {last.get('step')}); "
+                           f"this process runs NL_HEAD={NL_HEAD}: per-step compute changes from here (loss differs "
+                           f"at rounding level; head_rows and achieved_tflops in loss_history change scale). "
+                           f"Export NL_HEAD={prev_head} to keep the lineage's head mode.")
 
     # Restore stage eval history
     stage_eval_path = os.path.join(os.path.dirname(path), "stage_eval_history.json")
@@ -1412,7 +1471,11 @@ def _head_ce_and_preds(lm_head, shift_h, shift_labels, valid_mask, mode: str = N
 
     shift_h [Tm1, H], shift_labels [Tm1] (-100 = unlabelled), valid_mask = shift_labels != -100. Returns
     (ce [n_valid] in valid-row order, preds [Tm1] long, head_rows) where head_rows is how many rows went through
-    lm_head. ce is F.cross_entropy(reduction='none') on the head's native dtype (no upcast), exactly as before.
+    lm_head. ce is F.cross_entropy(reduction='none') on the lm_head output with no explicit dtype conversion here,
+    exactly as before: the training forward runs with autocast off (asserted in _hf_forward_body; transformers'
+    compute_loss_context_manager enters autocast only for CPU AMP), so with the bf16 model the CE runs on bf16
+    logits; under an active torch.autocast it would run in fp32 instead (cross_entropy is on the autocast fp32
+    list). Either way the dtype path is the caller's and identical in both modes.
 
     mode='full': the pre-2026-10-09 loop, verbatim: lm_head and argmax over EVERY row in chunk_size slices, CE at
     the valid rows of each slice; head_rows = Tm1.
@@ -1547,7 +1610,8 @@ class PackedSequenceTrainer(Trainer):
         if NL_HEAD == "sparse":
             rank_print(f"[HEAD] NL_HEAD=sparse: lm_head/argmax/CE on labelled rows only (valid_mask), in "
                        f"--ce_chunk_size={self.ce_chunk_size} row pieces; per-step rows logged as head_rows next to "
-                       f"tokens in loss_history (6N*tokens accounting unchanged, overstates this path)")
+                       f"tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay "
+                       f"6N*tokens, which overstates this path)")
         else:
             _why = ("forced by NL_PACKING=custom (legacy path kept bit-identical)" if NL_PACKING == "custom"
                     else "NL_HEAD=full")
@@ -2302,6 +2366,7 @@ class FirstTokenCurriculum(TrainerCallback):
         self.loss_history = []
         # Flops tracking
         self.flops_per_token = None
+        self.flops_per_head_row = None  # 6 * N_head, set with flops_per_token; sparse-head achieved_tflops only
         self.cumulative_wall_time = 0.0  # Total wall time across resumes (seconds)
         self.wall_time_offset = 0.0  # Offset from previous runs
         self.training_start_time = None  # Set when training starts
@@ -2913,7 +2978,11 @@ class FirstTokenCurriculum(TrainerCallback):
             if hasattr(self.trainer, '_train_timing') and self.trainer._train_timing["steps"] > 0:
                 recent_step_time = self.trainer._train_timing["total_step"] / self.trainer._train_timing["steps"]
                 if recent_step_time > 0 and self.flops_per_token and tokens_this_step > 0:
-                    flops_this_step = tokens_this_step * self.flops_per_token
+                    # FLOPs executed this step: 6N * tokens for the full head (as always); under NL_HEAD=sparse the
+                    # head ran on head_rows_this_step rows only (executed_flops). The cumulative PFLOPs accounting
+                    # (_cumulative_tokens * flops_per_token) stays 6N * tokens, see estimate_flops_per_token.
+                    flops_this_step = executed_flops(tokens_this_step, head_rows_this_step, self.flops_per_token,
+                                                     self.flops_per_head_row, NL_HEAD)
                     achieved_tflops = flops_this_step / recent_step_time / 1e12
 
             entry = {
@@ -2924,6 +2993,7 @@ class FirstTokenCurriculum(TrainerCallback):
                 "effective_L": effective_L,
                 "tokens": tokens_this_step,
                 "head_rows": head_rows_this_step,
+                "head": NL_HEAD,
                 "wall_time": current_wall_time,
                 "achieved_tflops": achieved_tflops,
                 "n_gpus": get_world_size(),
@@ -3017,7 +3087,19 @@ class FirstTokenCurriculum(TrainerCallback):
 
             achieved_tflops_str = ""
             if self.flops_per_token and tokens_per_sec > 0:
-                achieved_tflops = tokens_per_sec * self.flops_per_token / 1e12
+                # Same executed-FLOPs count as the loss_history achieved_tflops: per-token rate over this stage's
+                # logged steps (sparse-head correction per entry via its head tag), times the stage's tokens/s.
+                # Full-head entries contribute 6N exactly. Walks loss_history backwards to the stage start only.
+                st_tokens, st_flops = 0, 0.0
+                for h in reversed(self.loss_history):
+                    if h.get("step", 0) <= self.stage_start_step:
+                        break
+                    t = int(h.get("tokens", 0) or 0)
+                    st_tokens += t
+                    st_flops += executed_flops(t, int(h.get("head_rows", t) or 0), self.flops_per_token,
+                                               self.flops_per_head_row, _entry_head_mode(h))
+                eff_flops_per_token = st_flops / st_tokens if st_tokens > 0 else self.flops_per_token
+                achieved_tflops = tokens_per_sec * eff_flops_per_token / 1e12
                 achieved_tflops_str = f" | {achieved_tflops:.1f} TFLOPs/s"
 
             # Calculate proper stage denominator
@@ -4227,6 +4309,16 @@ def main():
     curriculum.flops_per_token = estimate_flops_per_token(model)
     rank_print(
         f"[FLOPS] Model has {sum(p.numel() for p in model.parameters()) / 1e9:.2f}B params, ~{curriculum.flops_per_token / 1e9:.1f}B FLOPs/token")
+    # N_head for the sparse-head achieved_tflops correction (executed_flops); cumulative PFLOPs stay 6N * tokens.
+    _n_head = estimate_head_params(model)
+    curriculum.flops_per_head_row = 6 * _n_head if _n_head > 0 else None
+    if _n_head > 0:
+        rank_print(f"[FLOPS] Output head: N_head={_n_head / 1e6:.1f}M params, 6*N_head={6 * _n_head / 1e9:.2f}B FLOPs per "
+                   f"head row; NL_HEAD={NL_HEAD}: achieved_tflops counts executed FLOPs "
+                   f"({'6(N-N_head)*tokens + 6*N_head*head_rows' if NL_HEAD == 'sparse' else '6N*tokens, as always'})")
+    else:
+        rank_print("[FLOPS][WARN] could not resolve the output head; achieved_tflops falls back to 6N*tokens "
+                   f"(overstates NL_HEAD={NL_HEAD} if sparse)")
 
     # Build plot metadata
     curriculum.plot_metadata = {
