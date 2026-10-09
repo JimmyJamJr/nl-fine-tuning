@@ -18,7 +18,7 @@ conda activate search
 export SCRATCH="${SCRATCH:-/scratch/gautschi/$USER}"
 export HF_HOME="$SCRATCH/model_cache"
 # Use cached datasets only (pre-populated by setup_cache_datasets.py).
-export HF_DATASETS_OFFLINE=1
+export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"   # set 0 when datasets must be fetched/cached
 export HF_HUB_OFFLINE=0
 export TRITON_CACHE_DIR="$SCRATCH/triton_cache"
 mkdir -p "$SCRATCH/triton_cache" "$SCRATCH/model_cache"
@@ -41,7 +41,7 @@ cd /home/huan2073/nl-fine-tuning/nl/downstream
 # Defaults: base + instruct + a curriculum-depth sweep
 MODELS="${MODELS:-base instruct_only 6pct_L8 6pct_L16 6pct_L32 6pct_L48 6pct_L64 6pct_L75}"
 # Default to the 14 primary benchmarks + 5 few-shot variants (19 total).
-BENCHMARKS="${BENCHMARKS:-proofwriter proofwriter_cwa prontoqa_ood clutrr clutrr_fs stepgame folio logiqa logiqa_fs ruletaker ruletaker_fs logicbench_bqa logicbench_mcqa multilogieval multilogieval_fs nlgraph_gen legal zebra_mc zebra_mc_fs}"
+BENCHMARKS="${BENCHMARKS:-proofwriter proofwriter_cwa prontoqa_ood clutrr clutrr_fs stepgame folio logiqa logiqa_fs ruletaker ruletaker_fs logicbench_bqa logicbench_mcqa multilogieval multilogieval_fs nlgraph_gen zebra_mc zebra_mc_fs}"
 N="${N:-1000}"
 DEBUG_SAMPLES="${DEBUG_SAMPLES:-1}"  # print 1 sample per subtask for inspection
 OUTPUT="${OUTPUT:-results/eval_${SLURM_JOB_ID}.json}"
@@ -54,7 +54,7 @@ DATA_DIR="${DATA_DIR:-$SCRATCH/nl_eval}"
 
 echo "Models:           $MODELS"
 echo "Benchmarks:       $BENCHMARKS"
-echo "n_overrides:      $N_OVERRIDES"
+echo "n_overrides:      ${N_OVERRIDES:-<none>}"
 echo "Output:           $OUTPUT"
 echo "hf_cache:         $HF_CACHE"
 echo "prompts_dir:      $PROMPTS_DIR"

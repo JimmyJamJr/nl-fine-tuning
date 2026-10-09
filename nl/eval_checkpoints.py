@@ -37,9 +37,14 @@ from peft import PeftModel
 def resolve_job_chain(job_id: str, base_dir: str) -> List[str]:
     """Walk backwards through resume_from_job links to find the full job chain."""
     chain = []
+    seen = set()
     current = job_id
 
-    while current:
+    # Pod relaunches reuse the same job id, so run_meta can carry
+    # `--resume_from_job <itself>`. Without this guard that self-reference
+    # (or any cycle) spins forever.
+    while current and current not in seen:
+        seen.add(current)
         chain.append(current)
         meta_path = os.path.join(base_dir, f"job_{current}", "run_meta.json")
         if not os.path.exists(meta_path):
