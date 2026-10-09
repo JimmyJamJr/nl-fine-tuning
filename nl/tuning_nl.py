@@ -9,42 +9,31 @@ applies the lm_head (sparse: labelled rows only, see NL_HEAD), the cross-entropy
 loss = ce.sum()/n_valid, the loss split and the gate accuracies itself (PackedSequenceTrainer._hf_forward_body,
 compute_loss, _head_ce_and_preds). Two status-quo properties are preserved on purpose: DistributedDataParallel.forward
 is bypassed, so gradients are NOT averaged across ranks unless NL_DDP_GRAD_AVERAGE=1, and no autocast is active (the
-model runs in native bf16).
+model runs in native bf16). The pre-refactor hand-rolled layer loop (archive/tuning_nl_pre_hfpacked_20261009.py) was
+removed after the old-vs-new parity sign-off of 2026-10-09 (archive/bench_parity_20261009/).
 
 Environment flags
-  NL_PACKING=hf|custom          hf (default): the HF body path above. custom: the pre-refactor hand-rolled layer loop
-                                in legacy_varlen_forward.py (parity runs only); the model then loads with transformers'
-                                default attention (SDPA) exactly as the paper runs did.
   NL_HEAD=sparse|full           sparse (default): the lm_head, argmax and cross-entropy run only on the labelled rows
                                 of the shifted sequence (valid_mask), which the loss and both gate metrics are the
                                 only consumers of; the ~99% unlabelled rows (zero gradient) are skipped, i.e. about a
                                 quarter of all FLOPs per step at 156M head / 596M params. full: the pre-2026-10-09
-                                chunked loop over every row. Forced to full under NL_PACKING=custom so the legacy
-                                path stays bit-identical to the archived behaviour. Same loss up to GEMM rounding.
+                                chunked loop over every row. Same loss up to GEMM rounding.
                                 Every loss_history entry carries head_rows and a "head" tag; achieved_tflops counts
                                 the FLOPs executed (executed_flops), the cumulative PFLOPs accounting stays
-                                6N * tokens (estimate_flops_per_token). bench/run_arm.sh does not set NL_HEAD, so
-                                re-running the pre-sparse full-head hf arms (hf_fa3_det, hf_fa2_det, hf_fa3, hf_fa2)
-                                needs NL_HEAD=full exported; bench/sparse_arms.sh exports NL_HEAD=sparse itself.
+                                6N * tokens (estimate_flops_per_token). bench/run_arm.sh does not set NL_HEAD, so a
+                                full-head benchmark arm needs NL_HEAD=full exported.
   NL_ATTN_KERNEL=auto|fa3|fa2   flash-attention family. auto = FA3 only on Hopper (sm90), FA2 elsewhere; fa3/fa2
-                                force. hf mode: selects attn_implementation=flash_attention_3|flash_attention_2 at
-                                model load. custom mode: selects the kernel legacy_varlen_forward imports. In-run
-                                evals (teacher-forced loss, greedy) always run with SDPA, the transformers default and
-                                what eval_checkpoints.py uses (eval_attn_sdpa).
+                                force. Selects attn_implementation=flash_attention_3|flash_attention_2 at model
+                                load. In-run evals (teacher-forced loss, greedy) always run with SDPA, the
+                                transformers default and what eval_checkpoints.py uses (eval_attn_sdpa).
   NL_DDP_GRAD_AVERAGE=1         opt-in: all-reduce (AVG) every trainable gradient across ranks after backward and
                                 before clipping, i.e. what DistributedDataParallel would do. Default off (status quo).
   NL_CKPT_EVERY_N_LAYERS=N      selective gradient checkpointing: recompute only every N-th decoder layer (default 1).
   NL_CKPT_RELAX_MAX_TOKENS=M    fall back to every layer when a micro-batch exceeds M tokens (default 0 = never).
-  FLASH_ATTENTION_DETERMINISTIC=1  deterministic flash-attention backward in both paths (transformers reads it for
-                                the HF path, FA2 and FA3 alike; legacy_varlen_forward passes it to the kernel).
-                                Determinism for parity runs is env-only: this flag plus CUBLAS_WORKSPACE_CONFIG,
-                                both exported by bench/run_arm.sh under DETERMINISTIC=1. The old --deterministic
-                                CLI flag (cudnn flags, use_deterministic_algorithms) was removed 2026-10-09.
-  NL_DEBUG_PARAM_SYNC=1         [PARAM-SYNC] per-rank parameter checksum after every optimizer step, plus a one-time
-                                [DEBUG] compute_loss line reporting DDP-wrapped / is_autocast_enabled.
-  NL_PARITY_DUMP=1              parity hooks: first-micro-batch dump, step-1 gradient dump, per-parameter sums per
-                                step (all under <output_dir>/parity_dump/) and peak memory in the 10-step log line.
-  NL_LEGACY_NEOX_RESIDUAL_ORDER=hf  custom mode only: HF's GPT-NeoX residual summation order (see legacy module).
+  FLASH_ATTENTION_DETERMINISTIC=1  deterministic flash-attention backward (transformers reads it, FA2 and FA3 alike).
+                                Determinism is env-only: this flag plus CUBLAS_WORKSPACE_CONFIG, both exported by
+                                bench/run_arm.sh under DETERMINISTIC=1. The old --deterministic CLI flag (cudnn
+                                flags, use_deterministic_algorithms) was removed 2026-10-09.
 """
 import os
 import re
@@ -94,20 +83,16 @@ from peft import LoraConfig, get_peft_model, TaskType
 from nl_generator import NaturalLanguageGraphGenerator
 
 # ---------------------------------------------------------------------------------------------------------------
-# Packed-forward path and attention-kernel selection (2026-10-09; the module docstring lists every env flag).
+# Attention-kernel and output-head selection (2026-10-09; the module docstring lists every env flag).
 # ---------------------------------------------------------------------------------------------------------------
-NL_PACKING = os.environ.get("NL_PACKING", "hf").lower()
-if NL_PACKING not in ("hf", "custom"):
-    raise ValueError(f"NL_PACKING must be 'hf' or 'custom', got {NL_PACKING!r}")
 _ATTN_KERNEL_REQ = os.environ.get("NL_ATTN_KERNEL", "auto").lower()
 if _ATTN_KERNEL_REQ not in ("auto", "fa3", "fa2"):
     raise ValueError(f"NL_ATTN_KERNEL must be 'auto', 'fa3' or 'fa2', got {_ATTN_KERNEL_REQ!r}")
-# Output head over labelled rows only (sparse, default) or over every packed row (full, the pre-2026-10-09 loop).
-# custom mode is the archived legacy path and is pinned to full regardless of the request (see _head_ce_and_preds).
-_NL_HEAD_REQ = os.environ.get("NL_HEAD", "sparse").lower()
-if _NL_HEAD_REQ not in ("sparse", "full"):
-    raise ValueError(f"NL_HEAD must be 'sparse' or 'full', got {_NL_HEAD_REQ!r}")
-NL_HEAD = "full" if NL_PACKING == "custom" else _NL_HEAD_REQ
+# Output head over labelled rows only (sparse, default) or over every packed row (full, the pre-2026-10-09 loop);
+# see _head_ce_and_preds.
+NL_HEAD = os.environ.get("NL_HEAD", "sparse").lower()
+if NL_HEAD not in ("sparse", "full"):
+    raise ValueError(f"NL_HEAD must be 'sparse' or 'full', got {NL_HEAD!r}")
 
 
 def _is_hopper() -> bool:
@@ -121,7 +106,7 @@ def _is_hopper() -> bool:
 
 
 def select_attn_implementation(req: str = _ATTN_KERNEL_REQ) -> str:
-    """Map NL_ATTN_KERNEL onto the transformers attn_implementation string used in hf mode. The Qwen paper runs used
+    """Map NL_ATTN_KERNEL onto the transformers attn_implementation string used at model load. The Qwen paper runs used
     FA2 and the Pythia runs FA3; NL_ATTN_KERNEL=fa2 reproduces the Qwen kernel exactly. transformers accepts
     flash_attention_3 wherever the flash_attn_3 package imports (utils/import_utils.py:1214-1229, no capability
     check), so the Hopper gate is kept here."""
@@ -144,12 +129,6 @@ if not {"cu_seq_lens_q", "cu_seq_lens_k", "max_length_q", "max_length_k"} <= _FA
     raise ImportError(f"FlashAttentionKwargs does not accept cu_seq_lens_q/cu_seq_lens_k/max_length_q/max_length_k "
                       f"(fields: {sorted(_FA_KW_FIELDS)}); the packed forward in tuning_nl.py was written against "
                       f"transformers==4.57.5")
-
-if NL_PACKING == "custom":
-    # Pre-refactor hand-rolled varlen loop; imports flash_attn_varlen_func (FA3/FA2) with the same auto rule.
-    import legacy_varlen_forward as _legacy
-else:
-    _legacy = None
 
 # config._attn_implementation the model was loaded with (set in main()); eval_attn_sdpa restores and asserts it.
 NL_TRAIN_ATTN_IMPL = None
@@ -346,11 +325,12 @@ def _dist_version(*names) -> Optional[str]:
 
 
 def _run_provenance(model=None) -> Dict[str, Any]:
-    """Which forward path, kernel, flags and library versions a run used; written to run_meta.json and
-    run_config.json (2026-10-09) so OLD/NEW parity runs and later re-evaluations are attributable."""
+    """Which kernel, head mode, flags and library versions a run used; written to run_meta.json and run_config.json
+    (2026-10-09) so later re-evaluations are attributable. forward_path is a constant now that the pre-refactor
+    custom layer loop is gone; the key stays so run_meta.json keeps its schema."""
     cfg = getattr(model, "config", None) if model is not None else None
     return {
-        "forward_path": NL_PACKING,
+        "forward_path": "hf",
         "head": NL_HEAD,
         "attn_implementation": getattr(cfg, "_attn_implementation", None) if cfg is not None else NL_TRAIN_ATTN_IMPL,
         "NL_ATTN_KERNEL": _ATTN_KERNEL_REQ,
@@ -359,7 +339,6 @@ def _run_provenance(model=None) -> Dict[str, Any]:
         "NL_DDP_GRAD_AVERAGE": os.environ.get("NL_DDP_GRAD_AVERAGE", "0"),
         "FLASH_ATTENTION_DETERMINISTIC": os.environ.get("FLASH_ATTENTION_DETERMINISTIC"),
         "CUBLAS_WORKSPACE_CONFIG": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
-        "NL_LEGACY_NEOX_RESIDUAL_ORDER": os.environ.get("NL_LEGACY_NEOX_RESIDUAL_ORDER"),
         "versions": {
             "torch": torch.__version__,
             "transformers": _dist_version("transformers"),
@@ -717,13 +696,8 @@ class PackedSequenceDataset(Dataset):
             use_chat_template: bool = False,
             **task_kwargs,
     ):
-        if NL_PACKING == "custom" and not _legacy.FLASH_ATTN_AVAILABLE:
-            raise ImportError(
-                "flash-attn required for PackedSequenceDataset (NL_PACKING=custom). "
-                "Install with: pip install flash-attn --no-build-isolation"
-            )
-        # NL_PACKING=hf: the model load with attn_implementation=flash_attention_{2,3} has already failed if
-        # neither flash_attn nor flash_attn_3 is importable.
+        # No flash-attn check here: the model load with attn_implementation=flash_attention_{2,3} (main) has already
+        # failed if neither flash_attn nor flash_attn_3 is importable.
 
         self.task = task
         self.tokenizer = tokenizer
@@ -1185,7 +1159,7 @@ def set_layer_checkpointing(layers, use_ckpt: bool, ckpt_every: int) -> None:
     """Per-micro-batch selective gradient checkpointing for the HF body. GradientCheckpointingLayer.__call__ reads
     the per-instance `gradient_checkpointing` flag at call time (transformers/modeling_layers.py:58-61, 93) and
     Trainer set it True on every layer at train start (trainer.py:2447 -> modeling_utils.py:3716-3730), so writing
-    `use_ckpt and (li % ckpt_every == 0)` before the forward recomputes exactly the layers the legacy loop did."""
+    `use_ckpt and (li % ckpt_every == 0)` before the forward recomputes exactly the layers the pre-refactor loop did."""
     for li, layer in enumerate(layers):
         layer.gradient_checkpointing = bool(use_ckpt and (li % ckpt_every == 0))
 
@@ -1201,7 +1175,7 @@ def eval_attn_sdpa(model):
     call time (modeling_qwen3.py:212-214, modeling_gpt_neox.py:173-175), so the switch is atomic across layers.
     The restore is asserted: a model left on SDPA would turn the packed position_ids with attention_mask=None into
     a dense [1, 1, T, T] mask (masking_utils.py:734-740, 795-832), about 13.7 GB of bool at T = 117,040.
-    No-op when the model already runs SDPA (NL_PACKING=custom loads it that way)."""
+    No-op when the model already runs SDPA."""
     pm = unwrap_model_for_body(model)
     train_impl = pm.config._attn_implementation
     if train_impl == "sdpa":
@@ -1221,7 +1195,7 @@ def eval_attn_sdpa(model):
 
 
 def _head_ce_and_preds(lm_head, shift_h, shift_labels, valid_mask, mode: str = NL_HEAD, chunk_size: int = 4096):
-    """Output head + per-row cross-entropy of one packed micro-batch (shared by both forward paths; CPU-testable).
+    """Output head + per-row cross-entropy of one packed micro-batch (CPU-testable).
 
     shift_h [Tm1, H], shift_labels [Tm1] (-100 = unlabelled), valid_mask = shift_labels != -100. Returns
     (ce [n_valid] in valid-row order, preds [Tm1] long, head_rows) where head_rows is how many rows went through
@@ -1235,8 +1209,8 @@ def _head_ce_and_preds(lm_head, shift_h, shift_labels, valid_mask, mode: str = N
     the valid rows of each slice; head_rows = Tm1.
     mode='sparse': lm_head only at rows = valid_mask.nonzero() (one call when n_valid <= chunk_size, otherwise
     chunk_size row pieces so the transient [rows, V] logits never exceed the full path's); preds is -1 at every
-    unlabelled row and the argmax at labelled rows, so every consumer (first-token and full-word gate metrics, the
-    parity dump) is untouched since they only ever read labelled rows (first_valid, span_valid); head_rows = n_valid.
+    unlabelled row and the argmax at labelled rows, so every consumer (the first-token and full-word gate metrics)
+    is untouched since they only ever read labelled rows (first_valid, span_valid); head_rows = n_valid.
     The two modes differ only by GEMM rounding (different row counts per cuBLAS call)."""
     Tm1 = shift_h.size(0)
     device = shift_h.device
@@ -1308,10 +1282,9 @@ def _blend_first_token_ce(ce, lm_head, shift_h, valid_mask, first_indices, first
 class PackedSequenceTrainer(Trainer):
     """
     Trainer for packed sequences: one flat [1, T] micro-batch with per-sequence position_ids and cu_seqlens.
-    Supports Qwen and GPT-NeoX (Pythia) architectures. NL_PACKING=hf runs the HF body through transformers' built-in
-    varlen flash-attention path (_hf_forward_body); NL_PACKING=custom runs legacy_varlen_forward.forward_body. The
-    head, loss and gate metrics are computed here in both modes (compute_loss -> _head_ce_and_preds, which under
-    NL_HEAD=sparse runs the lm_head on the labelled rows only; custom mode is pinned to the full per-row loop).
+    Supports Qwen and GPT-NeoX (Pythia) architectures. compute_loss runs the HF body through transformers' built-in
+    varlen flash-attention path (_hf_forward_body); the head, loss and gate metrics are computed here
+    (compute_loss -> _head_ce_and_preds, which under NL_HEAD=sparse runs the lm_head on the labelled rows only).
     """
 
     def __init__(self, *args, first_token_soft_weight=0.3, accuracy_window=1000, ce_chunk_size=4096, **kwargs):
@@ -1350,7 +1323,7 @@ class PackedSequenceTrainer(Trainer):
 
         # Cached model internals (populated on first compute_loss call)
         self._cached_model_parts = None
-        self._first_batch_checked = False   # hf mode: one-time cu_seqlens dtype/device, no-cache, no-autocast check
+        self._first_batch_checked = False   # one-time cu_seqlens dtype/device, no-cache, no-autocast check
 
         # NL_DDP_GRAD_AVERAGE=1: average trainable gradients across ranks after backward (see training_step).
         self._ddp_grad_average = os.environ.get("NL_DDP_GRAD_AVERAGE", "0") == "1"
@@ -1368,15 +1341,8 @@ class PackedSequenceTrainer(Trainer):
                        f"tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay "
                        f"6N*tokens, which overstates this path)")
         else:
-            _why = ("forced by NL_PACKING=custom (legacy path kept bit-identical)" if NL_PACKING == "custom"
-                    else "NL_HEAD=full")
-            rank_print(f"[HEAD] NL_HEAD=full ({_why}): chunked lm_head over every packed row, "
+            rank_print(f"[HEAD] NL_HEAD=full: chunked lm_head over every packed row, "
                        f"--ce_chunk_size={self.ce_chunk_size}")
-
-        # NL_PARITY_DUMP=1: one-time dumps for the old-vs-new parity test (see _write_parity_dump).
-        self._parity_dump = os.environ.get("NL_PARITY_DUMP", "0") == "1"
-        self._parity_first_batch_done = False
-        self._parity_grad_done = False
 
     def get_train_dataloader(self):
         """Bypass Accelerate's dataloader wrapping --use TrainingArguments settings."""
@@ -1405,9 +1371,6 @@ class PackedSequenceTrainer(Trainer):
         # window; clipping and the optimizer step follow in _inner_training_loop (trainer.py:2698-2718), so this is
         # the point where DistributedDataParallel would have reduced.
         if self.accelerator.sync_gradients:
-            if self._parity_dump and not self._parity_grad_done:
-                self._parity_grad_done = True
-                self._parity_dump_grads(model)
             if self._ddp_grad_average and dist_is_initialized():
                 self._all_reduce_grads(model)
         t1 = time.perf_counter()
@@ -1429,39 +1392,6 @@ class PackedSequenceTrainer(Trainer):
                     # all-reduce sequences desynchronise. Zero is the correct contribution to the average.
                     p.grad = torch.zeros_like(p)
                 torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.AVG)
-
-    def _write_parity_dump(self, name: str, payload: Dict[str, Any]) -> None:
-        """NL_PARITY_DUMP=1: write <output_dir>/parity_dump/<name>_rank<r>.json (one file per rank)."""
-        try:
-            d = os.path.join(self.args.output_dir, "parity_dump")
-            os.makedirs(d, exist_ok=True)
-            payload = dict(payload, rank=get_rank(), world_size=get_world_size(),
-                           global_step=int(self.state.global_step), packing=NL_PACKING, head=NL_HEAD,
-                           attn_implementation=NL_TRAIN_ATTN_IMPL)
-            with open(os.path.join(d, f"{name}_rank{get_rank()}.json"), "w") as f:
-                json.dump(payload, f, indent=1)
-            rank_print(f"[PARITY] wrote {name} dump(s) under {d}")
-        except Exception as e:
-            print(f"[PARITY][WARN] rank {get_rank()}: dump {name} failed: {e}", flush=True)
-
-    def _parity_dump_grads(self, model):
-        """NL_PARITY_DUMP=1: per trainable parameter, float64 sum / sum of squares of .grad and a sha256 of its raw
-        bytes, per rank, once the first optimizer step's backward is complete (before any NL_DDP_GRAD_AVERAGE
-        all-reduce and before clipping). Under the DDP bypass grads are per-rank quantities and the per-rank data
-        streams are index-seeded, so rank-by-rank comparison between the two paths is well defined."""
-        import hashlib
-        rec = {}
-        with torch.no_grad():
-            # Unwrapped names (no DDP 'module.' prefix), so they join with ParamSyncDebugCallback's per-parameter sums.
-            for n, p in unwrap_model_for_body(model).named_parameters():
-                if not p.requires_grad or p.grad is None:
-                    continue
-                g = p.grad.detach()
-                g64 = g.double()
-                raw = g.contiguous().cpu().view(torch.uint8).numpy().tobytes()
-                rec[n] = {"sum": g64.sum().item(), "sumsq": (g64 * g64).sum().item(),
-                          "dtype": str(g.dtype), "sha256": hashlib.sha256(raw).hexdigest()}
-        self._write_parity_dump(f"grads_step{int(self.state.global_step) + 1}", {"params": rec})
 
     def _report_train_timing(self):
         n = self._train_timing["steps"]
@@ -1492,19 +1422,15 @@ class PackedSequenceTrainer(Trainer):
         self._step_end_time = None
 
     def _get_model_parts(self, model):
-        """Cache model internals on first call to avoid repeated unwrapping. hf mode: {arch, unwrapped, inner,
-        lm_head} from resolve_model_parts; custom mode: the legacy loop's full dict from
-        legacy_varlen_forward.get_model_parts (embed, layers, norm, rotary_emb, head counts, rotary dims, ...)."""
+        """Cache model internals on first call to avoid repeated unwrapping: {arch, unwrapped, inner, lm_head} from
+        resolve_model_parts."""
         if self._cached_model_parts is None:
-            if NL_PACKING == "custom":
-                self._cached_model_parts = _legacy.get_model_parts(model)
-            else:
-                self._cached_model_parts = resolve_model_parts(model)
+            self._cached_model_parts = resolve_model_parts(model)
         return self._cached_model_parts
 
     def _resolve_ckpt_every(self, tokens: int) -> int:
         """Selective-checkpointing stride for this micro-batch (NL_CKPT_EVERY_N_LAYERS, gated by
-        NL_CKPT_RELAX_MAX_TOKENS on `tokens`) with the [CKPT-GATE] logging; shared by both forward paths."""
+        NL_CKPT_RELAX_MAX_TOKENS on `tokens`) with the [CKPT-GATE] logging."""
         # Selective checkpointing: recompute only every Nth layer. N=1 (default) is the historical
         # all-layers behaviour; larger N trades memory for a cheaper backward. Purely a
         # memory/compute dial -- gradients are identical either way.
@@ -1553,19 +1479,19 @@ class PackedSequenceTrainer(Trainer):
 
     def _hf_forward_body(self, model, input_ids, position_ids, cu_seqlens_list, max_seqlen_list,
                          use_ckpt: bool, ckpt_every: int):
-        """NL_PACKING=hf: run the HF transformer body (Qwen3Model / GPTNeoXModel) on one packed micro-batch through
-        transformers' built-in varlen flash-attention path; returns (h [T, H] after the final norm, lm_head).
+        """Run the HF transformer body (Qwen3Model / GPTNeoXModel) on one packed micro-batch through transformers'
+        built-in varlen flash-attention path; returns (h [T, H] after the final norm, lm_head).
 
         The body is called directly, not the CausalLM and not the DDP wrapper: the lm_head and loss stay ours
         (chunked, with the soft first-token blend), DistributedDataParallel.forward is bypassed exactly as before (no
         gradient averaging unless NL_DDP_GRAD_AVERAGE=1) and no autocast is entered (native bf16). With
         attention_mask=None the FA mask builder returns None (masking_utils.py:525-561, 627-628) and
         _flash_attention_forward takes the varlen branch with our cu_seqlens (modeling_flash_attention_utils.py:
-        600-603, 632-656); RoPE cos/sin come from the same rotary_emb module the legacy loop used
-        (modeling_qwen3.py:407), and Liger's module-level patches (RoPE, RMSNorm, SwiGLU) apply unchanged."""
+        600-603, 632-656); RoPE cos/sin come from the model's own rotary_emb module (modeling_qwen3.py:407), and
+        Liger's module-level patches (RoPE, RMSNorm, SwiGLU) apply unchanged."""
         mp = self._get_model_parts(model)
         inner, lm_head = mp['inner'], mp['lm_head']
-        # Selective gradient checkpointing, per micro-batch (same gate as the legacy loop).
+        # Selective gradient checkpointing, per micro-batch.
         set_layer_checkpointing(inner.layers, use_ckpt, ckpt_every)
         device = input_ids.device
         # int32 on purpose: FlashAttentionKwargs annotates cu_seq_lens_* as LongTensor (transformers 4.57.5,
@@ -1592,10 +1518,6 @@ class PackedSequenceTrainer(Trainer):
         return out.last_hidden_state[0], lm_head   # [T, H], after the final norm
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        if os.environ.get("NL_DEBUG_PARAM_SYNC") == "1" and not getattr(self, "_fwd_ctx_reported", False):
-            self._fwd_ctx_reported = True   # one-time report for the DDP / autocast audit (2026-10-09)
-            rank_print(f"[DEBUG] compute_loss: model is DDP-wrapped={hasattr(model, 'module')}, "
-                       f"torch.is_autocast_enabled()={torch.is_autocast_enabled()}")
         # Extract metadata
         sequence_info = inputs.pop("sequence_info")
         num_sequences = inputs.pop("num_sequences")
@@ -1623,14 +1545,10 @@ class PackedSequenceTrainer(Trainer):
 
         all_labels = labels_pad[0]        # [total_tokens]
 
-        # Transformer body -> h [total_tokens, H] after the final norm, plus the output head. Both paths bypass the
-        # DDP wrapper and run without autocast; everything from the shift onwards is shared and unchanged.
-        if NL_PACKING == "custom":
-            h, lm_head = _legacy.forward_body(self._get_model_parts(model), input_ids, position_ids,
-                                              cu_seqlens_list, max_seqlen_list, use_ckpt, ckpt_every)
-        else:
-            h, lm_head = self._hf_forward_body(model, input_ids, position_ids, cu_seqlens_list, max_seqlen_list,
-                                               use_ckpt, ckpt_every)
+        # Transformer body -> h [total_tokens, H] after the final norm, plus the output head. Bypasses the DDP
+        # wrapper and runs without autocast.
+        h, lm_head = self._hf_forward_body(model, input_ids, position_ids, cu_seqlens_list, max_seqlen_list,
+                                           use_ckpt, ckpt_every)
 
         # Shift for autoregressive loss (per-sequence boundaries are masked by -100 labels)
         shift_h = h[:-1, :]           # [Tm1, H]
@@ -1658,7 +1576,7 @@ class PackedSequenceTrainer(Trainer):
             first_valid = first_in_range & valid_mask[first_indices.clamp(0, Tm1 - 1)]
 
             # Output head + per-valid-row CE. NL_HEAD=sparse (default): lm_head only on the labelled rows, preds = -1
-            # elsewhere (every consumer below reads labelled rows only). NL_HEAD=full / custom mode: the chunked loop
+            # elsewhere (every consumer below reads labelled rows only). NL_HEAD=full: the chunked loop
             # over every row (full [Tm1, V] logits would be ~65 GiB). ce is ordered by ascending valid row either way.
             ce, preds, head_rows = _head_ce_and_preds(lm_head, shift_h, shift_labels, valid_mask,
                                                       mode=NL_HEAD, chunk_size=self.ce_chunk_size)
@@ -1732,19 +1650,6 @@ class PackedSequenceTrainer(Trainer):
                 else:
                     self.first_token_correct.extend(local_first)
                     self.full_word_correct.extend(local_full)
-
-            # NL_PARITY_DUMP=1: first micro-batch of each rank, for the old-vs-new parity test.
-            if self._parity_dump and not self._parity_first_batch_done:
-                self._parity_first_batch_done = True
-                self._write_parity_dump("first_microbatch", {
-                    "loss": float(loss.item()), "n_valid": int(n_valid), "tokens": int(self._last_batch_tokens),
-                    "num_sequences": int(num_sequences), "h_sum": float(h.float().sum().item()),
-                    "first_preds": [int(x) for x in first_pred_list],
-                    "local_first": [bool(b) for b in local_first], "local_full": [bool(b) for b in local_full],
-                    "search_loss": self._last_search_loss, "pretrain_loss": self._last_pretrain_loss,
-                    "autocast": bool(torch.is_autocast_enabled()), "ckpt_every": int(ckpt_every),
-                    "head_rows": int(head_rows), "n_preds_set": int((preds >= 0).sum().item()),
-                })
         else:
             loss = torch.tensor(0.0, device=device, requires_grad=True)
 
@@ -2470,9 +2375,6 @@ class FirstTokenCurriculum(TrainerCallback):
             eff = getattr(self.trainer, '_last_efficiency', None)
             if eff is not None:
                 extra_info += f" | eff={eff:.1f}%"
-            if os.environ.get("NL_PARITY_DUMP", "0") == "1" and torch.cuda.is_available():
-                # Parity-regime only (keeps production logs byte-identical): peak allocated memory so far.
-                extra_info += f" | peak_mem={torch.cuda.max_memory_allocated() / 2**30:.2f}GiB"
 
             # Format tokens/s with K suffix for readability
             tokens_per_sec_str = f"{tokens_per_sec / 1000:.1f}K" if tokens_per_sec >= 1000 else f"{tokens_per_sec:.0f}"
@@ -2742,44 +2644,6 @@ def _eval_data_fingerprint(inputs: List[str], labels: List[List[str]]) -> str:
     return hashlib.md5(content.encode()).hexdigest()[:12]
 
 
-class ParamSyncDebugCallback(TrainerCallback):
-    """NL_DEBUG_PARAM_SYNC=1 (2026-10-09): after every optimizer step, all-gather a float64 checksum of the
-    model parameters and report the spread across ranks. Zero spread = the ranks hold identical weights, i.e.
-    DDP gradient averaging is in effect; nonzero = each rank is training its own replica (the custom forward
-    bypasses DistributedDataParallel.forward, so the reducer's hooks are never armed)."""
-    def on_step_end(self, args, state, control, model=None, **kwargs):
-        if not dist_is_initialized() or model is None:
-            return
-        m = model.module if hasattr(model, "module") else model
-        # NL_PARITY_DUMP=1 additionally records the per-parameter float64 sums per rank (same terms, same order).
-        per_param = {} if os.environ.get("NL_PARITY_DUMP", "0") == "1" else None
-        with torch.no_grad():
-            dev = next(m.parameters()).device
-            s = torch.zeros((), dtype=torch.float64, device=dev)
-            for n, p in m.named_parameters():
-                ps = p.detach().double().sum()
-                s += ps
-                if per_param is not None:
-                    per_param[n] = ps.item()
-        gathered = [torch.zeros_like(s) for _ in range(get_world_size())]
-        torch.distributed.all_gather(gathered, s)
-        vals = [g.item() for g in gathered]
-        if is_main_process():
-            spread = max(vals) - min(vals)
-            # Line format is parsed by bench/compare_packing_bench.py (param_sync_lines); keep it unchanged.
-            print(f"[PARAM-SYNC] step {state.global_step}: per-rank param sums "
-                  f"{['%.6f' % v for v in vals]} | spread {spread:.3e} -> "
-                  f"{'IN SYNC' if spread == 0 else 'DIVERGED'}", flush=True)
-        if per_param is not None:
-            try:
-                d = os.path.join(args.output_dir, "parity_dump")
-                os.makedirs(d, exist_ok=True)
-                with open(os.path.join(d, f"param_sums_rank{get_rank()}.jsonl"), "a") as f:
-                    f.write(json.dumps({"step": int(state.global_step), "sums": per_param}) + "\n")
-            except Exception as e:
-                print(f"[PARITY][WARN] rank {get_rank()}: param sums dump failed: {e}", flush=True)
-
-
 def main():
     rank_print("FlashAttention available:", torch.backends.cuda.flash_sdp_enabled())
     rank_print("PyTorch version:", torch.__version__)
@@ -2850,8 +2714,6 @@ def main():
     p.add_argument("--max_lookahead", type=int, default=12)
     p.add_argument("--vocab_pool", type=str, default="none", choices=["none", "grow", "fixed"],
                    help="Entity-vocabulary curriculum: map each symbolic vertex ID to one fixed attribute name. grow = the ID range follows the stage (2(L+1) names at stage L; ID 0 is reserved); fixed = the ID range is pinned at the context maximum ((n-5)//3+1 names) throughout; none = fresh random names per instance (historical behaviour).")
-    p.add_argument("--fixed_vocab", action="store_true",
-                   help="Search ablation: keep max_vertex_id at its un-alpha-scaled max so the vertex-ID vocab does not scale with curriculum (graph size still scales). Search task only.")
 
     # Eval sizes / printing
     p.add_argument("--eval_samples", type=int, default=1000)
@@ -3017,23 +2879,13 @@ def main():
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     }
-    if NL_PACKING == "hf":
-        # The training forward runs the HF body through transformers' packed flash-attention path, so the kernel is
-        # chosen at load time (NL_ATTN_KERNEL: auto = FA3 on Hopper, else FA2). In-run evals are pinned to SDPA by
-        # eval_attn_sdpa, i.e. they stay on the transformers default that eval_checkpoints.py uses as well.
-        attn_impl_req = select_attn_implementation()
-        model_kwargs["attn_implementation"] = attn_impl_req
-        rank_print(f"[ATTN-KERNEL] NL_PACKING=hf NL_ATTN_KERNEL={_ATTN_KERNEL_REQ} -> "
-                   f"attn_implementation={attn_impl_req} (hopper={_is_hopper()}); in-run evals use sdpa")
-    else:
-        # NL_PACKING=custom: no attn_implementation, i.e. Hugging Face's default (SDPA) wherever the HF forward runs
-        # (the in-run evals), exactly as the paper runs loaded the model. Training never goes through it:
-        # compute_loss runs legacy_varlen_forward with its own FA3/FA2 kernel. (Until 2026-10-09 this was
-        # flash_attention_2 here and sdpa in tuning_nl_fa3.py.)
-        attn_impl_req = None
-        rank_print(f"[ATTN-KERNEL] NL_PACKING=custom NL_ATTN_KERNEL={_ATTN_KERNEL_REQ}: model loads with the "
-                   f"transformers default attention (sdpa); training uses legacy_varlen_forward "
-                   f"FA{_legacy.FLASH_ATTN_VERSION}")
+    # The training forward runs the HF body through transformers' packed flash-attention path, so the kernel is
+    # chosen at load time (NL_ATTN_KERNEL: auto = FA3 on Hopper, else FA2). In-run evals are pinned to SDPA by
+    # eval_attn_sdpa, i.e. they stay on the transformers default that eval_checkpoints.py uses as well.
+    attn_impl_req = select_attn_implementation()
+    model_kwargs["attn_implementation"] = attn_impl_req
+    rank_print(f"[ATTN-KERNEL] NL_ATTN_KERNEL={_ATTN_KERNEL_REQ} -> "
+               f"attn_implementation={attn_impl_req} (hopper={_is_hopper()}); in-run evals use sdpa")
 
     # Apply Liger fused ops (NOT cross entropy) — architecture-dependent
     # Only apply to compatible architectures (Qwen uses RMSNorm+SwiGLU; Pythia uses LayerNorm+GELU)
@@ -3078,28 +2930,27 @@ def main():
         print(f"[FLASH] mem_efficient_sdp_enabled: {torch.backends.cuda.mem_efficient_sdp_enabled()}")
         print(f"[FLASH] math_sdp_enabled: {torch.backends.cuda.math_sdp_enabled()}")
 
-    # Record the training attention implementation (eval_attn_sdpa restores and asserts it) and, in hf mode, check
-    # that the load honoured the request and that per-layer selective checkpointing can be applied.
+    # Record the training attention implementation (eval_attn_sdpa restores and asserts it) and check that the load
+    # honoured the request and that per-layer selective checkpointing can be applied.
     NL_TRAIN_ATTN_IMPL = getattr(model.config, "_attn_implementation", None)
-    if NL_PACKING == "hf":
-        assert NL_TRAIN_ATTN_IMPL == attn_impl_req, \
-            f"model loaded with attn_implementation={NL_TRAIN_ATTN_IMPL!r}, requested {attn_impl_req!r}"
-        from transformers.modeling_layers import GradientCheckpointingLayer
-        _body = resolve_model_parts(model)
-        _not_gcl = [type(l).__name__ for l in _body['inner'].layers if not isinstance(l, GradientCheckpointingLayer)]
-        assert not _not_gcl, ("per-layer selective checkpointing needs every decoder layer to be a "
-                              f"transformers GradientCheckpointingLayer; found {_not_gcl}")
-        # The config string says what was requested; check which varlen kernel transformers actually imports for it
-        # (FA3 lives in the top-level `flash_attn_interface` module, FA2 in `flash_attn.flash_attn_interface`).
-        import transformers.modeling_flash_attention_utils as _mfa
-        _mfa.lazy_import_flash_attention(NL_TRAIN_ATTN_IMPL, force_import=True)
-        _vfn = _mfa._flash_varlen_fn
-        _vmod = getattr(_vfn, "__module__", "") or ""
-        _want = "flash_attn_interface" if NL_TRAIN_ATTN_IMPL == "flash_attention_3" else "flash_attn"
-        assert _vfn is not None and _vmod.split(".")[0] == _want, \
-            f"transformers imported the varlen kernel from {_vmod!r}; expected package {_want!r} for {NL_TRAIN_ATTN_IMPL}"
-        rank_print(f"[ATTN-KERNEL] verified: config._attn_implementation={NL_TRAIN_ATTN_IMPL}; varlen kernel from "
-                   f"{_vmod}; {len(_body['inner'].layers)} {_body['arch']} decoder layers are GradientCheckpointingLayer")
+    assert NL_TRAIN_ATTN_IMPL == attn_impl_req, \
+        f"model loaded with attn_implementation={NL_TRAIN_ATTN_IMPL!r}, requested {attn_impl_req!r}"
+    from transformers.modeling_layers import GradientCheckpointingLayer
+    _body = resolve_model_parts(model)
+    _not_gcl = [type(l).__name__ for l in _body['inner'].layers if not isinstance(l, GradientCheckpointingLayer)]
+    assert not _not_gcl, ("per-layer selective checkpointing needs every decoder layer to be a "
+                          f"transformers GradientCheckpointingLayer; found {_not_gcl}")
+    # The config string says what was requested; check which varlen kernel transformers actually imports for it
+    # (FA3 lives in the top-level `flash_attn_interface` module, FA2 in `flash_attn.flash_attn_interface`).
+    import transformers.modeling_flash_attention_utils as _mfa
+    _mfa.lazy_import_flash_attention(NL_TRAIN_ATTN_IMPL, force_import=True)
+    _vfn = _mfa._flash_varlen_fn
+    _vmod = getattr(_vfn, "__module__", "") or ""
+    _want = "flash_attn_interface" if NL_TRAIN_ATTN_IMPL == "flash_attention_3" else "flash_attn"
+    assert _vfn is not None and _vmod.split(".")[0] == _want, \
+        f"transformers imported the varlen kernel from {_vmod!r}; expected package {_want!r} for {NL_TRAIN_ATTN_IMPL}"
+    rank_print(f"[ATTN-KERNEL] verified: config._attn_implementation={NL_TRAIN_ATTN_IMPL}; varlen kernel from "
+               f"{_vmod}; {len(_body['inner'].layers)} {_body['arch']} decoder layers are GradientCheckpointingLayer")
 
     # Gradient checkpointing
     if args.gradient_checkpointing:
@@ -3163,8 +3014,7 @@ def main():
     reserved_inputs: Set[str] = set()
 
     # Task kwargs (search is the only task; the dfs/si branches were removed 2026-10-09)
-    task_kwargs = {"max_lookahead": args.max_lookahead, "fixed_vocab": args.fixed_vocab,
-                   "vocab_pool": getattr(args, "vocab_pool", "none")}
+    task_kwargs = {"max_lookahead": args.max_lookahead, "vocab_pool": getattr(args, "vocab_pool", "none")}
 
     # ==================== GENERATE EVAL DATA ONCE ====================
     eval_inputs_hard, eval_labels_hard = None, None  # alpha=1.0 (hardest)
@@ -3251,7 +3101,7 @@ def main():
     )
     data_collator = lambda x: x[0]  # Identity
     effective_batch_size = 1
-    num_workers = int(os.environ.get("BENCH_NUM_WORKERS", 4))
+    num_workers = 4   # dataloader workers (a probing env override of this default was folded away 2026-10-09)
     curriculum = FirstTokenCurriculum(
         dataset=dataset,
         n_stages=args.n_stages,
@@ -3484,10 +3334,8 @@ def main():
         dataloader_num_workers=num_workers,
         # One __getitem__ produces an ENTIRE packed micro-batch, and generation time varies a lot
         # because sampling is rejection-based (up to 100 inner retries per sample). A depth of 2 is
-        # therefore a thin buffer against that variance. 4 costs only host RAM. NL_PREFETCH_FACTOR
-        # overrides it for probing.
-        dataloader_prefetch_factor=(int(os.environ.get("NL_PREFETCH_FACTOR", "4"))
-                                    if num_workers > 0 else None),
+        # therefore a thin buffer against that variance. 4 costs only host RAM.
+        dataloader_prefetch_factor=4 if num_workers > 0 else None,
         dataloader_persistent_workers=num_workers > 0,
         dataloader_pin_memory=True,
 
@@ -3548,7 +3396,7 @@ def main():
         train_dataset=dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        callbacks=[curriculum, baseline_cb] + ([ParamSyncDebugCallback()] if os.environ.get("NL_DEBUG_PARAM_SYNC") == "1" else []),
+        callbacks=[curriculum, baseline_cb],
         first_token_soft_weight=args.first_token_soft_weight,
         accuracy_window=args.accuracy_window,
         ce_chunk_size=args.ce_chunk_size,

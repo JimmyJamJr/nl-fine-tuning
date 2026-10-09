@@ -142,7 +142,7 @@ class NameAttributeGenerator:
     # duplicates skipped, so entry i is the same in every worker and rank). When id-mapping is
     # active, symbolic vertex ID i always renders as name_for_id(i). The symbolic generator draws
     # each instance's IDs uniformly from 1..max_vertex_id (ID 0 is reserved), and max_vertex_id =
-    # max_edges + 1 grows with the curriculum stage (2(L+1) names at stage L) or, with fixed_vocab,
+    # max_edges + 1 grows with the curriculum stage (2(L+1) names at stage L) or, with vocab_pool=fixed,
     # stays at the context maximum ((n-5)//3 + 1 names, 255 for n=768). The active vocabulary is
     # therefore exactly that ID range.
     POOL_SEED = 20260907
@@ -418,17 +418,18 @@ class NaturalLanguageGraphGenerator:
         if vocab_pool not in ('none', 'grow', 'fixed'):
             raise ValueError(f"unknown vocab_pool mode {vocab_pool!r}")
         self.id_name_map = (vocab_pool != 'none')          # fixed ID->name dictionary
-        fixed_vocab = bool(kwargs.get('fixed_vocab', False)) or (vocab_pool == 'fixed')   # pin the ID range at its maximum
+        # Pin the ID range at its maximum only under vocab_pool=fixed (generator.cpp's last argument, fixed_vocab).
+        pin_vocab = (vocab_pool == 'fixed')
         try:
             inputs, outputs, labels, _ = generator.generate_training_set(
                 self.max_input_size, batch_size, max_lookahead,
                 max_edges, reserved_inputs, distance_from_start,
-                max_prefix_vertices, True, alpha, fixed_vocab
+                max_prefix_vertices, True, alpha, pin_vocab
             )
         except TypeError:
-            # Older compiled generator without fixed_vocab support.
-            if fixed_vocab:
-                print("WARNING: compiled generator lacks fixed_vocab support; falling back to default. Recompile generator.cpp.")
+            # Older compiled generator without the pinned-ID-range argument.
+            if pin_vocab:
+                print("WARNING: compiled generator lacks the pinned-ID-range argument (vocab_pool=fixed); falling back to default. Recompile generator.cpp.")
             inputs, outputs, labels, _ = generator.generate_training_set(
                 self.max_input_size, batch_size, max_lookahead,
                 max_edges, reserved_inputs, distance_from_start,

@@ -12,7 +12,7 @@ command -v torchrun >/dev/null 2>&1 || { module load conda; conda activate searc
 export SCRATCH="/scratch/gautschi/$USER" HF_HOME="/scratch/gautschi/$USER/model_cache" TORCH_HOME="/scratch/gautschi/$USER/model_cache"
 export HF_HUB_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false
 export TRITON_CACHE_DIR="$SCRATCH/triton_cache_pbench"; mkdir -p bench
-export NL_PACKING=hf NL_ATTN_KERNEL=fa3 NL_CKPT_EVERY_N_LAYERS=2 NL_CKPT_RELAX_MAX_TOKENS=88000
+export NL_ATTN_KERNEL=fa3 NL_CKPT_EVERY_N_LAYERS=2 NL_CKPT_RELAX_MAX_TOKENS=88000
 GPUS_PER_NODE=$(echo "${SLURM_JOB_GPUS:-}" | tr "," "\n" | grep -c .)
 export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-56} / GPUS_PER_NODE ))
 COMMON=(--task search --cache_dir "$HF_HOME" --output_dir "$SCRATCH/nl_output" --scratch_dir "$SCRATCH"

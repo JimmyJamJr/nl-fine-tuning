@@ -7,7 +7,7 @@ Prints sha256 hashes of
   (b) input_ids / labels / position_ids / cu_seqlens of PackedSequenceDataset items 0, 1, 2 at stage 1 and at
       stage 5, the dataset built exactly as tuning_nl.main() builds it for the paper config (Qwen/Qwen3-0.6B
       tokenizer, batch_size 48, max_input_size 768, --linear_lookahead --base_lookahead 8 --lookahead_step 8
-      --max_lookahead 128, seed 1234, no pretrain mix, no chat template, NL_PACKING=hf).
+      --max_lookahead 128, seed 1234, no pretrain mix, no chat template; no env vars needed).
 Only the hash lines go to stdout; import-time and dataset chatter goes to stderr, so
     cd nl && /home/huan2073/.conda/envs/search/bin/python bench/test_datastream.py > bench/test_datastream.reference.txt
     cd nl && /home/huan2073/.conda/envs/search/bin/python bench/test_datastream.py | diff - bench/test_datastream.reference.txt
@@ -25,7 +25,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 NL_DIR = os.path.abspath(os.path.join(HERE, ".."))
 os.chdir(NL_DIR)  # nl_generator compiles / checks generator.cpp relative to the cwd
 sys.path.insert(0, NL_DIR)
-os.environ.setdefault("NL_PACKING", "hf")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -66,7 +65,7 @@ def part_a() -> None:
 
 
 def build_dataset(tokenizer) -> PackedSequenceDataset:
-    task_kwargs = {"max_lookahead": MAX_L, "fixed_vocab": False, "vocab_pool": "none"}
+    task_kwargs = {"max_lookahead": MAX_L, "vocab_pool": "none"}
     kwargs = dict(
         task="search",
         tokenizer=tokenizer,
