@@ -26,7 +26,9 @@ if [ "${DETERMINISTIC:-0}" = 1 ]; then
   export NL_DEBUG_PARAM_SYNC=1   # [PARAM-SYNC] per-rank parameter checksums every step: must match bitwise old vs new
 fi
 GPUS_PER_NODE=$(echo "${SLURM_JOB_GPUS:-}" | tr "," "\n" | grep -c .)
-[ "$GPUS_PER_NODE" -eq 4 ] || { echo "FATAL: need 4 GPUs (SLURM_JOB_GPUS='${SLURM_JOB_GPUS:-}')"; exit 1; }
+# NGPUS (default 4): the per-GPU work (48 x GA 4) is fixed, so a 1-GPU arm reproduces rank 0 of a 4-GPU arm exactly
+# (per-rank seeded data, no cross-rank gradient averaging); tokens/step scale with the GPU count. Use TAG=_1g.
+[ "$GPUS_PER_NODE" -eq "${NGPUS:-4}" ] || { echo "FATAL: need ${NGPUS:-4} GPUs (SLURM_JOB_GPUS='${SLURM_JOB_GPUS:-}')"; exit 1; }
 export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-56} / GPUS_PER_NODE ))
 
 # TAG (optional, e.g. _h017): distinguishes arms re-run on another node; step times are only comparable within a node.
