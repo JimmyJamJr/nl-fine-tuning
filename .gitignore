@@ -13,6 +13,7 @@ pre_pretrain/OLMo
 **/slurm/
 # benchmark artifacts (nl/bench/: per-arm training logs, nvidia-smi memory samples, launcher output)
 nl/bench/*.txt
+!nl/bench/test_datastream.reference.txt
 nl/bench/*.csv
 nl/bench/*.out
 nl/bench/GO

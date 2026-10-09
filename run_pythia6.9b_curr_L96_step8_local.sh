@@ -85,9 +85,7 @@ MODEL_NAME="EleutherAI/pythia-6.9b"
 BATCH_SIZE="${BATCH_SIZE:-24}"
 GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-4}"
 LEARNING_RATE=2e-5
-WARMUP_STEPS=400
 SEED=1234
-NUM_SHOTS=0
 FIRST_TOKEN_SOFT_WEIGHT=0.0
 
 # Curriculum — step=8, L=8..96 (12 stages). Matches 160M/410M/1B runs.
@@ -103,17 +101,13 @@ EVAL_EVERY_STEPS=1000
 # Task — target L=96, max_input = 6 * L = 576
 MAX_INPUT_SIZE="${MAX_INPUT_SIZE:-576}"
 MAX_LOOKAHEAD="${MAX_LOOKAHEAD:-96}"
-MAX_FRONTIER_SIZE=12
-MAX_BRANCH_SIZE=12
-REQUESTED_BACKTRACK=3
 
 # Memory
 # H200 141GB has headroom: state ~83GB + activations ~25GB at batch 24 = ~108GB.
 # GC off for ~25% speedup; flip to true if late-stage OOM (like Jackie hit on 1.4B).
 GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-false}"
 USE_LIGER=false               # Pythia not supported
-USE_CHUNKED_CE=true
-CE_CHUNK_SIZE=4096
+CE_CHUNK_SIZE=4096            # chunked CE is always on; its old enable flag was removed 2026-10-09
 
 # Evaluation — all in-training evals OFF; eval checkpoints offline instead.
 # Stage advancement is driven by accuracy_threshold + recent_losses, independent
@@ -122,8 +116,6 @@ EVAL_SAMPLES=500
 PRINT_EVAL_EXAMPLES=0
 DO_BASELINE=false
 DO_FINAL_EVAL=false
-DO_REDACTED_EVAL=false
-DO_SEEN_EVAL=false
 DO_STAGE_EVAL=false
 
 # Rolling checkpoint window. stage_checkpoints/ + persistent_checkpoints/ are
@@ -161,9 +153,7 @@ ARGS=(
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --learning_rate "$LEARNING_RATE"
-    --warmup_steps "$WARMUP_STEPS"
     --seed "$SEED"
-    --num_shots "$NUM_SHOTS"
     --first_token_soft_weight "$FIRST_TOKEN_SOFT_WEIGHT"
 
     --n_stages "$N_STAGES"
@@ -177,13 +167,11 @@ ARGS=(
 
     --max_input_size "$MAX_INPUT_SIZE"
     --max_lookahead "$MAX_LOOKAHEAD"
-    --max_frontier_size "$MAX_FRONTIER_SIZE"
-    --max_branch_size "$MAX_BRANCH_SIZE"
-    --requested_backtrack "$REQUESTED_BACKTRACK"
 
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
     --save_total_limit "$SAVE_TOTAL_LIMIT"
+    --ce_chunk_size "$CE_CHUNK_SIZE"
 
     --use_packing
 
@@ -194,11 +182,8 @@ ARGS=(
 
 $GRADIENT_CHECKPOINTING && ARGS+=(--gradient_checkpointing)
 $USE_LIGER && ARGS+=(--use_liger)
-$USE_CHUNKED_CE && ARGS+=(--use_chunked_ce --ce_chunk_size "$CE_CHUNK_SIZE")
 $DO_BASELINE && ARGS+=(--do_baseline)
 $DO_FINAL_EVAL && ARGS+=(--do_final_eval)
-$DO_REDACTED_EVAL && ARGS+=(--do_redacted_eval)
-$DO_SEEN_EVAL && ARGS+=(--do_seen_eval)
 $DO_STAGE_EVAL && ARGS+=(--do_stage_eval)
 [ -n "$PREV_JOB_ID" ] && ARGS+=(--resume_from_job "$PREV_JOB_ID")
 
