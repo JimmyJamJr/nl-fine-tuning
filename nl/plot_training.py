@@ -1239,7 +1239,9 @@ def main():
     print("Done.")
 
 
-def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Combined"):
+def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Combined",
+                             inline_plateau=False, max_pflops=None, log_x=False,
+                             log_y=False, fig_width=11.0, no_labels=False):
     """Generate combined plots for multiple training runs on the same axes.
 
     Args:
@@ -1248,6 +1250,16 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
         colors: list of matplotlib colors
         out_dir: directory to save combined plots
         title_prefix: prefix for plot titles
+        inline_plateau: if True, place L=… annotations at plateau onset
+            instead of at the right edge (helps when multiple runs end at
+            nearby compute, e.g. step-size sweep).
+        max_pflops: if set, cap the PFLOPs x-axis at this value (PFLOPs).
+            Otherwise auto-fit to the longest run.
+        log_x: if True, use log scale on the PFLOPs x-axis. xmin is set to
+            the smallest nonzero stage transition across runs.
+        log_y: if True, use log scale on the lookahead y-axis (lookahead
+            plots only).
+        fig_width: figure width in inches (default 11). Height is fixed at 5.
     """
     import matplotlib
     matplotlib.use('Agg')
@@ -1366,9 +1378,10 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
                 transitions.append((i, e.get("effective_L", "?")))
                 prev = e["stage"]
 
+        cum_tokens = np.cumsum(tokens)
         runs[label] = {
             "h": h, "steps": steps, "losses": losses, "smoothed": smoothed,
-            "cum_pflops": cum_pflops, "gpu_hours": gpu_hours,
+            "cum_pflops": cum_pflops, "gpu_hours": gpu_hours, "cum_tokens": cum_tokens,
             "transitions": transitions, "evals": merged_evals, "color": color,
         }
         _print(f"Loaded {label}: {len(h):,} entries, L={h[-1].get('effective_L')}")
@@ -1415,6 +1428,12 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
         ax.set_title(f'Training Loss vs {xlabel} — {title_prefix}')
         ax.legend(loc="upper right", fontsize=9)
         ax.grid(True, alpha=0.3, which="both")
+        if x_key == "pflops":
+            if max_pflops is not None:
+                ax.set_xlim(0, max_pflops)
+            else:
+                max_pf = max(md["cum_pflops"][-1] for md in runs.values()) * 1.02
+                ax.set_xlim(0, max_pf)
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, fn), dpi=150)
         plt.close()
@@ -1425,49 +1444,117 @@ def generate_combined_plots(job_dirs, labels, colors, out_dir, title_prefix="Com
     # we can reuse them later for the ratio plot.
     per_run_stages = {}  # label -> {"pflops": [(pflop, L), ...], "gpu_hours": [(gh, L), ...]}
     for label, md in runs.items():
-        stages_pflops = [(0, md["h"][0].get("effective_L", 0))]
-        stages_gpuh = [(0, md["h"][0].get("effective_L", 0))]
+        # Seed at the first logged datapoint rather than (0, base_L). For
+        # linear axes this is visually equivalent (the seed is near the
+        # origin); for log axes it ensures every run's line originates from
+        # a comparable small-but-positive x rather than being clipped or
+        # dropped, which previously made larger-step runs look "shorter".
+        seed_pf = float(md["cum_pflops"][0]) if len(md["cum_pflops"]) else 0.0
+        seed_gh = float(md["gpu_hours"][0]) if len(md["gpu_hours"]) else 0.0
+        seed_tk = float(md["cum_tokens"][0]) if len(md["cum_tokens"]) else 0.0
+        stages_pflops = [(seed_pf, md["h"][0].get("effective_L", 0))]
+        stages_gpuh = [(seed_gh, md["h"][0].get("effective_L", 0))]
+        stages_tokens = [(seed_tk, md["h"][0].get("effective_L", 0))]
         prev = md["h"][0]["stage"]
         for i, e in enumerate(md["h"]):
             if e["stage"] != prev:
                 L = e.get("effective_L", 0)
                 stages_pflops.append((md["cum_pflops"][i], L))
                 stages_gpuh.append((md["gpu_hours"][i], L))
+                stages_tokens.append((md["cum_tokens"][i], L))
                 prev = e["stage"]
         stages_pflops.append((md["cum_pflops"][-1], md["h"][-1].get("effective_L", 0)))
         stages_gpuh.append((md["gpu_hours"][-1], md["h"][-1].get("effective_L", 0)))
-        per_run_stages[label] = {"pflops": stages_pflops, "gpu_hours": stages_gpuh}
+        stages_tokens.append((md["cum_tokens"][-1], md["h"][-1].get("effective_L", 0)))
+        per_run_stages[label] = {"pflops": stages_pflops, "gpu_hours": stages_gpuh, "tokens": stages_tokens}
 
-    def _annotate_stages_boxed(ax, stages, color, labeled_every=1, y_offset=0.5):
-        """Boxed L=N label only at the highest L reached (last point of the chain)."""
+    def _annotate_stages_boxed(ax, stages, color, labeled_every=1, y_offset=0.5,
+                                inline_plateau=False):
+        """Boxed L=N label.
+
+        Default: label at the highest L reached (last point WITHIN xlim).
+        inline_plateau=True: label at the plateau-onset x (first time the run
+        attains its final L), so multiple runs that all top out near the right
+        edge don't pile up on top of each other.
+        """
         valid = [(x, L) for x, L in stages if L > 0]
         if not valid:
             return
-        # Last achieved L (final point of the trace)
-        x, L = valid[-1]
+        xlim_min, xlim_max = ax.get_xlim()
+        if inline_plateau:
+            within = [(x, L) for x, L in valid if x <= xlim_max]
+            if not within:
+                return
+            # Highest L reached within the visible range — for plateaued runs
+            # this picks the plateau value; for non-plateaued runs it picks
+            # the right-edge value, so every run still gets a label.
+            visible_max_L = max(L for _, L in within)
+            x = next(x for x, L in within if L == visible_max_L)
+            L = visible_max_L
+            edge_thresh = xlim_min + 0.92 * (xlim_max - xlim_min)
+            ha = "right" if x >= edge_thresh else "left"
+        else:
+            within = [(x, L) for x, L in valid if x <= xlim_max]
+            if not within:
+                return
+            x, L = within[-1]
+            edge_thresh = xlim_min + 0.95 * (xlim_max - xlim_min)
+            ha = "right" if x >= edge_thresh else "center"
         ax.text(x, L + y_offset, f"L={L}", fontsize=7, color=color,
-                ha="center", va="bottom",
+                ha=ha, va="bottom",
                 bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color,
                           lw=0.5, alpha=0.9))
 
     for axis_key, xlabel, fname in [
         ("pflops",    "Cumulative Compute (PFLOPs)", "lookahead_vs_flops.png"),
         ("gpu_hours", "GPU-hours",                   "lookahead_vs_gpu_hours.png"),
+        ("tokens",    "Cumulative Tokens",           "lookahead_vs_tokens.png"),
     ]:
-        fig, ax = plt.subplots(figsize=(11, 5))
+        fig, ax = plt.subplots(figsize=(fig_width, 5))
         for label, md in runs.items():
             stages = per_run_stages[label][axis_key]
+            # On log axes, drop the (0, base_L) seed point — it would
+            # otherwise render as a long horizontal segment from xmin to the
+            # first actual stage transition, falsely implying the model held
+            # that L for many decades of compute. Also drop any (x, 0)
+            # entries when log_y is on.
+            if (log_x and axis_key == "pflops") or log_y:
+                stages = [(x, L) for x, L in stages
+                          if (not log_x or axis_key != "pflops" or x > 0)
+                          and (not log_y or L > 0)]
+                if not stages:
+                    continue
             xs, ys = zip(*stages)
             ax.plot(xs, ys, "-", linewidth=2, color=md["color"], label=label)
-            # Auto-pick label density: if >20 stages, label every Nth so it's not crowded
-            n_stages = len({L for _, L in stages if L > 0})
-            labeled_every = max(1, n_stages // 16)
-            _annotate_stages_boxed(ax, stages, md["color"], labeled_every=labeled_every)
         ax.set_xlabel(xlabel)
         ax.set_ylabel('Achieved Lookahead (L)')
         ax.set_title(f'Achieved Lookahead vs {xlabel} — {title_prefix}')
         ax.legend(loc="lower right", fontsize=9)
-        ax.set_ylim(bottom=0)
+        if log_y:
+            ax.set_yscale("log")
+        else:
+            ax.set_ylim(bottom=0)
+        if axis_key == "pflops":
+            xmax = max_pflops if max_pflops is not None else \
+                   max(md["cum_pflops"][-1] for md in runs.values()) * 1.02
+            if log_x:
+                # Smallest nonzero stage transition across runs — gives the
+                # earliest meaningful x for log scale.
+                xmin = min((x for label, md in runs.items()
+                            for x, L in per_run_stages[label]["pflops"]
+                            if x > 0), default=1.0)
+                ax.set_xscale("log")
+                ax.set_xlim(xmin, xmax)
+            else:
+                ax.set_xlim(0, xmax)
+        # Annotate AFTER xlim is set so labels stay within visible area
+        if not no_labels:
+            for label, md in runs.items():
+                stages = per_run_stages[label][axis_key]
+                n_stages = len({L for _, L in stages if L > 0})
+                labeled_every = max(1, n_stages // 16)
+                _annotate_stages_boxed(ax, stages, md["color"], labeled_every=labeled_every,
+                                       inline_plateau=inline_plateau)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(os.path.join(out_dir, fname), dpi=150)
@@ -1562,6 +1649,18 @@ def combined_main():
                         help="Each run as dir:label:color (e.g. /path/to/job:'Pythia-410M (lr=5e-5, bs=192)':#FF9800)")
     parser.add_argument("--out_dir", required=True, help="Output directory for combined plots")
     parser.add_argument("--title", default="Combined", help="Title prefix for plots")
+    parser.add_argument("--inline_plateau", action="store_true",
+                        help="Place L=... labels at plateau onset rather than the right edge")
+    parser.add_argument("--max_pflops", type=float, default=None,
+                        help="Cap the PFLOPs x-axis at this value (e.g. 300000)")
+    parser.add_argument("--log_x", action="store_true",
+                        help="Use log scale on the PFLOPs x-axis")
+    parser.add_argument("--log_y", action="store_true",
+                        help="Use log scale on the lookahead y-axis")
+    parser.add_argument("--width", type=float, default=11.0,
+                        help="Figure width in inches (default 11)")
+    parser.add_argument("--no_labels", action="store_true",
+                        help="Suppress L=... labels on lookahead plots")
     args = parser.parse_args()
 
     job_dirs, labels, colors = [], [], []
@@ -1574,7 +1673,13 @@ def combined_main():
         labels.append(parts[1])
         colors.append(parts[2])
 
-    generate_combined_plots(job_dirs, labels, colors, args.out_dir, args.title)
+    generate_combined_plots(job_dirs, labels, colors, args.out_dir, args.title,
+                             inline_plateau=args.inline_plateau,
+                             max_pflops=args.max_pflops,
+                             log_x=args.log_x,
+                             log_y=args.log_y,
+                             fig_width=args.width,
+                             no_labels=args.no_labels)
     print("Done.")
 
 

@@ -55,7 +55,7 @@ BENCHMARKS=(
     logicbench_bqa logicbench_mcqa
     multilogieval multilogieval_fs
     nlgraph_gen
-    legal
+    # legal — dropped; LegalBench removed from suite
     # chess_mate — dropped; 0% (exact + first_move) across all 12 models at 0.6-1.7B scale
     zebra_mc zebra_mc_fs
 )

@@ -145,6 +145,41 @@ class NameAttributeGenerator:
         random.shuffle(attributes)
         return attributes
 
+    # ---- fixed vertex-ID -> attribute-name dictionary (entity-vocabulary curriculum) ----
+    # One deterministic list of attribute names (seed POOL_SEED, generated sequentially with
+    # duplicates skipped, so entry i is the same in every worker and rank). When id-mapping is
+    # active, symbolic vertex ID i always renders as name_for_id(i). The symbolic generator draws
+    # each instance's IDs uniformly from 1..max_vertex_id (ID 0 is reserved), and max_vertex_id =
+    # max_edges + 1 grows with the curriculum stage (2(L+1) names at stage L) or, with fixed_vocab,
+    # stays at the context maximum ((n-5)//3 + 1 names, 255 for n=768). The active vocabulary is
+    # therefore exactly that ID range.
+    POOL_SEED = 20260907
+    _pool = None
+
+    def _attribute_with(self, rng) -> str:
+        vowels = "aeiou"; consonants = "bcdfghjklmnpqrstvwxyz"
+        patterns = ["CV", "VC", "CVC", "CVV", "CCV", "VCV", "VCC"]
+        out = ""
+        for _ in range(2):
+            for ch in rng.choice(patterns):
+                out += rng.choice(consonants) if ch == "C" else rng.choice(vowels)
+        return out
+
+    def _ensure_pool(self, n: int):
+        if self._pool is not None and len(self._pool) >= n:
+            return
+        rng = random.Random(self.POOL_SEED)
+        pool, seen = [], set()
+        while len(pool) < n:
+            a = self._attribute_with(rng)
+            if a not in seen:
+                seen.add(a); pool.append(a)
+        self._pool = pool
+
+    def name_for_id(self, vertex_id: int) -> str:
+        self._ensure_pool(int(vertex_id) + 1)
+        return self._pool[int(vertex_id)]
+
 
 def convert_to_int(value):
     """Safely convert any numeric type to Python int"""
@@ -312,9 +347,13 @@ class NaturalLanguageGraphGenerator:
         # Use one name for all nodes unless use_different_names is True
         num_nodes = len(node_ids)
         all_names = self.name_gen.generate_names(num_nodes if use_different_names else 1)
-        all_attributes = self.name_gen.generate_attributes(num_nodes)
-        sorted_nodes = sorted(node_ids)
-        id_to_attr = {node_id: all_attributes[i] for i, node_id in enumerate(sorted_nodes)}
+        if getattr(self, "id_name_map", False):
+            # entity-vocabulary mode: vertex ID -> fixed attribute name
+            id_to_attr = {node_id: self.name_gen.name_for_id(node_id) for node_id in node_ids}
+        else:
+            all_attributes = self.name_gen.generate_attributes(num_nodes)
+            sorted_nodes = sorted(node_ids)
+            id_to_attr = {node_id: all_attributes[i] for i, node_id in enumerate(sorted_nodes)}
         name = all_names[0]
 
         # Facts in NL
@@ -590,7 +629,11 @@ class NaturalLanguageGraphGenerator:
             max_prefix_vertices = kwargs.get('max_prefix_vertices', self.max_input_size)
             alpha = kwargs.get('alpha', 1.0)
 
-            fixed_vocab = bool(kwargs.get('fixed_vocab', False))
+            vocab_pool = kwargs.get('vocab_pool', 'none') or 'none'
+            if vocab_pool not in ('none', 'grow', 'fixed'):
+                raise ValueError(f"unknown vocab_pool mode {vocab_pool!r}")
+            self.id_name_map = (vocab_pool != 'none')          # fixed ID->name dictionary
+            fixed_vocab = bool(kwargs.get('fixed_vocab', False)) or (vocab_pool == 'fixed')   # pin the ID range at its maximum
             try:
                 inputs, outputs, labels, _ = generator.generate_training_set(
                     self.max_input_size, batch_size, max_lookahead,
@@ -675,7 +718,11 @@ class NaturalLanguageGraphGenerator:
             max_prefix_vertices = kwargs.get('max_prefix_vertices', self.max_input_size)
             alpha = kwargs.get('alpha', 1.0)
 
-            fixed_vocab = bool(kwargs.get('fixed_vocab', False))
+            vocab_pool = kwargs.get('vocab_pool', 'none') or 'none'
+            if vocab_pool not in ('none', 'grow', 'fixed'):
+                raise ValueError(f"unknown vocab_pool mode {vocab_pool!r}")
+            self.id_name_map = (vocab_pool != 'none')          # fixed ID->name dictionary
+            fixed_vocab = bool(kwargs.get('fixed_vocab', False)) or (vocab_pool == 'fixed')   # pin the ID range at its maximum
             try:
                 inputs, outputs, labels, _ = generator.generate_training_set(
                     self.max_input_size, batch_size, max_lookahead,
