@@ -234,8 +234,6 @@ ARGS=(
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
 
-    --use_packing
-
     --linear_lookahead
     --base_lookahead 1
     --lookahead_step 1

@@ -74,8 +74,9 @@ _APPLY_ROPE_RESOLVED = False
 
 def _resolve_apply_rope():
     """RoPE implementation lookup (tuning_nl.py L1284-1296, verbatim). Resolved lazily on the first forward, as the
-    original did at train start inside _load_optimizer_and_scheduler, so that --use_liger's module-level patch of
-    modeling_qwen3.apply_rotary_pos_emb (applied in main() before the model loads) is the function picked up."""
+    original did at train start inside its override of Trainer's optimizer/scheduler loading hook (override removed
+    2026-10-09), so that --use_liger's module-level patch of modeling_qwen3.apply_rotary_pos_emb (applied in main()
+    before the model loads) is the function picked up."""
     global _APPLY_ROPE, _APPLY_ROPE_RESOLVED
     if _APPLY_ROPE_RESOLVED:
         return _APPLY_ROPE

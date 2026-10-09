@@ -17,7 +17,7 @@
 #
 # HYPERPARAMETERS. Copied from the joint run's command line (job 8555128): batch 48 x GA 4 x 4 GPUs = 768,
 # lr 5e-5 constant after a single 100-step warmup (the curriculum never reset or re-warmed the LR: lr_scheduler
-# "constant", no --stage_schedule), seed 1234, packing, liger, chunked CE, gradient checkpointing, no chat
+# "constant", no per-stage LR schedule), seed 1234, packing, liger, chunked CE, gradient checkpointing, no chat
 # template, no Dolci, in-run eval every 1000 steps on 500 items. Stage machinery disabled: accuracy_threshold
 # 1.01 can never be met, so the run stays in stage 1 (base_lookahead 120 is only the logged L). Stops at exactly
 # 22,125 steps (--max_train_steps); compute should land within ~1% of 81.8K PFLOPs (same examples, same tokens).
@@ -86,7 +86,6 @@ ARGS=(
     --max_lookahead 128
     --eval_samples 500
     --print_eval_examples 0
-    --use_packing
     --linear_lookahead
     --base_lookahead 120
     --lookahead_step 8

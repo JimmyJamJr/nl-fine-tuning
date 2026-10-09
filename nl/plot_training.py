@@ -172,10 +172,8 @@ def _build_plot_subtitle(metadata: Dict) -> str:
     if metadata.get("model_params_b"):
         parts.append(f"{metadata['model_params_b']:.2f}B params")
 
-    if metadata.get("use_packing"):
-        parts.append(f"Packed (target={metadata.get('target_samples', '?')})")
-    else:
-        parts.append(f"BS={metadata.get('batch_size', '?')}")
+    # Sequence packing is always on (the metadata flag was dropped 2026-10-09).
+    parts.append(f"Packed (target={metadata.get('target_samples', metadata.get('batch_size', '?'))})")
 
     if metadata.get("learning_rate"):
         parts.append(f"LR={metadata['learning_rate']:.1e}")

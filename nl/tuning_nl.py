@@ -299,7 +299,6 @@ def set_all_seeds(seed: int):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(true_seed)
         torch.cuda.manual_seed_all(true_seed)
-    os.environ["PYTHONHASHSEED"] = str(true_seed)
     try:
         from transformers import set_seed as hf_set_seed
         hf_set_seed(true_seed)
@@ -312,10 +311,7 @@ def set_all_seeds(seed: int):
 def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int, wall_time_offset: float = 0.0,
                            first_token_correct=None, full_word_correct=None,
                            recent_losses=None, samples_this_stage: int = 0,
-                           tokens_this_stage: int = 0,
-                           lr_reset_step: int = None,
-                           batch_increase_count: int = None,
-                           plateau_last_spike_step: int = None) -> None:
+                           tokens_this_stage: int = 0) -> None:
     try:
         os.makedirs(dirpath, exist_ok=True)
         fp = os.path.join(dirpath, "curriculum_state.json")
@@ -326,12 +322,6 @@ def _save_curriculum_state(dirpath: str, stage: int, stage_start_step: int, wall
             "samples_this_stage": int(samples_this_stage),
             "tokens_this_stage": int(tokens_this_stage),
         }
-        if lr_reset_step is not None:
-            data["lr_reset_step"] = int(lr_reset_step)
-        if batch_increase_count is not None:
-            data["batch_increase_count"] = int(batch_increase_count)
-        if plateau_last_spike_step is not None:
-            data["plateau_last_spike_step"] = int(plateau_last_spike_step)
         if first_token_correct is not None:
             data["first_token_correct"] = list(first_token_correct)
         if full_word_correct is not None:
@@ -498,12 +488,8 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
         }
         curriculum.samples_this_stage = int(cs.get("samples_this_stage", 0))
         curriculum.tokens_this_stage = int(cs.get("tokens_this_stage", 0))
-        if cs.get("lr_reset_step") is not None:
-            curriculum.lr_reset_step = int(cs["lr_reset_step"])
-        if cs.get("batch_increase_count") is not None:
-            curriculum.batch_increase_count = int(cs["batch_increase_count"])
-        if cs.get("plateau_last_spike_step") is not None:
-            curriculum.plateau_last_spike_step = int(cs["plateau_last_spike_step"])
+        # Old files may carry the three per-stage LR-schedule keys (family removed 2026-10-09); unknown keys are
+        # ignored. bench/test_curriculum_state_compat.py covers this.
         rank_print(
             f"[CURRICULUM] Restored stage={dataset.stage}, stage_start_step={curriculum.stage_start_step}, wall_time_offset={curriculum.wall_time_offset:.1f}s from {fp}")
     except Exception as e:
@@ -1346,8 +1332,9 @@ class PackedSequenceTrainer(Trainer):
         self._last_efficiency = None
 
         # Accumulate across micro-batches within one optimizer step (for grad_acc > 1).
-        # (Until 2026-10-09 this and the blocks below were initialised inside _load_optimizer_and_scheduler, which
-        # only worked because Trainer calls that hook unconditionally at train start.)
+        # (Until 2026-10-09 this and the blocks below were initialised inside an override of Trainer's
+        # optimizer/scheduler loading hook, which only worked because Trainer calls that hook unconditionally at
+        # train start.)
         self._step_samples = 0
         self._step_tokens = 0
         self._step_head_rows = 0   # rows the lm_head processed this optimizer step (reset with _step_tokens)
@@ -1390,27 +1377,6 @@ class PackedSequenceTrainer(Trainer):
         self._parity_dump = os.environ.get("NL_PARITY_DUMP", "0") == "1"
         self._parity_first_batch_done = False
         self._parity_grad_done = False
-
-    def _load_optimizer_and_scheduler(self, checkpoint):
-        """Override to handle scheduler state mismatches gracefully (e.g. when
-        switching from constant to stage_schedule between runs)."""
-        try:
-            super()._load_optimizer_and_scheduler(checkpoint)
-        except (KeyError, TypeError, ValueError) as e:
-            # Scheduler state from checkpoint is incompatible — load optimizer only
-            if is_main_process():
-                rank_print(f"[WARN] Scheduler state incompatible ({e}), loading optimizer only. "
-                           f"Scheduler will be recreated by stage_schedule.")
-            import os
-            if checkpoint:
-                sched_path = os.path.join(checkpoint, "scheduler.pt")
-                sched_bak = sched_path + ".bak"
-                if os.path.exists(sched_path):
-                    os.rename(sched_path, sched_bak)
-                    try:
-                        super()._load_optimizer_and_scheduler(checkpoint)
-                    finally:
-                        os.rename(sched_bak, sched_path)
 
     def get_train_dataloader(self):
         """Bypass Accelerate's dataloader wrapping --use TrainingArguments settings."""
@@ -2031,7 +1997,6 @@ class FirstTokenCurriculum(TrainerCallback):
             accuracy_threshold: float,
             min_steps_per_stage: int,
             check_every: int,
-            use_packing: bool = False,  # NEW
             # Stage eval config
             do_stage_eval: bool = False,
             stage_eval_every: int = 1,  # Run stage eval every N stage advancements (1=every stage)
@@ -2047,59 +2012,16 @@ class FirstTokenCurriculum(TrainerCallback):
             seed: int = None,
             persist_every: int = 2000,
             print_examples: int = 0,
-            lr_reset_on_stage: bool = False,
-            lr_reset_warmup: int = 50,
-            peak_lr: float = 1e-4,
-            stage_schedule: str = "none",
-            cosine_t_max: int = 3000,
-            cosine_t0: int = 10000,
-            cosine_t_mult: int = 2,
-            cosine_eta_min_ratio: float = 0.01,
-            batch_increase_factor: float = 2.0,
-            lr_spike_factor: float = 5.0,
-            lr_spike_steps: int = 200,
-            plateau_spike: bool = False,
-            plateau_action: str = "lr_spike",  # "lr_spike" or "batch_increase"
-            plateau_window: int = 5000,
-            plateau_threshold: float = 0.02,
-            plateau_cooldown: int = 10000,
     ):
         self.dataset = dataset
         self.n_stages = n_stages
         self.acc_thr = accuracy_threshold
         self.min_steps = min_steps_per_stage
         self.check_every = check_every
-        self.use_packing = use_packing
         self.trainer: Optional[PackedSequenceTrainer] = None
         self.stage_start_step = 0
         self._last_log = -1
         self.finished = False
-        # Backward compat: --lr_reset_on_stage maps to stage_schedule=warmup_reset
-        if lr_reset_on_stage and stage_schedule == "none":
-            stage_schedule = "warmup_reset"
-        self.stage_schedule = stage_schedule
-        self.lr_reset_warmup = lr_reset_warmup
-        self.peak_lr = peak_lr
-        self.lr_reset_step = None  # global_step when LR was last reset/changed
-        # Cosine decay params
-        self.cosine_t_max = cosine_t_max
-        self.cosine_t0 = cosine_t0
-        self.cosine_t_mult = cosine_t_mult
-        self.cosine_eta_min_ratio = cosine_eta_min_ratio
-        # Batch increase params
-        self.batch_increase_factor = batch_increase_factor
-        self.batch_increase_count = 0  # how many times we've increased
-        # LR spike params
-        self.lr_spike_factor = lr_spike_factor
-        self.lr_spike_steps = lr_spike_steps
-        # Plateau-triggered params
-        self.plateau_spike = plateau_spike
-        self.plateau_action = plateau_action
-        self.plateau_window = plateau_window
-        self.plateau_threshold = plateau_threshold
-        self.plateau_cooldown = plateau_cooldown
-        self.plateau_last_spike_step = -plateau_cooldown  # allow spike from the start
-        self.plateau_acc_history = []  # list of (step, full_word_acc)
 
         # Speed tracking
         self.stage_start_time = None
@@ -2152,263 +2074,6 @@ class FirstTokenCurriculum(TrainerCallback):
         self._jsonl_buffer = []
         self._jsonl_flush_every = 10  # Flush to disk every N entries
 
-    def _check_plateau_spike(self, state):
-        """Check if accuracy has plateaued, and if so spike LR temporarily."""
-        if not self.plateau_spike:
-            return
-        # Don't spike if we're already in a spike (lr_spike schedule active)
-        if self.lr_reset_step is not None and self.stage_schedule == "lr_spike":
-            steps_since = state.global_step - self.lr_reset_step
-            if steps_since < self.lr_spike_steps:
-                return
-        # Cooldown check
-        if state.global_step - self.plateau_last_spike_step < self.plateau_cooldown:
-            return
-        # Record current accuracy
-        fw = self.trainer.get_full_word_acc()
-        self.plateau_acc_history.append((state.global_step, fw))
-        # Need enough history
-        if len(self.plateau_acc_history) < 2:
-            return
-        # Check if we have data spanning plateau_window steps
-        oldest_step = self.plateau_acc_history[0][0]
-        if state.global_step - oldest_step < self.plateau_window:
-            return
-        # Trim history older than plateau_window
-        cutoff = state.global_step - self.plateau_window
-        while self.plateau_acc_history and self.plateau_acc_history[0][0] < cutoff:
-            self.plateau_acc_history.pop(0)
-        if len(self.plateau_acc_history) < 2:
-            return
-        # Compare: best acc in first half vs best acc in second half
-        mid_step = self.plateau_acc_history[0][0] + self.plateau_window // 2
-        first_half = [a for s, a in self.plateau_acc_history if s < mid_step]
-        second_half = [a for s, a in self.plateau_acc_history if s >= mid_step]
-        if not first_half or not second_half:
-            return
-        best_first = max(first_half)
-        best_second = max(second_half)
-        improvement = best_second - best_first
-        if improvement < self.plateau_threshold:
-            # Plateau detected
-            self.plateau_last_spike_step = state.global_step
-            self.plateau_acc_history.clear()  # reset history after action
-
-            if is_main_process():
-                print(f"[PLATEAU] Plateau detected! acc improvement={improvement:.4f} < {self.plateau_threshold} "
-                      f"over {self.plateau_window} steps (best_first={best_first:.2%}, best_second={best_second:.2%})")
-
-            if self.plateau_action == "lr_spike":
-                peak_lr = self.peak_lr
-                spike_factor = self.lr_spike_factor
-                spike_steps = self.lr_spike_steps
-                from torch.optim.lr_scheduler import LambdaLR
-
-                def lr_lambda(current_step):
-                    if current_step < spike_steps // 2:
-                        t = float(current_step) / float(max(1, spike_steps // 2))
-                        return 1.0 + (spike_factor - 1.0) * t
-                    elif current_step < spike_steps:
-                        t = float(current_step - spike_steps // 2) / float(max(1, spike_steps - spike_steps // 2))
-                        return spike_factor - (spike_factor - 1.0) * t
-                    else:
-                        return 1.0
-
-                for pg in self.trainer.optimizer.param_groups:
-                    pg['lr'] = peak_lr
-                    pg['initial_lr'] = peak_lr
-                self.trainer.lr_scheduler = LambdaLR(self.trainer.optimizer, lr_lambda, last_epoch=-1)
-                self.lr_reset_step = state.global_step
-                if is_main_process():
-                    max_lr = peak_lr * spike_factor
-                    print(f"[PLATEAU] Action: LR spike {peak_lr:.2e}→{max_lr:.2e}→{peak_lr:.2e} "
-                          f"over {spike_steps} steps at step {state.global_step}")
-
-            elif self.plateau_action == "batch_increase":
-                old_ga = self.trainer.args.gradient_accumulation_steps
-                new_ga = max(1, int(old_ga * self.batch_increase_factor))
-                if new_ga != old_ga:
-                    self.trainer.args.gradient_accumulation_steps = new_ga
-                    self.batch_increase_count += 1
-                    if is_main_process():
-                        eff_batch = self.trainer.args.per_device_train_batch_size * new_ga * max(1, torch.cuda.device_count())
-                        print(f"[PLATEAU] Action: batch increase grad_acc {old_ga}→{new_ga} "
-                              f"(eff_batch≈{eff_batch}, increase #{self.batch_increase_count}) "
-                              f"at step {state.global_step}")
-                elif is_main_process():
-                    print(f"[PLATEAU] Action: batch_increase requested but grad_acc unchanged at {old_ga}")
-
-    def _apply_stage_schedule(self, state):
-        """Apply LR/batch schedule strategy on stage advance."""
-        strategy = self.stage_schedule
-        peak_lr = self.peak_lr
-
-        if strategy == "warmup_reset":
-            # Warmup from 0 to peak_lr, then hold constant
-            from torch.optim.lr_scheduler import LambdaLR
-            warmup = self.lr_reset_warmup
-
-            def lr_lambda(current_step):
-                if current_step < warmup:
-                    return float(current_step) / float(max(1, warmup))
-                return 1.0
-
-            for pg in self.trainer.optimizer.param_groups:
-                pg['lr'] = peak_lr
-                pg['initial_lr'] = peak_lr
-            self.trainer.lr_scheduler = LambdaLR(self.trainer.optimizer, lr_lambda, last_epoch=-1)
-            self.lr_reset_step = state.global_step
-            if is_main_process():
-                print(f"[STAGE-SCHED] warmup_reset: LR→{peak_lr} with {warmup}-step warmup at step {state.global_step}")
-
-        elif strategy == "cosine_restart":
-            # CosineAnnealingLR — single cosine decay per stage, reset on advance
-            from torch.optim.lr_scheduler import CosineAnnealingLR
-            eta_min = peak_lr * self.cosine_eta_min_ratio
-
-            for pg in self.trainer.optimizer.param_groups:
-                pg['lr'] = peak_lr
-                pg['initial_lr'] = peak_lr
-            self.trainer.lr_scheduler = CosineAnnealingLR(
-                self.trainer.optimizer,
-                T_max=self.cosine_t_max,
-                eta_min=eta_min,
-            )
-            self.lr_reset_step = state.global_step
-            if is_main_process():
-                print(f"[STAGE-SCHED] cosine_decay: T_max={self.cosine_t_max}, "
-                      f"eta_min={eta_min:.2e}, peak={peak_lr:.2e} at step {state.global_step}")
-
-        elif strategy == "cosine_sgdr":
-            # CosineAnnealingWarmRestarts (SGDR) — cyclic cosine with periodic LR resets
-            from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-            eta_min = peak_lr * self.cosine_eta_min_ratio
-
-            for pg in self.trainer.optimizer.param_groups:
-                pg['lr'] = peak_lr
-                pg['initial_lr'] = peak_lr
-            self.trainer.lr_scheduler = CosineAnnealingWarmRestarts(
-                self.trainer.optimizer,
-                T_0=self.cosine_t0,
-                T_mult=self.cosine_t_mult,
-                eta_min=eta_min,
-            )
-            self.lr_reset_step = state.global_step
-            if is_main_process():
-                print(f"[STAGE-SCHED] cosine_sgdr: T_0={self.cosine_t0}, T_mult={self.cosine_t_mult}, "
-                      f"eta_min={eta_min:.2e}, peak={peak_lr:.2e} at step {state.global_step}")
-
-        elif strategy == "batch_increase":
-            # Increase gradient accumulation steps (simulates larger batch)
-            old_ga = self.trainer.args.gradient_accumulation_steps
-            new_ga = max(1, int(old_ga * self.batch_increase_factor))
-            if new_ga != old_ga:
-                self.trainer.args.gradient_accumulation_steps = new_ga
-                self.batch_increase_count += 1
-                if is_main_process():
-                    eff_batch = self.trainer.args.per_device_train_batch_size * new_ga * max(1, torch.cuda.device_count())
-                    print(f"[STAGE-SCHED] batch_increase: grad_acc {old_ga}→{new_ga} "
-                          f"(eff_batch≈{eff_batch}) at step {state.global_step}")
-
-        elif strategy == "lr_spike":
-            # Mini 1-cycle: spike LR up then decay back to peak
-            from torch.optim.lr_scheduler import LambdaLR
-            spike_factor = self.lr_spike_factor
-            spike_steps = self.lr_spike_steps
-
-            def lr_lambda(current_step):
-                if current_step < spike_steps // 2:
-                    # Phase 1: ramp up from 1.0 to spike_factor
-                    t = float(current_step) / float(max(1, spike_steps // 2))
-                    return 1.0 + (spike_factor - 1.0) * t
-                elif current_step < spike_steps:
-                    # Phase 2: ramp down from spike_factor to 1.0
-                    t = float(current_step - spike_steps // 2) / float(max(1, spike_steps - spike_steps // 2))
-                    return spike_factor - (spike_factor - 1.0) * t
-                else:
-                    # After spike: constant at peak
-                    return 1.0
-
-            for pg in self.trainer.optimizer.param_groups:
-                pg['lr'] = peak_lr
-                pg['initial_lr'] = peak_lr
-            self.trainer.lr_scheduler = LambdaLR(self.trainer.optimizer, lr_lambda, last_epoch=-1)
-            self.lr_reset_step = state.global_step
-            if is_main_process():
-                max_lr = peak_lr * spike_factor
-                print(f"[STAGE-SCHED] lr_spike: {peak_lr:.2e}→{max_lr:.2e}→{peak_lr:.2e} "
-                      f"over {spike_steps} steps at step {state.global_step}")
-
-    def _restore_stage_schedule(self, state):
-        """Restore LR scheduler after preemption resume (lambda not serialized)."""
-        strategy = self.stage_schedule
-        if strategy in ("warmup_reset", "cosine_restart", "cosine_sgdr", "lr_spike") and self.lr_reset_step is not None:
-            peak_lr = self.peak_lr
-            steps_since_reset = max(state.global_step - self.lr_reset_step, 0)
-
-            for pg in self.trainer.optimizer.param_groups:
-                pg['initial_lr'] = peak_lr
-
-            if strategy == "warmup_reset":
-                from torch.optim.lr_scheduler import LambdaLR
-                warmup = self.lr_reset_warmup
-
-                def lr_lambda(current_step):
-                    if current_step < warmup:
-                        return float(current_step) / float(max(1, warmup))
-                    return 1.0
-
-                new_sched = LambdaLR(self.trainer.optimizer, lr_lambda,
-                                     last_epoch=max(steps_since_reset - 1, -1))
-                self.trainer.lr_scheduler = new_sched
-
-            elif strategy == "cosine_restart":
-                from torch.optim.lr_scheduler import CosineAnnealingLR
-                eta_min = peak_lr * self.cosine_eta_min_ratio
-                new_sched = CosineAnnealingLR(
-                    self.trainer.optimizer,
-                    T_max=self.cosine_t_max,
-                    eta_min=eta_min,
-                    last_epoch=max(steps_since_reset - 1, -1),
-                )
-                self.trainer.lr_scheduler = new_sched
-
-            elif strategy == "cosine_sgdr":
-                from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-                eta_min = peak_lr * self.cosine_eta_min_ratio
-                new_sched = CosineAnnealingWarmRestarts(
-                    self.trainer.optimizer,
-                    T_0=self.cosine_t0,
-                    T_mult=self.cosine_t_mult,
-                    eta_min=eta_min,
-                    last_epoch=max(steps_since_reset - 1, -1),
-                )
-                self.trainer.lr_scheduler = new_sched
-
-            elif strategy == "lr_spike":
-                from torch.optim.lr_scheduler import LambdaLR
-                spike_factor = self.lr_spike_factor
-                spike_steps = self.lr_spike_steps
-
-                def lr_lambda(current_step):
-                    if current_step < spike_steps // 2:
-                        t = float(current_step) / float(max(1, spike_steps // 2))
-                        return 1.0 + (spike_factor - 1.0) * t
-                    elif current_step < spike_steps:
-                        t = float(current_step - spike_steps // 2) / float(max(1, spike_steps - spike_steps // 2))
-                        return spike_factor - (spike_factor - 1.0) * t
-                    else:
-                        return 1.0
-
-                new_sched = LambdaLR(self.trainer.optimizer, lr_lambda,
-                                     last_epoch=max(steps_since_reset - 1, -1))
-                self.trainer.lr_scheduler = new_sched
-
-            current_lr = self.trainer.optimizer.param_groups[0]['lr']
-            if is_main_process():
-                rank_print(f"[STAGE-SCHED] Restored {strategy} from step {self.lr_reset_step} "
-                          f"({steps_since_reset} steps ago), current lr={current_lr:.6e}")
-
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Capture grad_norm and lr from Transformers' logs"""
         if logs:
@@ -2426,26 +2091,6 @@ class FirstTokenCurriculum(TrainerCallback):
         # Track wall time
         if self.training_start_time is None:
             self.training_start_time = time.time()
-
-        # Apply or restore stage schedule
-        if self.stage_schedule != "none" and self.trainer.lr_scheduler is not None:
-            if self.lr_reset_step is not None:
-                # Resume: recreate scheduler at correct position
-                self._restore_stage_schedule(state)
-            else:
-                # Fresh start: apply schedule from Stage 1
-                self._apply_stage_schedule(state)
-
-        # Restore batch_increase: reapply accumulated gradient_accumulation increases
-        if self.stage_schedule == "batch_increase" and self.batch_increase_count > 0:
-            base_ga = self.trainer.args.gradient_accumulation_steps
-            new_ga = max(1, int(base_ga * (self.batch_increase_factor ** self.batch_increase_count)))
-            if new_ga != base_ga:
-                self.trainer.args.gradient_accumulation_steps = new_ga
-                if is_main_process():
-                    eff_batch = self.trainer.args.per_device_train_batch_size * new_ga * max(1, torch.cuda.device_count())
-                    rank_print(f"[STAGE-SCHED] Restored batch_increase: grad_acc={new_ga} "
-                              f"(increased {self.batch_increase_count}x, eff_batch≈{eff_batch})")
 
         return control
 
@@ -2476,10 +2121,7 @@ class FirstTokenCurriculum(TrainerCallback):
                                    full_word_correct=self.trainer.full_word_correct,
                                    recent_losses=self.trainer.recent_losses,
                                    samples_this_stage=self.samples_this_stage,
-                                   tokens_this_stage=self.tokens_this_stage,
-                                   lr_reset_step=self.lr_reset_step,
-                                   batch_increase_count=self.batch_increase_count if self.batch_increase_count else None,
-                                   plateau_last_spike_step=self.plateau_last_spike_step if self.plateau_spike else None)
+                                   tokens_this_stage=self.tokens_this_stage)
 
         if is_main_process():
             # Flush any buffered JSONL entries to disk
@@ -2560,10 +2202,7 @@ class FirstTokenCurriculum(TrainerCallback):
                                            full_word_correct=self.trainer.full_word_correct,
                                            recent_losses=self.trainer.recent_losses,
                                            samples_this_stage=self.samples_this_stage,
-                                           tokens_this_stage=self.tokens_this_stage,
-                                           lr_reset_step=self.lr_reset_step,
-                                   batch_increase_count=self.batch_increase_count if self.batch_increase_count else None,
-                                   plateau_last_spike_step=self.plateau_last_spike_step if self.plateau_spike else None)
+                                           tokens_this_stage=self.tokens_this_stage)
                 self._last_persist_step = state.global_step
             except Exception as e:
                 rank_print(f"[PERSIST] Warning: Could not save persistent checkpoint: {e}")
@@ -2787,17 +2426,16 @@ class FirstTokenCurriculum(TrainerCallback):
 
         current_time = datetime.datetime.now()
 
-        # ==================== Track Samples for Packing mode
+        # ==================== Track packed samples / tokens this optimizer step
         # Use accumulated values (correct with gradient_accumulation_steps > 1)
-        if self.use_packing:
-            if hasattr(self.trainer, '_step_samples'):
-                self.samples_this_stage += self.trainer._step_samples * get_world_size()
-            if hasattr(self.trainer, '_step_tokens'):
-                self.tokens_this_stage += self.trainer._step_tokens * get_world_size()
-            # Reset accumulators for next optimizer step
-            self.trainer._step_samples = 0
-            self.trainer._step_tokens = 0
-            self.trainer._step_head_rows = 0
+        if hasattr(self.trainer, '_step_samples'):
+            self.samples_this_stage += self.trainer._step_samples * get_world_size()
+        if hasattr(self.trainer, '_step_tokens'):
+            self.tokens_this_stage += self.trainer._step_tokens * get_world_size()
+        # Reset accumulators for next optimizer step
+        self.trainer._step_samples = 0
+        self.trainer._step_tokens = 0
+        self.trainer._step_head_rows = 0
 
         # ==================== Logging (every 10 steps) ====================
         if state.global_step % 10 == 0 and state.global_step != self._last_log and is_main_process():
@@ -2814,33 +2452,24 @@ class FirstTokenCurriculum(TrainerCallback):
                 stage_time = (current_time - self.stage_start_time).total_seconds()
                 stage_time_str = f"{stage_time / 60:.1f}m"
 
-                if self.use_packing:
-                    # Use actual tracked samples
-                    if stage_time > 0 and self.samples_this_stage > 0:
-                        samples_per_sec = self.samples_this_stage / stage_time
-                    if stage_time > 0 and self.tokens_this_stage > 0:
-                        tokens_per_sec = self.tokens_this_stage / stage_time
-                else:
-                    # Fixed batch size mode
-                    steps_in_stage = state.global_step - self.stage_start_step
-                    if steps_in_stage > 0 and stage_time > 0:
-                        batch_size = self.trainer.args.per_device_train_batch_size
-                        world_size = get_world_size()
-                        samples_per_sec = (steps_in_stage * batch_size * world_size) / stage_time
+                # Use actual tracked samples
+                if stage_time > 0 and self.samples_this_stage > 0:
+                    samples_per_sec = self.samples_this_stage / stage_time
+                if stage_time > 0 and self.tokens_this_stage > 0:
+                    tokens_per_sec = self.tokens_this_stage / stage_time
 
-            # Extra info for packing mode
+            # Packing stats
             extra_info = ""
-            if self.use_packing and self.samples_this_stage > 0:
+            if self.samples_this_stage > 0:
                 steps_in_stage = state.global_step - self.stage_start_step
                 if steps_in_stage > 0:
                     avg_seqs_per_step = self.samples_this_stage / steps_in_stage / get_world_size()
                     avg_tokens_per_step = self.tokens_this_stage / steps_in_stage / get_world_size() if self.tokens_this_stage > 0 else 0
                     extra_info = f" | seqs/step={avg_seqs_per_step:.1f} | toks/step={avg_tokens_per_step:.0f}"
 
-            if self.use_packing:
-                eff = getattr(self.trainer, '_last_efficiency', None)
-                if eff is not None:
-                    extra_info += f" | eff={eff:.1f}%"
+            eff = getattr(self.trainer, '_last_efficiency', None)
+            if eff is not None:
+                extra_info += f" | eff={eff:.1f}%"
             if os.environ.get("NL_PARITY_DUMP", "0") == "1" and torch.cuda.is_available():
                 # Parity-regime only (keeps production logs byte-identical): peak allocated memory so far.
                 extra_info += f" | peak_mem={torch.cuda.max_memory_allocated() / 2**30:.2f}GiB"
@@ -2895,10 +2524,6 @@ class FirstTokenCurriculum(TrainerCallback):
                                       self.plot_metadata)
                 plot_achieved_tflops(self.loss_history, self.trainer.args.output_dir, self.n_stages, self.plot_metadata)
 
-        # ==================== Plateau Spike Check ====================
-        if self.plateau_spike and state.global_step % self.check_every == 0:
-            self._check_plateau_spike(state)
-
         # ==================== Stage Advancement Check ====================
         if state.global_step % self.check_every == 0 and (state.global_step - self.stage_start_step) >= self.min_steps:
 
@@ -2918,15 +2543,11 @@ class FirstTokenCurriculum(TrainerCallback):
                         total_stage_time = (current_time - self.stage_start_time).total_seconds()
                         steps_in_stage = state.global_step - self.stage_start_step
 
-                        if self.use_packing:
-                            samples_per_sec = self.samples_this_stage / total_stage_time if total_stage_time > 0 else 0
-                            print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
-                                  f"{total_stage_time / 60:.1f} minutes | "
-                                  f"{self.samples_this_stage:,} samples | "
-                                  f"{samples_per_sec:.1f} samples/s")
-                        else:
-                            print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
-                                  f"{total_stage_time / 60:.1f} minutes")
+                        samples_per_sec = self.samples_this_stage / total_stage_time if total_stage_time > 0 else 0
+                        print(f"[COMPLETE] Stage {old_stage} complete in {steps_in_stage} steps, "
+                              f"{total_stage_time / 60:.1f} minutes | "
+                              f"{self.samples_this_stage:,} samples | "
+                              f"{samples_per_sec:.1f} samples/s")
                     else:
                         print(f"[COMPLETE] Stage {old_stage} complete")
 
@@ -2995,18 +2616,12 @@ class FirstTokenCurriculum(TrainerCallback):
                     # Clear accuracy tracking for fresh measurement
                     self.trainer.first_token_correct.clear()
                     self.trainer.full_word_correct.clear()
-                    if self.plateau_spike:
-                        self.plateau_acc_history.clear()
 
                     # Report and reset timing for new stage
                     if hasattr(self.trainer, '_report_train_timing'):
                         self.trainer._report_train_timing()
                     if hasattr(self.trainer, 'reset_timing'):
                         self.trainer.reset_timing()
-
-                    # Apply stage schedule strategy
-                    if self.stage_schedule != "none":
-                        self._apply_stage_schedule(state)
 
                     new_alpha = self.dataset._stage_alpha()
                     if is_main_process():
@@ -3034,10 +2649,7 @@ class FirstTokenCurriculum(TrainerCallback):
                                                full_word_correct=self.trainer.full_word_correct,
                                                recent_losses=self.trainer.recent_losses,
                                                samples_this_stage=self.samples_this_stage,
-                                               tokens_this_stage=self.tokens_this_stage,
-                                               lr_reset_step=self.lr_reset_step,
-                                   batch_increase_count=self.batch_increase_count if self.batch_increase_count else None,
-                                   plateau_last_spike_step=self.plateau_last_spike_step if self.plateau_spike else None)
+                                               tokens_this_stage=self.tokens_this_stage)
 
         return control
 
@@ -3169,7 +2781,6 @@ class ParamSyncDebugCallback(TrainerCallback):
 
 
 def main():
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     rank_print("FlashAttention available:", torch.backends.cuda.flash_sdp_enabled())
     rank_print("PyTorch version:", torch.__version__)
 
@@ -3181,7 +2792,9 @@ def main():
     p.add_argument("--task", type=str, choices=["search"], default="search")
     p.add_argument("--model_name", type=str, default="EleutherAI/pythia-160m")
     p.add_argument("--cache_dir", type=str, default=None)
-    p.add_argument("--output_dir", type=str, default="./nl_output")
+    p.add_argument("--output_dir", type=str, default=None,
+                   help="Output ROOT. The run directory is <output_dir>/<task>/job_<job_id> "
+                        "(local_<timestamp> without a job id). Default: <scratch_dir>/nl_output.")
 
     # Model initialization
     p.add_argument("--reinit_weights", action="store_true", default=False,
@@ -3197,11 +2810,11 @@ def main():
 
     # Training hyperparams
     p.add_argument("--batch_size", type=int, default=16,
-                   help="Samples per training step. With packing: target sequences packed per step. Without: per_device_train_batch_size.")
+                   help="Target sequences packed per optimizer step per device (sequence packing is always on).")
     p.add_argument("--gradient_accumulation_steps", type=int, default=1)
     p.add_argument("--learning_rate", type=float, default=2e-5)
-    # LR scheduling is handled by --stage_schedule (per-stage cosine/warmup_reset/SGDR). The global
-    # lr_scheduler_type is always "constant", with no global warmup — do not change.
+    # The learning rate is constant for the whole run: lr_scheduler_type is always "constant", with no warmup
+    # — do not change. (The per-stage reset/cosine/SGDR/spike/plateau schedule family was removed 2026-10-09.)
     p.add_argument("--first_token_soft_weight", type=float, default=0.3)
 
     # Curriculum
@@ -3266,45 +2879,15 @@ def main():
                    help="Stop training when cumulative compute reaches this many PFLOPS. 0=disabled.")
     p.add_argument("--save_total_limit", type=int, default=20,
                    help="Number of rolling checkpoint-* dirs to keep. stage_checkpoints/ and persistent_checkpoints/ are unaffected.")
-    p.add_argument("--lr_reset_on_stage", action="store_true",
-                   help="[DEPRECATED: use --stage_schedule warmup_reset] Reset LR scheduler on stage advance")
-    p.add_argument("--lr_reset_warmup", type=int, default=50,
-                   help="Warmup steps after LR reset on stage advance (default 50)")
-    p.add_argument("--stage_schedule", type=str, default="none",
-                   choices=["none", "warmup_reset", "cosine_restart", "cosine_sgdr", "batch_increase", "lr_spike"],
-                   help="LR/batch schedule strategy on stage advance")
-    p.add_argument("--cosine_t_max", type=int, default=3000,
-                   help="Steps for cosine decay per stage (cosine_restart)")
-    p.add_argument("--cosine_t0", type=int, default=10000,
-                   help="Initial restart period for SGDR (cosine_sgdr)")
-    p.add_argument("--cosine_t_mult", type=int, default=2,
-                   help="Period multiplier for SGDR warm restarts (cosine_sgdr)")
-    p.add_argument("--cosine_eta_min_ratio", type=float, default=0.01,
-                   help="Min LR as fraction of peak for cosine_restart")
-    p.add_argument("--batch_increase_factor", type=float, default=2.0,
-                   help="Multiply grad_accumulation_steps by this on stage advance (batch_increase)")
-    p.add_argument("--lr_spike_factor", type=float, default=5.0,
-                   help="Spike LR to peak*factor, then decay back (lr_spike/plateau_spike)")
-    p.add_argument("--lr_spike_steps", type=int, default=200,
-                   help="Duration of LR spike cycle in steps (lr_spike/plateau_spike)")
-    p.add_argument("--plateau_spike", action="store_true",
-                   help="Take action when accuracy plateaus (independent of stage_schedule)")
-    p.add_argument("--plateau_action", type=str, default="lr_spike",
-                   choices=["lr_spike", "batch_increase"],
-                   help="Action to take on plateau: spike LR or increase batch size")
-    p.add_argument("--plateau_window", type=int, default=5000,
-                   help="Steps to look back for plateau detection")
-    p.add_argument("--plateau_threshold", type=float, default=0.02,
-                   help="Min accuracy improvement over window to not count as plateau")
-    p.add_argument("--plateau_cooldown", type=int, default=10000,
-                   help="Min steps between plateau spikes")
 
     # Memory control
     p.add_argument("--gradient_checkpointing", action="store_true")
 
     # Scratch / resume
     p.add_argument("--scratch_dir", type=str,
-                   default=os.environ.get("SCRATCH") or os.path.join("/scratch", os.environ.get("USER", "user")))
+                   default=os.environ.get("SCRATCH") or os.path.join("/scratch", os.environ.get("USER", "user")),
+                   help="[DEPRECATED] Only used to derive the default --output_dir (<scratch_dir>/nl_output); "
+                        "pass --output_dir instead.")
     p.add_argument("--job_id", type=str, default=os.environ.get("SLURM_JOB_ID") or os.environ.get("LSB_JOBID"))
     p.add_argument("--resume_from_job", type=str, default=None)
     p.add_argument("--resume_weights_path", type=str, default=None,
@@ -3322,9 +2905,8 @@ def main():
     # archive/ were updated to stop passing it.
     p.add_argument("--ce_chunk_size", type=int, default=1024, help="Chunk size for chunked cross-entropy")
 
-    # Packing
-    p.add_argument("--use_packing", action="store_true",
-                   help="Use sequence packing for efficiency")
+    # Sequence packing is always on (its opt-in flag was folded in 2026-10-09; job scripts outside archive/ were
+    # updated to stop passing it).
 
     # Pretraining data mixing (anti-catastrophic-forgetting)
     p.add_argument("--mix_pretrain_data", type=str, default=None,
@@ -3375,14 +2957,15 @@ def main():
     if args.seed is not None:
         set_all_seeds(args.seed)
 
-    # Scratch dir names
+    # Run directory: <output_root>/<task>/job_<job_id> (or local_<timestamp>)
     if args.job_id:
         run_dir_name = f"job_{args.job_id}"
     else:
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         run_dir_name = f"local_{ts}"
 
-    base_out = os.path.join(args.scratch_dir, "nl_output", args.task)
+    output_root = args.output_dir if args.output_dir else os.path.join(args.scratch_dir, "nl_output")
+    base_out = os.path.join(output_root, args.task)
     args.output_dir = os.path.join(base_out, run_dir_name)
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -3390,7 +2973,7 @@ def main():
     for k, v in sorted(vars(args).items()):
         rank_print(f"{k:>28}: {v}")
     rank_print("=" * 60 + "\n")
-    rank_print("[CKPT] Scratch base      :", args.scratch_dir)
+    rank_print("[CKPT] Output root       :", output_root)
     rank_print("[CKPT] Task output base  :", base_out)
     rank_print("[CKPT] This run dir      :", args.output_dir, "\n")
 
@@ -3405,7 +2988,7 @@ def main():
             rank_print(f"[CKPT] Auto-resuming from local run: {resume_ckpt}")
 
     if resume_ckpt is None and args.resume_from_job:
-        prev_dir = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}")
+        prev_dir = os.path.join(base_out, f"job_{args.resume_from_job}")
         if os.path.isdir(prev_dir):
             resume_ckpt = get_last_checkpoint(prev_dir)
             rank_print(f"[CKPT] Resuming from previous job {args.resume_from_job}: {resume_ckpt}")
@@ -3675,7 +3258,6 @@ def main():
         accuracy_threshold=args.accuracy_threshold,
         min_steps_per_stage=args.min_steps_per_stage,
         check_every=args.check_every,
-        use_packing=args.use_packing,
         # Stage eval config
         do_stage_eval=args.do_stage_eval,
         skip_stage_alpha_eval=args.skip_stage_alpha_eval,
@@ -3691,22 +3273,6 @@ def main():
         seed=args.seed,
         persist_every=getattr(args, 'persist_every', 2000),
         print_examples=min(5, args.print_eval_examples),
-        lr_reset_on_stage=getattr(args, 'lr_reset_on_stage', False),
-        lr_reset_warmup=getattr(args, 'lr_reset_warmup', 50),
-        peak_lr=args.learning_rate,
-        stage_schedule=getattr(args, 'stage_schedule', 'none'),
-        cosine_t_max=getattr(args, 'cosine_t_max', 3000),
-        cosine_t0=getattr(args, 'cosine_t0', 10000),
-        cosine_t_mult=getattr(args, 'cosine_t_mult', 2),
-        cosine_eta_min_ratio=getattr(args, 'cosine_eta_min_ratio', 0.01),
-        batch_increase_factor=getattr(args, 'batch_increase_factor', 2.0),
-        lr_spike_factor=getattr(args, 'lr_spike_factor', 5.0),
-        lr_spike_steps=getattr(args, 'lr_spike_steps', 200),
-        plateau_spike=getattr(args, 'plateau_spike', False),
-        plateau_action=getattr(args, 'plateau_action', 'lr_spike'),
-        plateau_window=getattr(args, 'plateau_window', 5000),
-        plateau_threshold=getattr(args, 'plateau_threshold', 0.02),
-        plateau_cooldown=getattr(args, 'plateau_cooldown', 10000),
     )
 
     # Wire up PFLOPS milestones + max_total_pflops from CLI args
@@ -3744,7 +3310,7 @@ def main():
     if args.resume_from_job and curriculum.loss_history:
         first_step = curriculum.loss_history[0].get("step", 0)
         if first_step > 1:
-            prev_dir = os.path.join(args.scratch_dir, "nl_output", args.task, f"job_{args.resume_from_job}")
+            prev_dir = os.path.join(base_out, f"job_{args.resume_from_job}")
             # Try JSONL first (has entries between checkpoint saves), fall back to JSON
             prev_history = _load_from_jsonl(prev_dir, max_step=first_step - 1)
             if prev_history is None:
@@ -3850,12 +3416,8 @@ def main():
             has_tokens = any(h.get("tokens", 0) > 0 for h in curriculum.loss_history)
             if not has_tokens:
                 rank_print("[RETROACTIVE] Loss history missing 'tokens' field - estimating from steps")
-                if args.use_packing:
-                    avg_seq_len = 300
-                    est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
-                else:
-                    avg_seq_len = 300
-                    est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
+                avg_seq_len = 300
+                est_tokens_per_step = args.batch_size * avg_seq_len * get_world_size()
 
                 rank_print(f"[RETROACTIVE] Estimating ~{est_tokens_per_step} tokens/step")
                 for h in curriculum.loss_history:
@@ -3866,7 +3428,6 @@ def main():
                 "model_name": args.model_name.split("/")[-1],
                 "model_params_b": sum(p.numel() for p in model.parameters()) / 1e9,
                 "learning_rate": args.learning_rate,
-                "use_packing": args.use_packing,
                 "batch_size": args.batch_size,
                 "target_samples": args.batch_size,
                 "accuracy_threshold": args.accuracy_threshold,
@@ -3907,7 +3468,7 @@ def main():
         per_device_train_batch_size=effective_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
-        lr_scheduler_type="constant",  # per-stage decay handled by --stage_schedule
+        lr_scheduler_type="constant",  # constant LR for the whole run (no warmup, no per-stage schedule)
         max_steps=(args.max_train_steps if getattr(args, "max_train_steps", 0) > 0 else 100000000),
         num_train_epochs=1000,
         logging_steps=10,
@@ -4028,7 +3589,6 @@ def main():
         "model_name": args.model_name.split("/")[-1],  # Just the model name, not full path
         "model_params_b": sum(p.numel() for p in model.parameters()) / 1e9,
         "learning_rate": args.learning_rate,
-        "use_packing": args.use_packing,
         "batch_size": args.batch_size,
         "target_samples": args.batch_size,
         "accuracy_threshold": args.accuracy_threshold,
@@ -4052,6 +3612,7 @@ def main():
                 meta = {
                     "job_id": args.job_id,
                     "scratch_dir": args.scratch_dir,
+                    "output_root": output_root,
                     "created_at": datetime.datetime.now().isoformat(),
                     "resume_from": resume_ckpt,
                     "cli": " ".join(sys.argv),

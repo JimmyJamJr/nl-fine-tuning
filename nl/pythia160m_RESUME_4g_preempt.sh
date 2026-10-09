@@ -101,7 +101,6 @@ ARGS=(
     --ce_chunk_size 4096
     --persist_every 0
     --max_total_pflops 1000000
-    --use_packing
     --linear_lookahead
 )
 
