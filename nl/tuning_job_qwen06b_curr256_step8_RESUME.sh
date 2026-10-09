@@ -74,9 +74,7 @@ ARGS=(
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --learning_rate "$LEARNING_RATE"
-    --warmup_steps 100
     --seed 1234
-    --num_shots 0
     --first_token_soft_weight 0.0
     --n_stages "$N_STAGES"
     --base_alpha 0.1
@@ -90,15 +88,12 @@ ARGS=(
     --max_lookahead "$TARGET_MAX_LOOKAHEAD"
     --base_lookahead "$BASE_LOOKAHEAD"
     --lookahead_step "$LOOKAHEAD_STEP"
-    --max_frontier_size 12
-    --max_branch_size 12
-    --requested_backtrack 3
     --eval_samples 500
     --print_eval_examples 5
     --stage_eval_every 8
     --ce_chunk_size 4096
     --resume_from_job "$PREV_JOB_ID"
-    --do_baseline --do_final_eval --do_redacted_eval --do_seen_eval --do_stage_eval
+    --do_baseline --do_final_eval --do_stage_eval
     --use_packing
     --linear_lookahead
     --use_liger

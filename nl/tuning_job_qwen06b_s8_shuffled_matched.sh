@@ -72,9 +72,7 @@ ARGS=(
     --batch_size 48
     --gradient_accumulation_steps 4
     --learning_rate 5e-5
-    --warmup_steps 100
     --seed 1234
-    --num_shots 0
     --first_token_soft_weight 0.0
     --n_stages 16
     --base_alpha 0.1
@@ -86,9 +84,6 @@ ARGS=(
     --eval_every_steps 1000
     --max_input_size 768
     --max_lookahead 128
-    --max_frontier_size 12
-    --max_branch_size 12
-    --requested_backtrack 3
     --eval_samples 500
     --print_eval_examples 0
     --use_packing

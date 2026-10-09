@@ -47,12 +47,11 @@ echo "===== $(date)  arm=$arm  L=$L  NL_PACKING=$NL_PACKING  NL_ATTN_KERNEL=$NL_
 torchrun --nproc_per_node="$GPUS_PER_NODE" --master_port="$MASTER_PORT" tuning_nl.py \
     --task search --model_name Qwen/Qwen3-0.6B --cache_dir "$HF_HOME" \
     --output_dir "$SCRATCH/nl_output" --scratch_dir "$SCRATCH" --job_id "$JOB_ID" \
-    --batch_size 48 --gradient_accumulation_steps 4 --learning_rate 5e-5 --warmup_steps 100 --seed 1234 \
-    --num_shots 0 --first_token_soft_weight 0.0 \
+    --batch_size 48 --gradient_accumulation_steps 4 --learning_rate 5e-5 --seed 1234 \
+    --first_token_soft_weight 0.0 \
     --n_stages 1 --base_alpha 0.1 --max_alpha 1.0 --accuracy_threshold 1.01 --min_steps_per_stage 200 \
     --check_every 25 --accuracy_window 200 --eval_every_steps 0 \
     --max_input_size 768 --max_lookahead 128 --linear_lookahead --base_lookahead "$L" --lookahead_step 0 \
-    --max_frontier_size 12 --max_branch_size 12 --requested_backtrack 3 \
     --eval_samples 500 --print_eval_examples 0 \
     --ce_chunk_size 4096 --use_packing --use_liger --gradient_checkpointing \
     --max_train_steps "$STEPS" --save_steps 100000 --save_total_limit 1 --persist_every 0 2>&1 | tee "$LOG"

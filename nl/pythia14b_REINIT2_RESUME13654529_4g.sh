@@ -64,9 +64,7 @@ ARGS=(
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --learning_rate "$LEARNING_RATE"
-    --warmup_steps 100
     --seed 1234
-    --num_shots 0
     --first_token_soft_weight 0.0
     --n_stages "$TARGET_MAX_LOOKAHEAD"
     --base_alpha 0.1
@@ -80,9 +78,6 @@ ARGS=(
     --max_lookahead "$TARGET_MAX_LOOKAHEAD"
     --base_lookahead 1
     --lookahead_step 1
-    --max_frontier_size 12
-    --max_branch_size 12
-    --requested_backtrack 3
     --eval_samples 500
     --print_eval_examples 0
     --save_total_limit 2

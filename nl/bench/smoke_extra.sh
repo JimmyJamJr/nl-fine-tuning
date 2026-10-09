@@ -16,11 +16,11 @@ export NL_PACKING=hf NL_ATTN_KERNEL=fa3 NL_CKPT_EVERY_N_LAYERS=2 NL_CKPT_RELAX_M
 GPUS_PER_NODE=$(echo "${SLURM_JOB_GPUS:-}" | tr "," "\n" | grep -c .)
 export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-56} / GPUS_PER_NODE ))
 COMMON=(--task search --cache_dir "$HF_HOME" --output_dir "$SCRATCH/nl_output" --scratch_dir "$SCRATCH"
-        --batch_size 16 --gradient_accumulation_steps 1 --learning_rate 5e-5 --warmup_steps 10 --seed 1234
-        --num_shots 0 --first_token_soft_weight 0.0 --n_stages 1 --base_alpha 0.1 --max_alpha 1.0
+        --batch_size 16 --gradient_accumulation_steps 1 --learning_rate 5e-5 --seed 1234
+        --first_token_soft_weight 0.0 --n_stages 1 --base_alpha 0.1 --max_alpha 1.0
         --accuracy_threshold 1.01 --min_steps_per_stage 200 --check_every 25 --accuracy_window 200
         --max_input_size 768 --max_lookahead 128 --linear_lookahead --base_lookahead 16 --lookahead_step 0
-        --max_frontier_size 12 --max_branch_size 12 --requested_backtrack 3 --print_eval_examples 0
+        --print_eval_examples 0
         --ce_chunk_size 4096 --use_packing --gradient_checkpointing --save_steps 100000 --save_total_limit 1 --persist_every 0)
 run() {  # name, then extra args
   local name=$1; shift

@@ -39,11 +39,10 @@ ARGS=(
   --cache_dir "$HF_HOME" --output_dir "$SCRATCH/nl_output" --scratch_dir "$SCRATCH"
   --job_id 11590957
   --batch_size 256 --gradient_accumulation_steps 4
-  --learning_rate 1e-4 --warmup_steps 100 --seed 1234 --num_shots 0 --first_token_soft_weight 0.0
+  --learning_rate 1e-4 --seed 1234 --first_token_soft_weight 0.0
   --n_stages 96 --base_alpha 0.1 --max_alpha 1.0 --accuracy_threshold 0.98
   --min_steps_per_stage 200 --check_every 25 --accuracy_window 1000 --eval_every_steps 0
   --max_input_size 576 --max_lookahead 96 --base_lookahead 1 --lookahead_step 1 --linear_lookahead
-  --max_frontier_size 12 --max_branch_size 12 --requested_backtrack 3
   --eval_samples 0 --print_eval_examples 0 --save_total_limit 2 --ce_chunk_size 4096
   --persist_every 0 --save_steps 500 --use_packing
   --max_total_pflops 1000000

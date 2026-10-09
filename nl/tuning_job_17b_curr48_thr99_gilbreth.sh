@@ -161,9 +161,7 @@ ARGS=(
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --learning_rate 5e-5
-    --warmup_steps 100
     --seed 1234
-    --num_shots 0
     --first_token_soft_weight 0.0
 
     --n_stages 128
@@ -177,9 +175,6 @@ ARGS=(
 
     --max_input_size 780
     --max_lookahead 128
-    --max_frontier_size 12
-    --max_branch_size 12
-    --requested_backtrack 3
 
     --eval_samples 0
     --print_eval_examples 0
