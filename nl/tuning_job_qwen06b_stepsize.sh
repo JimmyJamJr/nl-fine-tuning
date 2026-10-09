@@ -54,7 +54,9 @@
 #     threshold, so a smaller W is noisier and easier to cross by chance, advancing stages faster
 #     independently of step size. s=8 had the smallest window and looks best in the archives.
 #     Standardised here at 800 for all arms, matching the canonical s=1 chain.
-#   warmup_steps: archives used 500 (s=1) and 100 (s=8, s=32). Standardised at 500.
+#   warmup_steps: archives passed 500 (s=1) and 100 (s=8, s=32). The flag was a no-op under
+#     lr_scheduler_type=constant and was removed from tuning_nl.py (2026-10-09), so all arms run
+#     without global warmup; nothing is passed here.
 #   batch geometry: archives used bs=96 ga=2; here bs=48 ga=4. Effective batch is 768 either way,
 #     but halving the micro-batch lets the selective-checkpointing token gate actually engage at
 #     low L. At bs=96 it never fires.

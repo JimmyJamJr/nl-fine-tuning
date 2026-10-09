@@ -603,13 +603,9 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
 
 # ================== Task helpers ==================
 
-def _determine_task_type(task: str, input_text: str) -> str:
-    # search is the only task (the dfs/si branches were removed 2026-10-09)
-    return task
-
-
-def _get_end_tokens(task_type: str) -> str:
-    return ". "
+# Appended after every search answer, in the labels too (search is the only task; the dfs/si
+# variants and their ", then" end tokens were removed 2026-10-09).
+SEARCH_END_TOKENS = ". "
 
 
 def _tokenize_leading_space(tokenizer, s: str) -> List[int]:
@@ -888,7 +884,6 @@ class PackedSequenceDataset(Dataset):
 
         prompt_text = ex.input_text
         chosen = rng.choice(ex.output_texts)
-        task_type = _determine_task_type(self.task, ex.input_text)
 
         if self.use_chat_template:
             # Wrap search data in chat template with enable_thinking=False
@@ -912,7 +907,7 @@ class PackedSequenceDataset(Dataset):
         else:
             prompt_ids = self.tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
             ans_ids = _tokenize_leading_space(self.tokenizer, chosen)
-            end_ids = self.tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+            end_ids = self.tokenizer(SEARCH_END_TOKENS, add_special_tokens=False)["input_ids"]
 
             input_ids = prompt_ids + ans_ids + end_ids
             labels = [-100] * len(prompt_ids) + ans_ids + end_ids
@@ -1839,7 +1834,6 @@ def _run_eval_tf_loss_impl(
     for x, ys in zip(my_inputs, my_labels):
         ys = ys if isinstance(ys, list) else [ys]
         chosen = rng.choice(ys)
-        task_type = _determine_task_type(task, x)
 
         if use_chat_template:
             msgs = [
@@ -1861,7 +1855,7 @@ def _run_eval_tf_loss_impl(
         else:
             prompt_ids = tokenizer(x, add_special_tokens=True, truncation=False)["input_ids"]
             ans_ids = _tokenize_leading_space(tokenizer, chosen)
-            end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+            end_ids = tokenizer(SEARCH_END_TOKENS, add_special_tokens=False)["input_ids"]
 
             input_ids = torch.tensor([prompt_ids + ans_ids + end_ids], device=device)
             label_ids = torch.tensor([[-100] * len(prompt_ids) + ans_ids + end_ids], device=device)
@@ -3112,11 +3106,10 @@ def generate_eval_like_training(
             continue
 
         chosen = rng.choice(ex.output_texts)
-        task_type = _determine_task_type(task, ex.input_text)
 
         prompt_ids = tokenizer(ex.input_text, add_special_tokens=True, truncation=False)["input_ids"]
         ans_ids = _tokenize_leading_space(tokenizer, chosen)
-        end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+        end_ids = tokenizer(SEARCH_END_TOKENS, add_special_tokens=False)["input_ids"]
         full_len = len(prompt_ids) + len(ans_ids) + len(end_ids)
         if full_len > max_len:
             continue
