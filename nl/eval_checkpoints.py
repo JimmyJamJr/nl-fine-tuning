@@ -33,6 +33,9 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, GenerationConfig
 from peft import PeftModel
 
+# Default locations derive from the environment (no user-specific paths hard-coded).
+_SCRATCH = os.environ.get("SCRATCH", "/scratch/" + os.environ.get("USER", "user"))
+
 
 def resolve_job_chain(job_id: str, base_dir: str) -> List[str]:
     """Walk backwards through resume_from_job links to find the full job chain."""
@@ -156,7 +159,7 @@ def find_checkpoints(job_ids: List[str], base_dir: str, mode: str, step_interval
 def generate_eval_data(target_L, max_input_size, max_lookahead, tokenizer, n_samples, seed=42):
     """Generate eval data at a specific target L using the C++ generator."""
     from nl_generator import NaturalLanguageGraphGenerator
-    from tuning_nl import alpha_for_lookahead, effective_search_L, _determine_task_type, _get_end_tokens, _tokenize_leading_space
+    from tuning_nl import alpha_for_lookahead, effective_search_L, SEARCH_END_TOKENS, _tokenize_leading_space
 
     alpha = alpha_for_lookahead(target_L, max_input_size)
     actual_L = effective_search_L(alpha, max_input_size, max_lookahead_cap=max_lookahead)
@@ -183,8 +186,7 @@ def generate_eval_data(target_L, max_input_size, max_lookahead, tokenizer, n_sam
         prompt_ids = tokenizer(ex.input_text, add_special_tokens=True, truncation=False)["input_ids"]
         chosen = ex.output_texts[0]
         ans_ids = _tokenize_leading_space(tokenizer, chosen)
-        task_type = _determine_task_type("search", ex.input_text)
-        end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+        end_ids = tokenizer(SEARCH_END_TOKENS, add_special_tokens=False)["input_ids"]
         if len(prompt_ids) + len(ans_ids) + len(end_ids) > max_len:
             continue
 
@@ -224,7 +226,7 @@ def evaluate_tf_loss(model, tokenizer, inputs, labels, device, seed=0):
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    from tuning_nl import _tokenize_leading_space, _determine_task_type, _get_end_tokens
+    from tuning_nl import _tokenize_leading_space, SEARCH_END_TOKENS
     rng = random.Random(seed + 777)
     total_loss = 0.0
     count = 0
@@ -232,10 +234,9 @@ def evaluate_tf_loss(model, tokenizer, inputs, labels, device, seed=0):
     for x, ys in zip(inputs, labels):
         ys = ys if isinstance(ys, list) else [ys]
         chosen = rng.choice(ys)
-        task_type = _determine_task_type("search", x)
         prompt_ids = tokenizer(x, add_special_tokens=True, truncation=False)["input_ids"]
         ans_ids = _tokenize_leading_space(tokenizer, chosen)
-        end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
+        end_ids = tokenizer(SEARCH_END_TOKENS, add_special_tokens=False)["input_ids"]
 
         input_ids = torch.tensor([prompt_ids + ans_ids + end_ids], device=device)
         label_ids = torch.tensor([[-100] * len(prompt_ids) + ans_ids + end_ids], device=device)
@@ -336,15 +337,15 @@ def main():
     parser.add_argument("--output", type=str, required=True, help="Output JSON file path")
     parser.add_argument("--print_mistakes", type=int, default=0, help="Print N mistakes per checkpoint")
     parser.add_argument("--base_dir", type=str,
-                        default="/scratch/gautschi/huan2073/nl_output/search",
-                        help="Base directory for job outputs")
+                        default=os.path.join(_SCRATCH, "nl_output", "search"),
+                        help="Base directory for job outputs (default: $SCRATCH/nl_output/search)")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from existing output file, skipping already-evaluated checkpoints")
 
     args = parser.parse_args()
 
     if args.cache_dir is None:
-        args.cache_dir = os.environ.get("HF_HOME", "/scratch/gautschi/huan2073/model_cache")
+        args.cache_dir = os.environ.get("HF_HOME", os.path.join(_SCRATCH, "model_cache"))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")

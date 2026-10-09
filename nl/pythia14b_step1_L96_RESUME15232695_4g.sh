@@ -91,7 +91,6 @@ ARGS=(
     --max_total_pflops 9000000
     --do_stage_eval
     --stage_eval_every 8
-    --use_packing
     --linear_lookahead
     --use_liger
 )

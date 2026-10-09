@@ -79,7 +79,6 @@ ARGS=(
     --save_total_limit 2
     --ce_chunk_size 4096
     --persist_every 0
-    --use_packing
     --linear_lookahead
 )
 

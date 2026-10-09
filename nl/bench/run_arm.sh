@@ -53,7 +53,7 @@ torchrun --nproc_per_node="$GPUS_PER_NODE" --master_port="$MASTER_PORT" tuning_n
     --check_every 25 --accuracy_window 200 --eval_every_steps 0 \
     --max_input_size 768 --max_lookahead 128 --linear_lookahead --base_lookahead "$L" --lookahead_step 0 \
     --eval_samples 500 --print_eval_examples 0 \
-    --ce_chunk_size 4096 --use_packing --use_liger --gradient_checkpointing \
+    --ce_chunk_size 4096 --use_liger --gradient_checkpointing \
     --max_train_steps "$STEPS" --save_steps 100000 --save_total_limit 1 --persist_every 0 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 kill "$MEMPID" 2>/dev/null; wait "$MEMPID" 2>/dev/null

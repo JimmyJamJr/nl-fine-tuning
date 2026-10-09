@@ -21,7 +21,7 @@ COMMON=(--task search --cache_dir "$HF_HOME" --output_dir "$SCRATCH/nl_output" -
         --accuracy_threshold 1.01 --min_steps_per_stage 200 --check_every 25 --accuracy_window 200
         --max_input_size 768 --max_lookahead 128 --linear_lookahead --base_lookahead 16 --lookahead_step 0
         --print_eval_examples 0
-        --ce_chunk_size 4096 --use_packing --gradient_checkpointing --save_steps 100000 --save_total_limit 1 --persist_every 0)
+        --ce_chunk_size 4096 --gradient_checkpointing --save_steps 100000 --save_total_limit 1 --persist_every 0)
 run() {  # name, then extra args
   local name=$1; shift
   local OUT="$SCRATCH/nl_output/search/job_pbench_smoke_$name"

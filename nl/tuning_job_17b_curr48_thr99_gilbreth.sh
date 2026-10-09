@@ -179,7 +179,6 @@ ARGS=(
     --eval_samples 0
     --print_eval_examples 0
 
-    --use_packing
     --linear_lookahead
     --base_lookahead 1
     --lookahead_step 1

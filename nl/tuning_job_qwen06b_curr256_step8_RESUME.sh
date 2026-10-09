@@ -94,7 +94,6 @@ ARGS=(
     --ce_chunk_size 4096
     --resume_from_job "$PREV_JOB_ID"
     --do_baseline --do_final_eval --do_stage_eval
-    --use_packing
     --linear_lookahead
     --use_liger
 )

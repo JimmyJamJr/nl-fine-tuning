@@ -85,7 +85,6 @@ ARGS=(
     --persist_every 0
     --do_stage_eval
     --stage_eval_every 8
-    --use_packing
     --linear_lookahead
     --use_liger
     --gradient_checkpointing

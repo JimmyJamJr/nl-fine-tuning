@@ -44,7 +44,7 @@ ARGS=(
   --min_steps_per_stage 200 --check_every 25 --accuracy_window 1000 --eval_every_steps 0
   --max_input_size 576 --max_lookahead 96 --base_lookahead 1 --lookahead_step 1 --linear_lookahead
   --eval_samples 0 --print_eval_examples 0 --save_total_limit 2 --ce_chunk_size 4096
-  --persist_every 0 --save_steps 500 --use_packing
+  --persist_every 0 --save_steps 500
   --max_total_pflops 1000000
 )
 echo "Command: torchrun --nproc_per_node=$GPUS tuning_nl.py ${ARGS[*]}"

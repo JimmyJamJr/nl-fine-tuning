@@ -87,7 +87,6 @@ ARGS=(
     --save_total_limit 2
     --ce_chunk_size 4096
     --max_total_pflops 2000000
-    --use_packing
     --linear_lookahead
     --gradient_checkpointing
     --use_liger

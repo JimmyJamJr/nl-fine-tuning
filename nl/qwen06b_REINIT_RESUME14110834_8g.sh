@@ -88,7 +88,6 @@ ARGS=(
     --print_eval_examples 0
     --save_total_limit 2
     --ce_chunk_size 4096
-    --use_packing
     --linear_lookahead
     --use_liger
     --gradient_checkpointing

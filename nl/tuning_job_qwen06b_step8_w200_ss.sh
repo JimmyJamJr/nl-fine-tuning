@@ -95,7 +95,6 @@ ARGS=(
     --eval_samples 0
     --print_eval_examples 0
     --ce_chunk_size 4096
-    --use_packing
     --use_liger
     --gradient_checkpointing
     --persist_every 2000
