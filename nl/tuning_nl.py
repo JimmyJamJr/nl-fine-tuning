@@ -326,11 +326,10 @@ def _dist_version(*names) -> Optional[str]:
 
 def _run_provenance(model=None) -> Dict[str, Any]:
     """Which kernel, head mode, flags and library versions a run used; written to run_meta.json and run_config.json
-    (2026-10-09) so later re-evaluations are attributable. forward_path is a constant now that the pre-refactor
-    custom layer loop is gone; the key stays so run_meta.json keeps its schema."""
+    (2026-10-09) so later re-evaluations are attributable. The two keys that only described the pre-refactor
+    custom layer loop were dropped with it; nothing in the tree read them."""
     cfg = getattr(model, "config", None) if model is not None else None
     return {
-        "forward_path": "hf",
         "head": NL_HEAD,
         "attn_implementation": getattr(cfg, "_attn_implementation", None) if cfg is not None else NL_TRAIN_ATTN_IMPL,
         "NL_ATTN_KERNEL": _ATTN_KERNEL_REQ,
