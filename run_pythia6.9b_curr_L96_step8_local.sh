@@ -173,8 +173,6 @@ ARGS=(
     --save_total_limit "$SAVE_TOTAL_LIMIT"
     --ce_chunk_size "$CE_CHUNK_SIZE"
 
-    --use_packing
-
     --linear_lookahead
     --base_lookahead 8
     --lookahead_step 8
