@@ -18,7 +18,6 @@ from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
-os.environ.setdefault("NL_PACKING", "hf")
 
 from tuning_nl import _save_curriculum_state, _try_restore_curriculum_state  # noqa: E402
 
