@@ -324,13 +324,15 @@ def _dist_version(*names) -> Optional[str]:
     return None
 
 
-def _run_provenance(model=None) -> Dict[str, Any]:
+def _run_provenance(model=None, revision: Optional[str] = None) -> Dict[str, Any]:
     """Which kernel, head mode, flags and library versions a run used; written to run_meta.json and run_config.json
     (2026-10-09) so later re-evaluations are attributable. The two keys that only described the pre-refactor
     custom layer loop were dropped with it; nothing in the tree read them."""
     cfg = getattr(model, "config", None) if model is not None else None
     return {
         "head": NL_HEAD,
+        # Record HuggingFace model revision (e.g. Pythia step1000/step10000/step100000) so intermediate-checkpoint runs are self-describing.
+        "revision": revision,
         "attn_implementation": getattr(cfg, "_attn_implementation", None) if cfg is not None else NL_TRAIN_ATTN_IMPL,
         "NL_ATTN_KERNEL": _ATTN_KERNEL_REQ,
         "NL_CKPT_EVERY_N_LAYERS": os.environ.get("NL_CKPT_EVERY_N_LAYERS", "1"),
@@ -2654,6 +2656,9 @@ def main():
     # Task/model
     p.add_argument("--task", type=str, choices=["search"], default="search")
     p.add_argument("--model_name", type=str, default="EleutherAI/pythia-160m")
+    # Support loading specific HuggingFace branch/commit revisions (e.g. EleutherAI/pythia-1.4b step1000/step10000/step100000).
+    p.add_argument("--revision", type=str, default=None,
+                   help="HuggingFace model revision/branch for from_pretrained (e.g. step1000); None uses default branch.")
     p.add_argument("--cache_dir", type=str, default=None)
     p.add_argument("--output_dir", type=str, default=None,
                    help="Output ROOT. The run directory is <output_dir>/<task>/job_<job_id> "
@@ -2868,13 +2873,18 @@ def main():
             resume_step = int(match.group(1))
 
     # Tokenizer/model
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, cache_dir=args.cache_dir, trust_remote_code=True)
+    # Pass args.revision to both tokenizer and model loading so intermediate pretraining checkpoints
+    # (e.g. EleutherAI/pythia-1.4b --revision step1000) fetch matching branch artifacts.
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name, revision=args.revision, cache_dir=args.cache_dir, trust_remote_code=True
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     model_kwargs = {
         "cache_dir": args.cache_dir,
+        "revision": args.revision,
         "trust_remote_code": True,
         "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
     }
@@ -2905,11 +2915,18 @@ def main():
 
     if getattr(args, 'reinit_weights', False):
         from transformers import AutoConfig
-        config = AutoConfig.from_pretrained(args.model_name, cache_dir=args.cache_dir, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_config(config, **{k: v for k, v in model_kwargs.items() if k != "cache_dir"})
+        config = AutoConfig.from_pretrained(
+            args.model_name, revision=args.revision, cache_dir=args.cache_dir, trust_remote_code=True
+        )
+        # Strip Hub-only kwargs ("cache_dir", "revision") that from_config does not accept.
+        model = AutoModelForCausalLM.from_config(
+            config, **{k: v for k, v in model_kwargs.items() if k not in ("cache_dir", "revision")}
+        )
         rank_print("[INIT] Randomly initialized model weights (--reinit_weights)")
     else:
         model = AutoModelForCausalLM.from_pretrained(args.model_name, **model_kwargs)
+        if args.revision is not None:
+            rank_print(f"[INIT] Loaded {args.model_name} at revision={args.revision}")
 
     # Force-tie lm_head.weight to embed_tokens.weight as the same Parameter.
     # HF's tie_weights() is broken for Qwen3 + Trainer.resume_from_checkpoint,
@@ -3450,7 +3467,7 @@ def main():
         if is_main_process():
             _save_run_config(args.output_dir, args.batch_size,
                              trainer.args.gradient_accumulation_steps,
-                             extra=_run_provenance(model))
+                             extra=_run_provenance(model, revision=args.revision))
 
     # Save run metadata
     if is_main_process():
@@ -3458,6 +3475,7 @@ def main():
             with open(os.path.join(args.output_dir, "run_meta.json"), "w") as f:
                 meta = {
                     "job_id": args.job_id,
+                    "revision": args.revision,
                     "scratch_dir": args.scratch_dir,
                     "output_root": output_root,
                     "created_at": datetime.datetime.now().isoformat(),
@@ -3466,7 +3484,7 @@ def main():
                     "world_size": get_world_size(),
                     "eval_fingerprint_hard": eval_fingerprint_hard,
                     "eval_fingerprint_easy": eval_fingerprint_easy,
-                    "provenance": _run_provenance(model),
+                    "provenance": _run_provenance(model, revision=args.revision),
                 }
                 json.dump(meta, f, indent=2)
         except Exception as e:
