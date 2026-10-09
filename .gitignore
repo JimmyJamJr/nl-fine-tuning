@@ -21,3 +21,12 @@ __pycache__/
 *.so
 .env
 .idea/
+
+# Exclude large model/optimizer binaries and rolling HF checkpoints from git commits
+*.safetensors
+*.bin
+*.pt
+*.pth
+**/checkpoint-*/
+**/final/
+
