@@ -11,6 +11,11 @@ pre_pretrain/OLMo
 
 # SLURM logs
 **/slurm/
+# benchmark artifacts (nl/bench/: per-arm training logs, nvidia-smi memory samples, launcher output)
+nl/bench/*.txt
+nl/bench/*.csv
+nl/bench/*.out
+nl/bench/GO
 __pycache__/
 *.so
 .env
