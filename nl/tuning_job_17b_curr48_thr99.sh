@@ -115,13 +115,11 @@ TASK="search"
 MODEL_NAME="Qwen/Qwen3-1.7B"
 
 # Training  (run_meta: --batch_size 48 --gradient_accumulation_steps 4
-#            --learning_rate 5e-5 --warmup_steps 100 --seed 1234; world_size 4 -> eff_batch 768)
+#            --learning_rate 5e-5 --seed 1234; world_size 4 -> eff_batch 768)
 BATCH_SIZE=48
 GRADIENT_ACCUMULATION_STEPS=4
 LEARNING_RATE=5e-5
-WARMUP_STEPS=100
 SEED=1234
-NUM_SHOTS=0
 FIRST_TOKEN_SOFT_WEIGHT=0.0
 
 # Curriculum (run_meta: --n_stages 96 --base_alpha 0.1 --max_alpha 1.0
@@ -140,9 +138,6 @@ EVAL_EVERY_STEPS=0
 # 6*L convention (n=288 for L=48) undershoots the ceiling by two stages.
 MAX_INPUT_SIZE=780
 MAX_LOOKAHEAD=128
-MAX_FRONTIER_SIZE=12
-MAX_BRANCH_SIZE=12
-REQUESTED_BACKTRACK=3
 
 # Memory optimizations
 CE_CHUNK_SIZE=4096
@@ -197,9 +192,7 @@ ARGS=(
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --learning_rate "$LEARNING_RATE"
-    --warmup_steps "$WARMUP_STEPS"
     --seed "$SEED"
-    --num_shots "$NUM_SHOTS"
     --first_token_soft_weight "$FIRST_TOKEN_SOFT_WEIGHT"
 
     --n_stages "$N_STAGES"
@@ -213,9 +206,6 @@ ARGS=(
 
     --max_input_size "$MAX_INPUT_SIZE"
     --max_lookahead "$MAX_LOOKAHEAD"
-    --max_frontier_size "$MAX_FRONTIER_SIZE"
-    --max_branch_size "$MAX_BRANCH_SIZE"
-    --requested_backtrack "$REQUESTED_BACKTRACK"
 
     --eval_samples "$EVAL_SAMPLES"
     --print_eval_examples "$PRINT_EVAL_EXAMPLES"
@@ -236,8 +226,6 @@ ARGS=(
 
     --do_baseline
     --do_final_eval
-    --do_redacted_eval
-    --do_seen_eval
     --do_stage_eval
 
     --persist_every 500

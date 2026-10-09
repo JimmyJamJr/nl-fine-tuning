@@ -46,7 +46,6 @@ MODEL_NAME="Qwen/Qwen3-0.6B"
 BATCH_SIZE=96
 GRADIENT_ACCUMULATION_STEPS=2       # 8 GPUs: 96*2*8 = 1536, same eff_batch as bs=96 GA=4 on 4 GPUs
 LEARNING_RATE=3e-4
-WARMUP_STEPS=2000
 TARGET_MAX_LOOKAHEAD=256
 MAX_INPUT_SIZE=1536
 
@@ -57,7 +56,7 @@ MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('',0)); print
 
 echo "Resume Qwen 0.6B REINIT from $PREV_JOB_ID on 8 GPUs"
 echo "GPUs=$GPUS_PER_NODE  bs=$BATCH_SIZE  GA=$GRADIENT_ACCUMULATION_STEPS  -> eff_batch=$(( BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS * GPUS_PER_NODE )) (target 1536)"
-echo "LR=$LEARNING_RATE  warmup=$WARMUP_STEPS  target L=$TARGET_MAX_LOOKAHEAD"
+echo "LR=$LEARNING_RATE  target L=$TARGET_MAX_LOOKAHEAD"
 echo "Output: $SCRATCH/nl_output/$TASK/job_${SLURM_JOB_ID}"
 
 ARGS=(
@@ -71,9 +70,7 @@ ARGS=(
     --batch_size "$BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --learning_rate "$LEARNING_RATE"
-    --warmup_steps "$WARMUP_STEPS"
     --seed 1234
-    --num_shots 0
     --first_token_soft_weight 0.0
     --n_stages "$TARGET_MAX_LOOKAHEAD"
     --base_alpha 0.1
@@ -87,9 +84,6 @@ ARGS=(
     --max_lookahead "$TARGET_MAX_LOOKAHEAD"
     --base_lookahead 1
     --lookahead_step 1
-    --max_frontier_size 12
-    --max_branch_size 12
-    --requested_backtrack 3
     --eval_samples 500
     --print_eval_examples 0
     --save_total_limit 2

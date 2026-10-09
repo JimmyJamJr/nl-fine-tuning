@@ -37,6 +37,9 @@ Environment flags
   NL_CKPT_RELAX_MAX_TOKENS=M    fall back to every layer when a micro-batch exceeds M tokens (default 0 = never).
   FLASH_ATTENTION_DETERMINISTIC=1  deterministic flash-attention backward in both paths (transformers reads it for
                                 the HF path, FA2 and FA3 alike; legacy_varlen_forward passes it to the kernel).
+                                Determinism for parity runs is env-only: this flag plus CUBLAS_WORKSPACE_CONFIG,
+                                both exported by bench/run_arm.sh under DETERMINISTIC=1. The old --deterministic
+                                CLI flag (cudnn flags, use_deterministic_algorithms) was removed 2026-10-09.
   NL_DEBUG_PARAM_SYNC=1         [PARAM-SYNC] per-rank parameter checksum after every optimizer step, plus a one-time
                                 [DEBUG] compute_loss line reporting DDP-wrapped / is_autocast_enabled.
   NL_PARITY_DUMP=1              parity hooks: first-micro-batch dump, step-1 gradient dump, per-parameter sums per
@@ -154,10 +157,7 @@ NL_TRAIN_ATTN_IMPL = None
 warnings.filterwarnings("ignore")
 hf_logging.set_verbosity_error()
 
-# --- Runtime env sanity for Accelerate / NCCL (must be set before Trainer builds Accelerator) ---
-os.environ.setdefault("ACCELERATE_DISPATCH_BATCHES", "false")
-os.environ.setdefault("ACCELERATE_SPLIT_BATCHES", "true")
-os.environ.setdefault("ACCELERATE_USE_DATA_LOADER_SHARDING", "false")
+# --- Runtime env sanity for NCCL ---
 os.environ.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
 
 if "MASTER_PORT" not in os.environ:
@@ -289,7 +289,7 @@ def _entry_head_mode(h: Dict[str, Any]) -> str:
 
 
 # Function for setting seed across libraries and GPUs
-def set_all_seeds(seed: int, deterministic: bool = False):
+def set_all_seeds(seed: int):
     r = get_rank()
     true_seed = (seed or 0) + r * 9973
     rank_print(f"[SEED] Setting all random seeds to {true_seed}")
@@ -300,16 +300,6 @@ def set_all_seeds(seed: int, deterministic: bool = False):
         torch.cuda.manual_seed(true_seed)
         torch.cuda.manual_seed_all(true_seed)
     os.environ["PYTHONHASHSEED"] = str(true_seed)
-    if deterministic:
-        if torch.cuda.is_available():
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
-        try:
-            torch.use_deterministic_algorithms(True)
-            rank_print("[SEED] Deterministic algorithms enabled")
-        except Exception as e:
-            rank_print(f"[SEED] Could not enable deterministic algorithms: {e}")
     try:
         from transformers import set_seed as hf_set_seed
         hf_set_seed(true_seed)
@@ -614,18 +604,12 @@ def _try_restore_curriculum_state(path: Optional[str], dataset, curriculum) -> b
 # ================== Task helpers ==================
 
 def _determine_task_type(task: str, input_text: str) -> str:
-    if task == "si":
-        text = input_text.strip()
-        if text.endswith(" is"):
-            if ", then" in text.split(".")[-1]:
-                return "inference"
-            else:
-                return "selection"
+    # search is the only task (the dfs/si branches were removed 2026-10-09)
     return task
 
 
 def _get_end_tokens(task_type: str) -> str:
-    return ", then" if task_type == "selection" else ". "
+    return ". "
 
 
 def _tokenize_leading_space(tokenizer, s: str) -> List[int]:
@@ -698,157 +682,6 @@ def alpha_for_lookahead(L_target: int,
     return min(max(needed_alpha, 0.0), 1.0)
 
 
-# ================== Redaction helpers ==================
-_name_given_re = re.compile(
-    r"(Given that\s+([A-Z][a-z]+)\s+is\s+)([a-z]+)(\s*,?\s+and we want to prove\s+\2\s+is\s+[a-z]+\.?)"
-)
-_proof_first_sentence_re_tpl = r"Proof:\s*{name}\s+is\s+([a-z]+)(\.)"
-
-
-def _extract_name_and_given_word(text: str) -> Tuple[Optional[str], Optional[str]]:
-    m = _name_given_re.search(text)
-    if m:
-        return m.group(2), m.group(3)
-    m2 = re.search(r"Proof:\s*([A-Z][a-z]+)\s+is\s+([a-z]+)\.", text)
-    if m2:
-        return m2.group(1), m2.group(2)
-    return None, None
-
-
-def _redact_given_and_first_proof_line(text: str, token: str = "_____") -> Tuple[
-    Optional[str], Optional[str], Optional[str]]:
-    name, word = _extract_name_and_given_word(text)
-    if not (name and word):
-        return None, None, None
-
-    out = text
-    out = _name_given_re.sub(lambda m: m.group(1) + token + m.group(4), out, count=1)
-    proof_re = re.compile(_proof_first_sentence_re_tpl.format(name=re.escape(name)))
-    out = proof_re.sub(lambda m: f"Proof: {name} is {token}{m.group(2)}", out, count=1)
-    return out, name, word
-
-
-def _redact_first_k_successors(text: str,
-                               name: str,
-                               given_word: str,
-                               token: str = "_____",
-                               k: int = 2) -> str:
-    if k <= 0:
-        return text
-
-    patterns = [
-        rf"If\s+(?:{re.escape(name)}|[A-Z][a-z]+|someone|Someone|a person|A person)\s+is\s+{re.escape(given_word)},\s+then\s+(?:they|{re.escape(name)}|[A-Z][a-z]+)\s+are\s+([a-z]+)\.",
-        rf"Everyone\s+that\s+is\s+{re.escape(given_word)}\s+is\s+([a-z]+)\."
-    ]
-
-    s = text
-    matches: List[Tuple[int, int, int]] = []
-    for pat in patterns:
-        pat_re = re.compile(pat)
-        for m in pat_re.finditer(s):
-            matches.append((m.start(1), m.end(1), m.start()))
-
-    matches.sort(key=lambda t: t[2])
-
-    offset = 0
-    replaced = 0
-    for g_start, g_end, _ in matches:
-        if replaced >= k:
-            break
-        g_start += offset
-        g_end += offset
-        s = s[:g_start] + token + s[g_end:]
-        offset += len(token) - (g_end - g_start)
-        replaced += 1
-
-    return s
-
-
-# Build a evaluation dataset where some of the attributes are redacted
-# as sanity check (should expect low accuracy)
-def build_redacted_eval_set(
-        inputs: List[str],
-        labels: List[List[str]],
-        token: str = "_____",
-        max_n: Optional[int] = None,
-) -> Tuple[List[str], List[List[str]]]:
-    red_inputs, red_labels = [], []
-    for x, y in zip(inputs, labels):
-        red, name, word = _redact_given_and_first_proof_line(x, token=token)
-        if not red or red == x or not (name and word):
-            continue
-        red2 = _redact_first_k_successors(red, name, word, token=token, k=2)
-        red_inputs.append(red2)
-        red_labels.append(y)
-        if max_n is not None and len(red_inputs) >= max_n:
-            break
-    return red_inputs, red_labels
-
-
-def build_scrambled_eval_set(
-        inputs: List[str],
-        labels: List[List[str]],
-        max_n: Optional[int] = None,
-        seed: int = 12345,
-) -> Tuple[List[str], List[List[str]]]:
-    """Scramble rule consequents to destroy graph structure.
-
-    For each eval example, randomly permutes the successor words across all
-    rules while keeping the exact same format, vocabulary, and question.
-    The graph edges become nonsensical so no valid path from given -> target
-    exists. Expected accuracy should be near baseline (~3%) if the model is
-    truly doing graph traversal rather than pattern matching.
-    """
-    rng = random.Random(seed)
-    # Regex: matches a rule sentence and captures (prefix, consequent_word)
-    # Handles: "If X is A, then X/they are B" / "Everyone that is A is B"
-    #          "If someone is A, then they are B" / "If a person is A, they are B"
-    _rule_re = re.compile(
-        r'('
-        r'(?:If\s+(?:[A-Z][a-z]+|someone|a person)\s+is\s+[a-z]+,?\s*then\s+(?:[A-Z][a-z]+|they)\s+are\s+)'
-        r'|(?:Everyone\s+that\s+is\s+[a-z]+\s+is\s+)'
-        r')'
-        r'([a-z]+)'
-        r'(\.\s*)'
-    )
-
-    scr_inputs, scr_labels = [], []
-    for x, y in zip(inputs, labels):
-        # Only scramble the rules section (before "Given that")
-        given_idx = x.find("Given that")
-        if given_idx == -1:
-            continue
-
-        rules_part = x[:given_idx]
-        question_part = x[given_idx:]
-
-        matches = list(_rule_re.finditer(rules_part))
-        if len(matches) < 3:
-            continue
-
-        # Extract and shuffle consequents
-        consequents = [m.group(2) for m in matches]
-        shuffled = consequents[:]
-        for _ in range(20):
-            rng.shuffle(shuffled)
-            if shuffled != consequents:
-                break
-
-        # Rebuild rules_part with shuffled consequents (replace from end)
-        new_rules = list(rules_part)
-        for m, new_word in reversed(list(zip(matches, shuffled))):
-            s, e = m.start(2), m.end(2)
-            new_rules[s:e] = list(new_word)
-        new_rules = ''.join(new_rules)
-
-        scr_inputs.append(new_rules + question_part)
-        scr_labels.append(y)
-        if max_n is not None and len(scr_inputs) >= max_n:
-            break
-
-    return scr_inputs, scr_labels
-
-
 # --------------- Plotting (extracted to plot_training.py) ---------------
 from plot_training import (
     fit_exponential_decay,
@@ -891,11 +724,8 @@ class PackedSequenceDataset(Dataset):
             breadth: int = 2,
             shuffled_mixture: Optional[List[Tuple[int, int]]] = None,
             reserved_inputs: Optional[Set[str]] = None,
-            num_shots: int = 0,
             seed: Optional[int] = None,
             resume_step: int = 0,
-            store_examples: bool = False,
-            store_cap: int = 1000,
             epoch_size: int = 10_000_000,  # Large enough to never cycle
             mix_pretrain_data: Optional[str] = None,
             mix_pretrain_subset: Optional[str] = "en",
@@ -934,7 +764,6 @@ class PackedSequenceDataset(Dataset):
             self._mix_w = [int(w) for _, w in shuffled_mixture]
         self.max_input_size = max_input_size
         self.reserved_inputs = reserved_inputs or set()
-        self.num_shots = num_shots
         self.seed = seed
         self.resume_step = resume_step
         self.task_kwargs = task_kwargs
@@ -956,20 +785,11 @@ class PackedSequenceDataset(Dataset):
         self.eos_token_id = tokenizer.eos_token_id
         self.pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
 
-        # Storage for seen samples (thread-safe for multi-worker)
-        self._store = bool(store_examples)
-        self._store_cap = int(store_cap)
-        self._seen_inputs: deque = deque(maxlen=self._store_cap)
-        self._seen_labels: deque = deque(maxlen=self._store_cap)
-        self._seen_lock = multiprocessing.Lock() if store_examples else None
-
         # Per-worker state (lazily initialized)
         self._worker_generator = None
         self._worker_rng = None
         self._pretrain_iterator = None
         self._worker_id = None
-
-        self.few_shot_examples = self._build_few_shots(num_shots, seed)
 
         rank_print(f"[DATASET] Packed Map-style | batch_size={batch_size} | epoch_size={epoch_size}")
 
@@ -983,13 +803,6 @@ class PackedSequenceDataset(Dataset):
 
     def __len__(self):
         return self.epoch_size
-
-    def get_seen_samples(self) -> Tuple[List[str], List[List[str]]]:
-        """Return stored training samples (thread-safe)."""
-        if self._seen_lock:
-            with self._seen_lock:
-                return list(self._seen_inputs), list(self._seen_labels)
-        return list(self._seen_inputs), list(self._seen_labels)
 
     def _stage_target_lookahead(self) -> Optional[int]:
         """Get target lookahead for current stage (search task with linear_lookahead only)."""
@@ -1018,34 +831,6 @@ class PackedSequenceDataset(Dataset):
             return current_L >= max_L
         else:
             return self.stage >= self.n_stages
-
-    def _build_few_shots(self, k: int, seed: Optional[int]):
-        """Build few-shot examples for prompting."""
-        if k <= 0:
-            return []
-        fs_seed = (seed or 0) + 12345
-        g = NaturalLanguageGraphGenerator(self.max_input_size, seed=fs_seed)
-        batch = g.generate_batch(self.task, batch_size=max(k, 3), alpha=0.5, **self.task_kwargs)
-        out = []
-        for ex in batch:
-            if ex and ex.output_texts:
-                out.append({"input": ex.input_text, "output": ex.output_texts[0]})
-                if len(out) >= k:
-                    break
-        return out[:k]
-
-    def _shots_prefix(self) -> str:
-        """Build few-shot prefix for prompts (cached after first call)."""
-        if not hasattr(self, '_cached_shots_prefix'):
-            if not self.few_shot_examples:
-                self._cached_shots_prefix = ""
-            else:
-                parts = []
-                for ex in self.few_shot_examples:
-                    tt = _determine_task_type(self.task, ex["input"])
-                    parts.append(f"{ex['input']} {ex['output']}{_get_end_tokens(tt)}")
-                self._cached_shots_prefix = "\n\n".join(parts) + ("\n\n" if parts else "")
-        return self._cached_shots_prefix
 
     def _get_worker_state(self, idx: int):
         """idx should already be offset by resume_step from __getitem__"""
@@ -1101,8 +886,7 @@ class PackedSequenceDataset(Dataset):
         if ex is None:
             return None
 
-        shots = self._shots_prefix()
-        prompt_text = (shots + ex.input_text) if shots else ex.input_text
+        prompt_text = ex.input_text
         chosen = rng.choice(ex.output_texts)
         task_type = _determine_task_type(self.task, ex.input_text)
 
@@ -1139,17 +923,6 @@ class PackedSequenceDataset(Dataset):
             for tokens in (_tokenize_leading_space(self.tokenizer, a) for a in ex.output_texts)
             if tokens
         })
-
-        # Store for seen eval (thread-safe)
-        if self._store and len(self._seen_inputs) < self._store_cap:
-            if self._seen_lock:
-                with self._seen_lock:
-                    if len(self._seen_inputs) < self._store_cap:
-                        self._seen_inputs.append(ex.input_text)
-                        self._seen_labels.append(list(ex.output_texts))
-            else:
-                self._seen_inputs.append(ex.input_text)
-                self._seen_labels.append(list(ex.output_texts))
 
         return {
             "input_ids": input_ids,
@@ -2055,7 +1828,6 @@ def _run_eval_tf_loss_impl(
     actual_count = len(my_inputs)
 
     rng = random.Random((kwargs.get("seed", 0) or 0) + 777)
-    num_shots = kwargs.get("num_shots", 0)
     max_input_size = kwargs.get("max_input_size", 256)
 
     local_loss_sum = 0.0
@@ -2115,7 +1887,7 @@ def _run_eval_tf_loss_impl(
 
 def run_eval_greedy_readable(model, *args, **kwargs) -> Dict[str, Any]:
     """Greedy eval, run with SDPA (eval_attn_sdpa) whatever the training attention implementation is. Wrapping here
-    covers every caller (stage/periodic, baseline, seen, final, scrambled evals); the body is unchanged in
+    covers every caller (stage/periodic, baseline, final evals); the body is unchanged in
     _run_eval_greedy_readable_impl."""
     with eval_attn_sdpa(model):
         return _run_eval_greedy_readable_impl(model, *args, **kwargs)
@@ -2277,7 +2049,6 @@ class FirstTokenCurriculum(TrainerCallback):
             tokenizer=None,
             task: str = None,
             task_kwargs: dict = None,
-            num_shots: int = 0,
             max_input_size: int = 256,
             seed: int = None,
             persist_every: int = 2000,
@@ -2356,7 +2127,6 @@ class FirstTokenCurriculum(TrainerCallback):
         self.tokenizer = tokenizer
         self.task = task
         self.task_kwargs = task_kwargs or {}
-        self.num_shots = num_shots
         self.max_input_size = max_input_size
         self.seed = seed
         self.print_examples = print_examples
@@ -2847,7 +2617,7 @@ class FirstTokenCurriculum(TrainerCallback):
             tf_loss = run_eval_tf_loss(
                 model, self.tokenizer, self.task,
                 self.eval_inputs_hard, self.eval_labels_hard,
-                num_shots=self.num_shots, max_input_size=self.max_input_size,
+                max_input_size=self.max_input_size,
                 seed=self.seed, use_chat_template=_use_chat, **self.task_kwargs
             )
 
@@ -2855,7 +2625,7 @@ class FirstTokenCurriculum(TrainerCallback):
             greedy_result = run_eval_greedy_readable(
                 model, self.tokenizer, self.task,
                 self.eval_inputs_hard, self.eval_labels_hard,
-                num_shots=self.num_shots, max_input_size=self.max_input_size,
+                max_input_size=self.max_input_size,
                 seed=self.seed, print_examples=self.print_examples,
                 use_chat_template=_use_chat, **self.task_kwargs
             )
@@ -2877,7 +2647,6 @@ class FirstTokenCurriculum(TrainerCallback):
                         tokenizer=self.tokenizer,
                         max_input_size=self.max_input_size,
                         alpha=stage_alpha,
-                        num_shots=self.num_shots,
                         reserved_inputs=set(),
                         seed=(self.seed or 0) + global_step,  # Vary seed per eval
                         **self.task_kwargs,
@@ -2890,7 +2659,7 @@ class FirstTokenCurriculum(TrainerCallback):
                     stage_greedy_result = run_eval_greedy_readable(
                         model, self.tokenizer, self.task,
                         stage_eval_inputs, stage_eval_labels,
-                        num_shots=self.num_shots, max_input_size=self.max_input_size,
+                        max_input_size=self.max_input_size,
                         seed=self.seed, print_examples=0,
                         use_chat_template=_use_chat, **self.task_kwargs
                     )
@@ -3322,34 +3091,12 @@ def generate_eval_like_training(
         tokenizer,
         max_input_size: int,
         alpha: float,
-        num_shots: int,
         reserved_inputs: Set[str],
         seed: Optional[int],
         **task_kwargs,
 ) -> Tuple[List[str], List[List[str]], List[str]]:
     g = NaturalLanguageGraphGenerator(max_input_size, seed=seed)
     eval_inputs, eval_labels, picked_answers = [], [], []
-
-    def build_shots():
-        if num_shots <= 0:
-            return []
-        fs_seed = (seed or 0) + 12345
-        gfs = NaturalLanguageGraphGenerator(max_input_size, seed=fs_seed)
-        batch = gfs.generate_batch(task, batch_size=max(num_shots, 3), alpha=0.5, **task_kwargs)
-        out = []
-        for ex in batch:
-            if ex and ex.output_texts:
-                out.append({"input": ex.input_text, "output": ex.output_texts[0]})
-                if len(out) >= num_shots:
-                    break
-        return out[:num_shots]
-
-    few_shots = build_shots()
-    shots_prefix = ""
-    if few_shots:
-        parts = [f"{ex['input']} {ex['output']}{_get_end_tokens(_determine_task_type(task, ex['input']))}" for ex in
-                 few_shots]
-        shots_prefix = "\n\n".join(parts) + "\n\n"
 
     max_len = getattr(tokenizer, "model_max_length", 512)
     rng = random.Random((seed or 0) + 424242)
@@ -3366,9 +3113,8 @@ def generate_eval_like_training(
 
         chosen = rng.choice(ex.output_texts)
         task_type = _determine_task_type(task, ex.input_text)
-        prompt_text = (shots_prefix + ex.input_text) if shots_prefix else ex.input_text
 
-        prompt_ids = tokenizer(prompt_text, add_special_tokens=True, truncation=False)["input_ids"]
+        prompt_ids = tokenizer(ex.input_text, add_special_tokens=True, truncation=False)["input_ids"]
         ans_ids = _tokenize_leading_space(tokenizer, chosen)
         end_ids = tokenizer(_get_end_tokens(task_type), add_special_tokens=False)["input_ids"]
         full_len = len(prompt_ids) + len(ans_ids) + len(end_ids)
@@ -3439,7 +3185,7 @@ def main():
     p = argparse.ArgumentParser()
 
     # Task/model
-    p.add_argument("--task", type=str, choices=["search", "dfs", "si"], default="si")
+    p.add_argument("--task", type=str, choices=["search"], default="search")
     p.add_argument("--model_name", type=str, default="EleutherAI/pythia-160m")
     p.add_argument("--cache_dir", type=str, default=None)
     p.add_argument("--output_dir", type=str, default="./nl_output")
@@ -3455,21 +3201,15 @@ def main():
 
     # Seed
     p.add_argument("--seed", type=int, default=1234)
-    p.add_argument("--deterministic", action="store_true",
-                   help="Enable CUDA deterministic algorithms (may be slower)")
 
     # Training hyperparams
     p.add_argument("--batch_size", type=int, default=16,
                    help="Samples per training step. With packing: target sequences packed per step. Without: per_device_train_batch_size.")
     p.add_argument("--gradient_accumulation_steps", type=int, default=1)
     p.add_argument("--learning_rate", type=float, default=2e-5)
-    p.add_argument("--warmup_steps", type=int, default=500)
-    # LR scheduling is handled by --stage_schedule (per-stage cosine/warmup/SGDR).
-    # Global lr_scheduler_type is always "constant" — do not change.
+    # LR scheduling is handled by --stage_schedule (per-stage cosine/warmup_reset/SGDR). The global
+    # lr_scheduler_type is always "constant", with no global warmup — do not change.
     p.add_argument("--first_token_soft_weight", type=float, default=0.3)
-
-    # Few-shot in prompt
-    p.add_argument("--num_shots", type=int, default=0, choices=[0, 1, 2])
 
     # Curriculum
     p.add_argument("--n_stages", type=int, default=10)
@@ -3502,9 +3242,6 @@ def main():
     # Task params
     p.add_argument("--max_input_size", type=int, default=256)
     p.add_argument("--max_lookahead", type=int, default=12)
-    p.add_argument("--max_frontier_size", type=int, default=12)
-    p.add_argument("--max_branch_size", type=int, default=12)
-    p.add_argument("--requested_backtrack", type=int, default=3)
     p.add_argument("--vocab_pool", type=str, default="none", choices=["none", "grow", "fixed"],
                    help="Entity-vocabulary curriculum: map each symbolic vertex ID to one fixed attribute name. grow = the ID range follows the stage (2(L+1) names at stage L; ID 0 is reserved); fixed = the ID range is pinned at the context maximum ((n-5)//3+1 names) throughout; none = fresh random names per instance (historical behaviour).")
     p.add_argument("--fixed_vocab", action="store_true",
@@ -3517,8 +3254,6 @@ def main():
     # Eval flags
     p.add_argument("--do_baseline", action="store_true", help="Run pre-training baseline eval")
     p.add_argument("--do_final_eval", action="store_true", help="Run post-training TF + greedy eval")
-    p.add_argument("--do_redacted_eval", action="store_true", help="Run redacted sanity check (should be low)")
-    p.add_argument("--do_seen_eval", action="store_true", help="Run seen-samples sanity check (should be ~100%%)")
     p.add_argument("--stage_eval_every", type=int, default=1,
                    help="Run stage eval every N lookahead units (e.g. 8 = eval only when L is multiple of 8)")
     p.add_argument("--do_stage_eval", action="store_true",
@@ -3570,10 +3305,6 @@ def main():
                    help="Min accuracy improvement over window to not count as plateau")
     p.add_argument("--plateau_cooldown", type=int, default=10000,
                    help="Min steps between plateau spikes")
-
-    # Redacted eval config
-    p.add_argument("--eval_redacted_samples", type=int, default=None)
-    p.add_argument("--redaction_token", type=str, default="_____")
 
     # Memory control
     p.add_argument("--gradient_checkpointing", action="store_true")
@@ -3649,7 +3380,7 @@ def main():
 
     # Seeds
     if args.seed is not None:
-        set_all_seeds(args.seed, deterministic=getattr(args, 'deterministic', False))
+        set_all_seeds(args.seed)
 
     # Scratch dir names
     if args.job_id:
@@ -3855,22 +3586,16 @@ def main():
     # Reserved inputs for deduplication
     reserved_inputs: Set[str] = set()
 
-    # Task kwargs
-    task_kwargs = {}
-    if args.task == "search":
-        task_kwargs = {"max_lookahead": args.max_lookahead, "fixed_vocab": args.fixed_vocab,
-                       "vocab_pool": getattr(args, "vocab_pool", "none")}
-    elif args.task == "dfs":
-        task_kwargs = {"requested_backtrack": args.requested_backtrack}
-    elif args.task == "si":
-        task_kwargs = {"max_frontier_size": args.max_frontier_size, "max_branch_size": args.max_branch_size}
+    # Task kwargs (search is the only task; the dfs/si branches were removed 2026-10-09)
+    task_kwargs = {"max_lookahead": args.max_lookahead, "fixed_vocab": args.fixed_vocab,
+                   "vocab_pool": getattr(args, "vocab_pool", "none")}
 
     # ==================== GENERATE EVAL DATA ONCE ====================
     eval_inputs_hard, eval_labels_hard = None, None  # alpha=1.0 (hardest)
     eval_inputs_easy, eval_labels_easy = None, None  # alpha=base_alpha (easiest)
     eval_fingerprint_hard, eval_fingerprint_easy = None, None
 
-    need_eval_data = (args.do_baseline or args.do_final_eval or args.do_redacted_eval or args.do_stage_eval)
+    need_eval_data = (args.do_baseline or args.do_final_eval or args.do_stage_eval)
 
     if need_eval_data:
         rank_print("[EVAL-DATA] Generating eval sets (once for all evals)...")
@@ -3883,7 +3608,6 @@ def main():
                 tokenizer=tokenizer,
                 max_input_size=args.max_input_size,
                 alpha=1.0,
-                num_shots=args.num_shots,
                 reserved_inputs=reserved_inputs,
                 seed=(args.seed or 0) + 42,
                 **task_kwargs,
@@ -3896,7 +3620,6 @@ def main():
                 tokenizer=tokenizer,
                 max_input_size=args.max_input_size,
                 alpha=args.base_alpha,
-                num_shots=args.num_shots,
                 reserved_inputs=set(eval_inputs_hard),  # Dedupe from hard set
                 seed=(args.seed or 0) + 99,
                 **task_kwargs,
@@ -3923,9 +3646,6 @@ def main():
     # ---------------- Training dataset ----------------
     rank_print(
         f"[DATASET] Using PackedSequenceDataset (batch_size={args.batch_size})")
-    if args.do_seen_eval:
-        rank_print("[WARN] --do_seen_eval disabled for packed dataset (incompatible with multi-worker)")
-        args.do_seen_eval = False
 
     dataset = PackedSequenceDataset(
         task=args.task,
@@ -3937,11 +3657,8 @@ def main():
         max_alpha=args.max_alpha,
         max_input_size=args.max_input_size,
         reserved_inputs=reserved_inputs,
-        num_shots=args.num_shots,
         seed=args.seed,
         resume_step=resume_step * args.gradient_accumulation_steps,
-        store_examples=args.do_seen_eval,
-        store_cap=1000,
         linear_lookahead=args.linear_lookahead,
         base_lookahead=args.base_lookahead,
         lookahead_step=args.lookahead_step,
@@ -3977,7 +3694,6 @@ def main():
         tokenizer=tokenizer,
         task=args.task,
         task_kwargs=task_kwargs,
-        num_shots=args.num_shots,
         max_input_size=args.max_input_size,
         seed=args.seed,
         persist_every=getattr(args, 'persist_every', 2000),
@@ -4193,17 +3909,11 @@ def main():
             barrier()
             return 0
 
-    # Disable Accelerate batch dispatching for token-budget training
-    os.environ["ACCELERATE_DISPATCH_BATCHES"] = "false"
-    os.environ["ACCELERATE_SPLIT_BATCHES"] = "false"
-    os.environ["ACCELERATE_EVEN_BATCHES"] = "false"
-
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=effective_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
-        warmup_steps=args.warmup_steps,
         lr_scheduler_type="constant",  # per-stage decay handled by --stage_schedule
         max_steps=(args.max_train_steps if getattr(args, "max_train_steps", 0) > 0 else 100000000),
         num_train_epochs=1000,
@@ -4251,7 +3961,7 @@ def main():
         base_hard = run_eval_greedy_readable(
             eval_model, tokenizer, args.task,
             eval_inputs_hard, eval_labels_hard,
-            num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
+            max_input_size=args.max_input_size, seed=args.seed,
             print_examples=args.print_eval_examples, **task_kwargs
         )
 
@@ -4259,7 +3969,7 @@ def main():
         base_easy = run_eval_greedy_readable(
             eval_model, tokenizer, args.task,
             eval_inputs_easy, eval_labels_easy,
-            num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
+            max_input_size=args.max_input_size, seed=args.seed,
             print_examples=args.print_eval_examples, **task_kwargs
         )
 
@@ -4380,62 +4090,6 @@ def main():
 
     # ==================== FINAL EVALUATIONS ====================
 
-    # ----- Seen samples sanity check (should be ~100%) -----
-    if args.do_seen_eval:
-        local_inputs, local_labels = dataset.get_seen_samples()
-
-        all_inputs_list = []
-        all_labels_list = []
-
-        for rank_id in range(get_world_size()):
-            if rank_id == get_rank():
-                broadcast_object(local_inputs, src=rank_id)
-                broadcast_object(local_labels, src=rank_id)
-                if is_main_process():
-                    all_inputs_list.append(local_inputs)
-                    all_labels_list.append(local_labels)
-            else:
-                rank_inputs = broadcast_object(None, src=rank_id)
-                rank_labels = broadcast_object(None, src=rank_id)
-                if is_main_process():
-                    all_inputs_list.append(rank_inputs)
-                    all_labels_list.append(rank_labels)
-
-        if is_main_process():
-            seen_set = set()
-            seen_inputs = []
-            seen_labels = []
-
-            for inputs, labels in zip(all_inputs_list, all_labels_list):
-                for inp, lab in zip(inputs, labels):
-                    if inp not in seen_set:
-                        seen_inputs.append(inp)
-                        seen_labels.append(lab)
-                        seen_set.add(inp)
-
-            rank_print(f"[SEEN-EVAL] Gathered {len(seen_inputs)} unique samples from {get_world_size()} ranks")
-        else:
-            seen_inputs = None
-            seen_labels = None
-
-        barrier()
-        seen_inputs = broadcast_object(seen_inputs, src=0)
-        seen_labels = broadcast_object(seen_labels, src=0)
-
-        if seen_inputs:
-            rank_print(f"[SEEN-EVAL] Evaluating on {len(seen_inputs)} seen samples")
-            trainer.model.eval()
-            seen_result = run_eval_greedy_readable(
-                trainer.model, tokenizer, args.task,
-                seen_inputs, seen_labels,
-                num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-                print_examples=min(5, args.print_eval_examples), **task_kwargs
-            )
-            rank_print(
-                f"[SEEN-EVAL] First={seen_result['first_token_acc']:.2%} | Full={seen_result['full_word_acc']:.2%} | N={seen_result['total']}")
-
-        barrier()
-
     # ----- Final eval: TF + greedy at alpha=1.0 and alpha=base_alpha -----
     if args.do_final_eval:
         trainer.model.eval()
@@ -4451,7 +4105,7 @@ def main():
         greedy_hard = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
             eval_inputs_hard, eval_labels_hard,
-            num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
+            max_input_size=args.max_input_size, seed=args.seed,
             print_examples=min(3, args.print_eval_examples), **task_kwargs
         )
         rank_print(
@@ -4460,7 +4114,7 @@ def main():
         greedy_easy = run_eval_greedy_readable(
             trainer.model, tokenizer, args.task,
             eval_inputs_easy, eval_labels_easy,
-            num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
+            max_input_size=args.max_input_size, seed=args.seed,
             print_examples=0, **task_kwargs
         )
         rank_print(
@@ -4478,36 +4132,6 @@ def main():
                     # "tf_easy": final_tf_easy,
                     "greedy_easy": greedy_easy,
                 }, f, indent=2)
-
-    # ----- Scrambled eval: sanity check (should be near baseline ~3%) -----
-    # Randomly permutes rule consequents so graph edges are nonsensical.
-    # If model truly does graph traversal, accuracy drops to baseline.
-    if args.do_redacted_eval:
-        trainer.model.eval()
-
-        fp_hard = _eval_data_fingerprint(eval_inputs_hard, eval_labels_hard)
-        rank_print(f"[SCRAMBLED-EVAL] Verifying source data: hard={fp_hard}")
-        assert fp_hard == eval_fingerprint_hard, f"Hard eval fingerprint mismatch! {fp_hard} != {eval_fingerprint_hard}"
-
-        red_n = args.eval_redacted_samples
-        if red_n is None or red_n <= 0:
-            red_n = args.eval_samples
-
-        scr_inputs, scr_labels = build_scrambled_eval_set(
-            eval_inputs_hard, eval_labels_hard, max_n=red_n
-        )
-
-        if scr_inputs:
-            scr_result = run_eval_greedy_readable(
-                trainer.model, tokenizer, args.task,
-                scr_inputs, scr_labels,
-                num_shots=args.num_shots, max_input_size=args.max_input_size, seed=args.seed,
-                print_examples=min(3, args.print_eval_examples), **task_kwargs
-            )
-            rank_print(
-                f"[SCRAMBLED] First={scr_result['first_token_acc']:.2%} | Full={scr_result['full_word_acc']:.2%} | N={scr_result['total']}")
-        else:
-            rank_print("[SCRAMBLED-EVAL] Skipped (could not scramble any eval items)")
 
     if is_main_process():
         # Flush any remaining JSONL buffer
