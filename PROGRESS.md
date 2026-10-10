@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`, plus `--revision` support in `nl/tuning_nl.py`)
 **Branch:** `jackierwzhang/exp2-pythia14b-revisions`
 **VM Instance:** `nl-exp2-pythia14b` (`a2-highgpu-8g`, 8x NVIDIA A100-SXM4-40GB, `asia-southeast1-c`)
-**Last updated:** 2026-10-10 03:11 UTC
+**Last updated:** 2026-10-10 03:12 UTC
 
 ## Shared Configuration
 
@@ -26,10 +26,23 @@
 
 | Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | GPUs 0,1,2,3 | Running | 16920 | 6/96 (`L=6`) | 93.38% | 95.12% | 0.0570 | 3,566.9 | 456.8 | 2.29h | ~34.8h (stg rate, 6.2% L) / 280.6h (500k cap @ 1,769 PF/h) |
-| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | GPUs 4,5,6,7 | Running | 13320 | 9/96 (`L=9`) | 94.88% | 96.25% | 0.0307 | 3,761.8 | 502.8 | 2.16h | ~21.0h (stg rate, 9.4% L) / 254.5h (500k cap @ 1,949 PF/h) |
+| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | GPUs 0,1,2,3 | Running | 17040 | 6/96 (`L=6`) | 92.25% | 93.62% | 0.0510 | 3,566.9 | 450.0 | 2.29h | ~34.8h (stg rate, 6.2% L) / 284.5h (500k cap @ 1,745 PF/h) |
+| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | GPUs 4,5,6,7 | Running | 13440 | 9/96 (`L=9`) | 95.50% | 97.12% | 0.0310 | 3,912.2 | 502.9 | 2.29h | ~22.3h (stg rate, 9.4% L) / 254.5h (500k cap @ 1,949 PF/h) |
 | `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Wave 2 (4 GPUs) | Queued | 0 | - | - | - | - | 0.0 | - | 0.00h | Starts when Wave 1 slot frees (~20-25h if 96 stg / <=274h cap) |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`, every 8 stages)
 
-_No stage evaluations recorded yet (first stage evaluation runs upon completing Stage 8, $L=8$)._
+### Arm: `step1000` (`exp2_pythia14b_step1000`)
+
+_No stage evaluations completed yet._
+
+### Arm: `step10000` (`exp2_pythia14b_step10000`)
+
+| Stage | Step | $L$ | Stage $\alpha$ | TF Loss ($\alpha=1.0$) | Greedy First ($\alpha=1.0$) | Greedy Full ($\alpha=1.0$) | Greedy First (Stage $\alpha$) | Greedy Full (Stage $\alpha$) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 13025 | 8 | 0.0895 | 0.6055 | 43.40% | 41.60% | 99.00% | 99.00% |
+
+### Arm: `step100000` (`exp2_pythia14b_step100000`)
+
+_No stage evaluations completed yet._
+
