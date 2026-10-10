@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`)
 **Branch:** `jackierwzhang/exp1-qwen06b-lora-vs-fullft`
 **VM:** `nl-exp1-qwen06b` (`a2-highgpu-8g`, 8x NVIDIA A100-SXM4-40GB, `asia-southeast1-c`)
-**Last updated:** 2026-10-10 01:05 UTC
+**Last updated:** 2026-10-10 01:22 UTC
 
 ## Shared Configuration
 
@@ -25,8 +25,8 @@
 
 | Arm | Job ID | Mode | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Loss | PFLOPs | TFLOP/s | Wall Time |
 | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 600 | 2 (`L=16`) | 93.75% | 95.38% | 0.0347 | 487.01 | 204.2 | 0.58h |
-| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 470 | 1 (`L=8`) | 97.50% | 98.88% | 0.0179 | 268.93 | 113.8 | 0.49h |
+| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 870 | 2 (`L=16`) | 96.75% | 98.00% | 0.0243 | 753.35 | 204.4 | 0.85h |
+| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 600 | 2 (`L=16`) | 83.00% | 84.88% | 0.0843 | 393.70 | 120.9 | 0.86h |
 | LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
 | LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
 
@@ -35,3 +35,4 @@
 | Arm | Stage | Step | $L$ | Stage $\alpha$ | TF Loss ($\alpha=1.0$) | Greedy First ($\alpha=1.0$) | Greedy Full ($\alpha=1.0$) | Greedy First (Stage $\alpha$) | Greedy Full (Stage $\alpha$) |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Full-FT | 1 | 250 | 8 | 0.067 | 0.5895 | 38.60% | 38.40% | 98.80% | 98.20% |
+| LoRA `R=8` | 1 | 475 | 8 | 0.067 | 0.4921 | 40.00% | 39.40% | 98.80% | 98.80% |
