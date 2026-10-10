@@ -353,3 +353,131 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [CHECK] Stage 2 full=96.50% target>=98.00%
 [Stage 2/16 L=16] step 980 | loss_avg=0.0238(100) | First=98.88% | Full=97.50% | lr=5.00e-05 | grad_norm=1.67 | Speed=223.2 samples/s (80.0K toks/s) | 231.9 TFLOPs/s | Stage time=30.4m | seqs/step=192.0 | toks/step=68832 | eff=100.0%
 {'loss': 0.0923, 'grad_norm': 2.0202338695526123, 'learning_rate': 5e-05, 'epoch': 3.92e-06}
+[Stage 2/16 L=16] step 990 | loss_avg=0.0238(100) | First=98.62% | Full=96.00% | lr=5.00e-05 | grad_norm=2.02 | Speed=223.2 samples/s (80.0K toks/s) | 231.9 TFLOPs/s | Stage time=31.0m | seqs/step=192.0 | toks/step=68841 | eff=100.0%
+{'loss': 0.0914, 'grad_norm': 3.7804555892944336, 'learning_rate': 5e-05, 'epoch': 3.96e-06}
+[Sat Oct 10 04:45:26 UTC 2026] Starting/Resuming exp1_qwen06b_lora_r64 (LoRA R=64) on nl-exp1-spot-r64 (us-east4-a)
+W1010 04:45:30.426000 2450 torch/distributed/run.py:792] 
+W1010 04:45:30.426000 2450 torch/distributed/run.py:792] *****************************************
+W1010 04:45:30.426000 2450 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1010 04:45:30.426000 2450 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.C++ module `generator` loaded.C++ module `generator` loaded.C++ module `generator` loaded.
+
+
+
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=8 to 128, step=8
+[CURRICULUM] Expected stages: 16
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 8
+                  batch_size: 48
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 4
+      gradient_checkpointing: True
+                      job_id: exp1_qwen06b_lora_r64
+               learning_rate: 5e-05
+            linear_lookahead: True
+              lookahead_step: 8
+                lora_dropout: 0.1
+                   lora_rank: 64
+                   max_alpha: 1.0
+              max_input_size: 768
+               max_lookahead: 128
+            max_total_pflops: 0.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: Qwen/Qwen3-0.6B
+                    n_stages: 16
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp1_qwen06b_lora_r64
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 1
+                        task: search
+           use_chat_template: False
+                   use_liger: True
+                    use_lora: True
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp1_qwen06b_lora_r64 
+
+[CKPT] Auto-resuming from local run: /root/nl_output/search/job_exp1_qwen06b_lora_r64/checkpoint-500
+[ATTN-KERNEL] NL_ATTN_KERNEL=fa2 -> attn_implementation=flash_attention_2 (hopper=True); in-run evals use sdpa
+[LIGER] liger-kernel not installed, continuing without
+[ATTENTION] Using: flash_attention_2
+[FLASH] flash_sdp_enabled: True
+[FLASH] mem_efficient_sdp_enabled: True
+[FLASH] math_sdp_enabled: True
+[ATTN-KERNEL] verified: config._attn_implementation=flash_attention_2; varlen kernel from flash_attn.flash_attn_interface; 28 qwen decoder layers are GradientCheckpointingLayer
+[MEM] model.config.use_cache = False (training)
+[INIT] Applying LoRA...
+[INIT] LoRA targets: ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+[MEM] Enabled input grads for Gradient Checkpointing + LoRA
+trainable params: 40,370,176 || all params: 636,420,096 || trainable%: 6.3433
+[EVAL-DATA] Generating eval sets (once for all evals)...
+[EVAL-DATA] Hard (alpha=1.0): n=500, fingerprint=7f8106bfe369
+[EVAL-DATA] Easy (alpha=0.1): n=500, fingerprint=5e3065b9a4da
+[DATASET] Using PackedSequenceDataset (batch_size=48)
+[DATASET] Packed Map-style | batch_size=48 | epoch_size=1000000000
+[CURRICULUM] Restored stage=2, stage_start_step=450, wall_time_offset=1342.9s from /root/nl_output/search/job_exp1_qwen06b_lora_r64/checkpoint-500/curriculum_state.json
+[CURRICULUM] Restored 500 loss records from JSONL (truncated to step 500)
+[CURRICULUM] Will mark next entry as resume point (step ~500)
+[CURRICULUM] Restored 1 stage eval records
+[CURRICULUM] Synced state with checkpoint: /root/nl_output/search/job_exp1_qwen06b_lora_r64/checkpoint-500
+[LOSS] Wrote 500 records to JSONL in /root/nl_output/search/job_exp1_qwen06b_lora_r64
+[DDP] cross-rank gradient averaging: OFF (status quo: compute_loss bypasses DistributedDataParallel.forward, so each rank trains its own replica between checkpoint reloads; set NL_DDP_GRAD_AVERAGE=1 to all-reduce)
+[HEAD] NL_HEAD=sparse: lm_head/argmax/CE on labelled rows only (valid_mask), in --ce_chunk_size=4096 row pieces; per-step rows logged as head_rows next to tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay 6N*tokens, which overstates this path)
+[CURRICULUM] Restored 800 first_token_correct entries
+[CURRICULUM] Restored 800 full_word_correct entries
+[CURRICULUM] Restored 100 recent_losses entries
+[FLOPS] Model has 0.64B params, ~3.8B FLOPs/token
+[FLOPS] Output head: N_head=155.6M params, 6*N_head=0.93B FLOPs per head row; NL_HEAD=sparse: achieved_tflops counts executed FLOPs (6(N-N_head)*tokens + 6*N_head*head_rows)
+
+[TRAIN] Starting training...
+
+[CURRICULUM] Resuming from step 500
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+[CKPT-GATE] recomputing every 1 layer(s) at 18,420 tokens/micro-batch (every_n=1, relax_max=0)
+[Stage 2/16 L=16] step 510 | loss_avg=0.0536(100) | First=91.38% | Full=90.25% | lr=0.00e+00 | grad_norm=0.00 | Speed=1293.1 samples/s (453.4K toks/s) | 1313.9 TFLOPs/s | Stage time=0.6m | seqs/step=192.0 | toks/step=67321 | eff=100.0%
+{'loss': 0.2197, 'grad_norm': 5.4253058433532715, 'learning_rate': 5e-05, 'epoch': 4e-08}
+[Stage 2/16 L=16] step 520 | loss_avg=0.0570(100) | First=92.62% | Full=90.00% | lr=5.00e-05 | grad_norm=5.43 | Speed=766.7 samples/s (270.1K toks/s) | 782.8 TFLOPs/s | Stage time=1.2m | seqs/step=192.0 | toks/step=67650 | eff=100.0%
+{'loss': 0.2243, 'grad_norm': 4.408207893371582, 'learning_rate': 5e-05, 'epoch': 8e-08}
+[Stage 2/16 L=16] step 530 | loss_avg=0.0543(100) | First=94.12% | Full=92.00% | lr=5.00e-05 | grad_norm=4.41 | Speed=587.5 samples/s (207.5K toks/s) | 601.4 TFLOPs/s | Stage time=1.7m | seqs/step=192.0 | toks/step=67820 | eff=100.0%
+{'loss': 0.1823, 'grad_norm': 5.852602005004883, 'learning_rate': 5e-05, 'epoch': 1.2e-07}
+[Stage 2/16 L=16] step 540 | loss_avg=0.0519(100) | First=94.12% | Full=92.62% | lr=5.00e-05 | grad_norm=5.85 | Speed=497.2 samples/s (176.0K toks/s) | 510.1 TFLOPs/s | Stage time=2.3m | seqs/step=192.0 | toks/step=67974 | eff=100.0%
+{'loss': 0.1975, 'grad_norm': 4.65966272354126, 'learning_rate': 5e-05, 'epoch': 1.6e-07}
