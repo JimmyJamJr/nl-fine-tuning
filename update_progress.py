@@ -69,7 +69,7 @@ ARMS: Tuple[ArmSpec, ...] = (
         arm_label="LoRA `R=8`",
         job_id="exp1_qwen06b_lora_r8",
         mode_desc="`--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`)",
-        wave_desc="4,5,6,7 (A100: nl-exp1-qwen06b -> migrating at step 3000 to Spot 4x H100: nl-exp1-spot-r8, us-east4-a)",
+        wave_desc="0,1,2,3 (Spot 4x H100: nl-exp1-spot-r8, us-east4-a)",
     ),
     ArmSpec(
         arm_label="LoRA `R=64`",
@@ -169,6 +169,7 @@ def compute_eta(
     rolling_full_acc: Optional[float],
     cumulative_pflops: float,
     wall_time_hours: float,
+    recent_pflops_per_hour: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float], str]:
   """Compute stage-weighted ETA and 82k-PFLOPs reference ETA for an arm."""
   if status == "Completed":
@@ -196,11 +197,19 @@ def compute_eta(
   remaining_units = max(0.0, TOTAL_STAGE_UNITS - effective_units)
   eta_stage_wt = wall_time_hours * (remaining_units / max(effective_units, 0.02))
 
-  # 2. Reference 82,000 PFLOPs ETA based on achieved PFLOPs/hour rate
-  pflops_per_hour = cumulative_pflops / wall_time_hours if wall_time_hours > 0 else 0.0
-  if pflops_per_hour > 0:
+  # 2. Reference 82,000 PFLOPs ETA based on achieved PFLOPs/hour rate.
+  # Why: If an arm migrated from slower hardware (4x A100) to faster hardware (4x H100),
+  # use the measured recent PFLOPs/hour rate for remaining work and adjust stage-wt ETA proportionally.
+  avg_pflops_per_hour = cumulative_pflops / wall_time_hours if wall_time_hours > 0 else 0.0
+  effective_pflops_per_hour = avg_pflops_per_hour
+  if recent_pflops_per_hour is not None and recent_pflops_per_hour > 0:
+    if avg_pflops_per_hour > 0 and recent_pflops_per_hour > 1.25 * avg_pflops_per_hour:
+      eta_stage_wt = eta_stage_wt * (avg_pflops_per_hour / recent_pflops_per_hour)
+      effective_pflops_per_hour = recent_pflops_per_hour
+
+  if effective_pflops_per_hour > 0:
     remaining_pflops = max(0.0, REF_TOTAL_PFLOPS - cumulative_pflops)
-    eta_pflops_ref = remaining_pflops / pflops_per_hour
+    eta_pflops_ref = remaining_pflops / effective_pflops_per_hour
   else:
     eta_pflops_ref = eta_stage_wt
 
@@ -278,10 +287,38 @@ def parse_arm_metrics(spec: ArmSpec) -> Tuple[ArmLiveMetrics, List[StageEvalReco
         lookahead = int(r["effective_L"])
       if r.get("loss") is not None:
         recent_loss = float(r["loss"])
-      if r.get("achieved_tflops") is not None and float(r["achieved_tflops"]) > 0:
+      if r.get("achieved_tflops") is not None and 0 < float(r["achieved_tflops"]) < 500.0:
         achieved_tflops = float(r["achieved_tflops"])
       if r.get("wall_time") is not None:
         wall_time_hours = float(r["wall_time"]) / 3600.0
+
+  # Compute live step-delta TFLOP/s and PFLOPs/h over the most recent 30 steps.
+  # Why: Mid-stage checkpoint resumes reset stage_start_time in tuning_nl.py, causing transient >500 TFLOP/s
+  # values in train.log/loss_history.jsonl; step-delta timing gives exact hardware throughput.
+  recent_sparse_tflops: Optional[float] = None
+  recent_pflops_per_hour: Optional[float] = None
+  if len(loss_records) >= 5:
+    tail_recs = loss_records[-31:]
+    dt_sum = 0.0
+    sparse_flops_sum = 0.0
+    nominal_flops_sum = 0.0
+    n_total = 596049920.0
+    n_head = 155582464.0
+    for prev_r, curr_r in zip(tail_recs[:-1], tail_recs[1:]):
+      s_prev = int(prev_r.get("step", 0) or 0)
+      s_curr = int(curr_r.get("step", 0) or 0)
+      wt_prev = float(prev_r.get("wall_time", 0.0) or 0.0)
+      wt_curr = float(curr_r.get("wall_time", 0.0) or 0.0)
+      dt = wt_curr - wt_prev
+      if s_curr == s_prev + 1 and 0.2 < dt < 60.0:
+        toks = float(curr_r.get("tokens", 0) or 0)
+        hrows = float(curr_r.get("head_rows", 0) or 0)
+        dt_sum += dt
+        sparse_flops_sum += 6.0 * (n_total - n_head) * toks + 6.0 * n_head * hrows
+        nominal_flops_sum += toks * flops_per_token
+    if dt_sum > 5.0:
+      recent_sparse_tflops = (sparse_flops_sum / dt_sum) / 1e12
+      recent_pflops_per_hour = (nominal_flops_sum / 1e15) / (dt_sum / 3600.0)
 
   cumulative_pflops = (total_tokens * flops_per_token) / 1e15
 
@@ -290,6 +327,7 @@ def parse_arm_metrics(spec: ArmSpec) -> Tuple[ArmLiveMetrics, List[StageEvalReco
   status = "Starting" if os.path.isfile(os.path.join(job_dir, "train.log")) else "Queued"
 
   train_log_path = os.path.join(job_dir, "train.log")
+  last_log_tflops_valid = False
   if os.path.isfile(train_log_path):
     try:
       with open(train_log_path, "r", encoding="utf-8", errors="replace") as f:
@@ -319,6 +357,9 @@ def parse_arm_metrics(spec: ArmSpec) -> Tuple[ArmLiveMetrics, List[StageEvalReco
           rolling_full_acc = log_full
           if log_tflops is not None and log_tflops < 500.0:
             achieved_tflops = log_tflops
+            last_log_tflops_valid = True
+          else:
+            last_log_tflops_valid = False
         elif "[CURRICULUM] Resuming from step " in line:
           res_m = re.search(r"\[CURRICULUM\] Resuming from step (\d+)", line)
           if res_m:
@@ -337,6 +378,9 @@ def parse_arm_metrics(spec: ArmSpec) -> Tuple[ArmLiveMetrics, List[StageEvalReco
             status = "Error (check train.log)"
     except OSError:
       pass
+
+  if (not last_log_tflops_valid or achieved_tflops is None) and recent_sparse_tflops is not None:
+    achieved_tflops = recent_sparse_tflops
 
   curr_state_path = os.path.join(job_dir, "curriculum_state.json")
   if os.path.isfile(curr_state_path):
@@ -395,6 +439,7 @@ def parse_arm_metrics(spec: ArmSpec) -> Tuple[ArmLiveMetrics, List[StageEvalReco
       rolling_full_acc=rolling_full_acc,
       cumulative_pflops=cumulative_pflops,
       wall_time_hours=wall_time_hours,
+      recent_pflops_per_hour=recent_pflops_per_hour,
   )
 
   return (
