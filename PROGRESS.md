@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`)
 **Branch:** `jackierwzhang/exp1-qwen06b-lora-vs-fullft`
 **VMs:** `nl-exp1-qwen06b` (`a2-highgpu-8g`, 8x A100-40GB On-Demand, `asia-southeast1-c`), `nl-exp1-spot-r64` (`a3-highgpu-4g`, 4x H100-80GB Spot, `us-east4-a`), `nl-exp1-spot-r256` (`a3-highgpu-4g`, 4x H100-80GB Spot, `us-east4-b`)
-**Last updated:** 2026-10-10 03:42 UTC
+**Last updated:** 2026-10-10 03:54 UTC
 
 ## Shared Configuration
 
@@ -25,12 +25,12 @@
 
 | Arm | Job ID | Mode | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Loss | PFLOPs | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (On-Demand 4x A100: nl-exp1-qwen06b, asia-southeast1-c) | Running | 2550 | 4 (`L=32`) | 95.25% | 97.12% | 0.0309 | 2973.63 | 212.6 | 3.19h | ~41.7h (stage-wt) / ~84.9h (82k PFLOPs ref) |
-| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (On-Demand 4x A100: nl-exp1-qwen06b, asia-southeast1-c) | Running | 1970 | 2 (`L=16`) | 97.25% | 98.62% | 0.0210 | 1749.26 | 120.9 | 3.20h | ~149.8h (stage-wt) / ~146.6h (82k PFLOPs ref) |
-| LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r64, us-east4-a) | Running | 130 | 1 (`L=8`) | 92.50% | 94.12% | 0.0453 | 74.41 | 218.4 | 0.08h | ~28.1h (stage-wt) / ~84.7h (82k PFLOPs ref) |
-| LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r256, us-east4-b) | Running | 50 | 1 (`L=8`) | 80.25% | 81.25% | 0.1141 | 28.58 | 195.2 | 0.04h | ~39.3h (stage-wt) / ~118.5h (82k PFLOPs ref) |
+| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (On-Demand 4x A100: nl-exp1-qwen06b, asia-southeast1-c) | Running | 2660 | 4 (`L=32`) | 95.25% | 96.88% | 0.0292 | 3173.61 | 212.8 | 3.39h | ~44.2h (stage-wt) / ~84.1h (82k PFLOPs ref) |
+| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (On-Demand 4x A100: nl-exp1-qwen06b, asia-southeast1-c) | Running | 2090 | 2 (`L=16`) | 97.50% | 99.38% | 0.0218 | 1867.63 | 120.9 | 3.40h | ~159.4h (stage-wt) / ~145.9h (82k PFLOPs ref) |
+| LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r64, us-east4-a) | Running | 450 | 1 (`L=8`) | 98.00% | 99.25% | 0.0155 | 257.44 | 217.8 | 0.27h | ~39.2h (stage-wt) / ~84.8h (82k PFLOPs ref) |
+| LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r256, us-east4-b) | Running | 280 | 1 (`L=8`) | 97.62% | 98.88% | 0.0181 | 160.24 | 195.7 | 0.23h | ~39.1h (stage-wt) / ~118.0h (82k PFLOPs ref) |
 
-> **ETA Methodology & Overall Experiment 1 Completion (All 4 Arms Running Concurrently on 8x A100 + 8x Spot H100):** `stage-wt` scales current wall time by remaining lookahead units ($\sum_{k=1}^{16} k = 136$); `82k PFLOPs ref` divides remaining compute against the collaborator's `Qwen3-0.6B` `step=8` cold-start reference (`82,000 PFLOPs` to `L=128`) by the arm's measured `PFLOPs/h` rate. Fastest arm completion is estimated in **~28.1h (stage-wt) / ~84.7h (82k PFLOPs ref)**; full 4-arm concurrent completion is bounded by the slowest arm at **~149.8h (stage-wt) to ~146.6h (82k PFLOPs ref)**.
+> **ETA Methodology & Overall Experiment 1 Completion (All 4 Arms Running Concurrently on 8x A100 + 8x Spot H100):** `stage-wt` scales current wall time by remaining lookahead units ($\sum_{k=1}^{16} k = 136$); `82k PFLOPs ref` divides remaining compute against the collaborator's `Qwen3-0.6B` `step=8` cold-start reference (`82,000 PFLOPs` to `L=128`) by the arm's measured `PFLOPs/h` rate. Fastest arm completion is estimated in **~39.1h (stage-wt) / ~84.1h (82k PFLOPs ref)**; full 4-arm concurrent completion is bounded by the slowest arm at **~159.4h (stage-wt) to ~145.9h (82k PFLOPs ref)**.
 
 ## Stage Evaluation Summary (`stage_eval_history.json`)
 
