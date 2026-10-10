@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`)
 **Branch:** `jackierwzhang/exp1-qwen06b-lora-vs-fullft`
 **VM:** `nl-exp1-qwen06b` (`a2-highgpu-8g`, 8x NVIDIA A100-SXM4-40GB, `asia-southeast1-c`)
-**Last updated:** 2026-10-10 02:46 UTC
+**Last updated:** 2026-10-10 03:05 UTC
 
 ## Shared Configuration
 
@@ -23,12 +23,14 @@
 
 ## Run Status
 
-| Arm | Job ID | Mode | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Loss | PFLOPs | TFLOP/s | Wall Time |
-| :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 2050 | 3 (`L=24`) | 97.12% | 98.25% | 0.0258 | 2088.25 | 211.0 | 2.26h |
-| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 1420 | 2 (`L=16`) | 95.88% | 97.75% | 0.0314 | 1204.55 | 120.9 | 2.26h |
-| LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
-| LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
+| Arm | Job ID | Mode | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Loss | PFLOPs | TFLOP/s | Wall Time | Est. Remaining |
+| :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 2200 | 4 (`L=32`) | 93.62% | 95.12% | 0.0392 | 2338.19 | 212.6 | 2.58h | ~33.7h (stage-wt) / ~87.9h (82k PFLOPs ref) |
+| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 1610 | 2 (`L=16`) | 96.88% | 99.00% | 0.0249 | 1392.85 | 120.9 | 2.58h | ~121.0h (stage-wt) / ~149.4h (82k PFLOPs ref) |
+| LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h | Queued (~55-150h run) |
+| LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h | Queued (~55-150h run) |
+
+> **ETA Methodology & Overall Experiment 1 Completion (Wave 1 + Wave 2 on 2x 4-GPU slots):** `stage-wt` scales current wall time by remaining lookahead units ($\sum_{k=1}^{16} k = 136$); `82k PFLOPs ref` divides remaining compute against the collaborator's `Qwen3-0.6B` `step=8` cold-start reference (`82,000 PFLOPs` to `L=128`) by the arm's measured `PFLOPs/h` rate. First Wave 2 slot (`LoRA R=64`) is estimated to start in **~33.7h–87.9h**; full 4-arm completion across both waves is estimated at **~242h (stage-wt) to ~299h (82k PFLOPs ref)**.
 
 ## Stage Evaluation Summary (`stage_eval_history.json`)
 
@@ -36,4 +38,5 @@
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Full-FT | 1 | 250 | 8 | 0.067 | 0.5895 | 38.60% | 38.40% | 98.80% | 98.20% |
 | Full-FT | 2 | 1650 | 16 | 0.130 | 0.5030 | 42.60% | 42.00% | 99.20% | 99.00% |
+| Full-FT | 3 | 2100 | 24 | 0.193 | 0.3774 | 47.20% | 46.60% | 97.00% | 96.80% |
 | LoRA `R=8` | 1 | 475 | 8 | 0.067 | 0.4921 | 40.00% | 39.40% | 98.80% | 98.80% |
