@@ -15,6 +15,8 @@ import subprocess
 import time
 from typing import Dict, List, Optional, Tuple
 
+os.environ.setdefault("CLOUDSDK_CONTEXT_AWARE_USE_CLIENT_CERTIFICATE", "False")
+
 
 @dataclass(frozen=True, kw_only=True)
 class ArmSpec:
