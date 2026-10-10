@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`)
 **Branch:** `jackierwzhang/exp1-qwen06b-lora-vs-fullft`
 **VM:** `nl-exp1-qwen06b` (`a2-highgpu-8g`, 8x NVIDIA A100-SXM4-40GB, `asia-southeast1-c`)
-**Last updated:** 2026-10-10 01:55 UTC
+**Last updated:** 2026-10-10 02:13 UTC
 
 ## Shared Configuration
 
@@ -25,8 +25,8 @@
 
 | Arm | Job ID | Mode | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Loss | PFLOPs | TFLOP/s | Wall Time |
 | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 1440 | 2 (`L=16`) | 98.12% | 99.50% | 0.0187 | 1317.69 | 204.7 | 1.42h |
-| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 930 | 2 (`L=16`) | 91.38% | 93.50% | 0.0452 | 719.47 | 120.8 | 1.42h |
+| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 1650 | 3 (`L=24`) | 98.12% | 99.25% | 0.0167 | 1526.00 | 204.6 | 1.71h |
+| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 1100 | 2 (`L=16`) | 94.88% | 96.12% | 0.0385 | 887.96 | 120.8 | 1.71h |
 | LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
 | LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
 
@@ -35,4 +35,5 @@
 | Arm | Stage | Step | $L$ | Stage $\alpha$ | TF Loss ($\alpha=1.0$) | Greedy First ($\alpha=1.0$) | Greedy Full ($\alpha=1.0$) | Greedy First (Stage $\alpha$) | Greedy Full (Stage $\alpha$) |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Full-FT | 1 | 250 | 8 | 0.067 | 0.5895 | 38.60% | 38.40% | 98.80% | 98.20% |
+| Full-FT | 2 | 1650 | 16 | 0.130 | 0.5030 | 42.60% | 42.00% | 99.20% | 99.00% |
 | LoRA `R=8` | 1 | 475 | 8 | 0.067 | 0.4921 | 40.00% | 39.40% | 98.80% | 98.80% |
