@@ -1727,3 +1727,29 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [Stage 6/16 L=48] step 6420 | loss_avg=0.0226(100) | First=98.50% | Full=97.25% | lr=5.00e-05 | grad_norm=18.38 | Speed=83.3 samples/s (80.3K toks/s) | 212.5 TFLOPs/s | Stage time=76.0m | seqs/step=192.0 | toks/step=184960 | eff=100.0%
 {'loss': 0.0807, 'grad_norm': 55.75, 'learning_rate': 5e-05, 'epoch': 2.568e-05}
 [CHECK] Stage 6 full=97.00% target>=98.00%
+[Stage 6/16 L=48] step 6430 | loss_avg=0.0216(100) | First=98.38% | Full=97.75% | lr=5.00e-05 | grad_norm=55.75 | Speed=83.3 samples/s (80.3K toks/s) | 212.5 TFLOPs/s | Stage time=77.6m | seqs/step=192.0 | toks/step=184954 | eff=100.0%
+{'loss': 0.0791, 'grad_norm': 24.875, 'learning_rate': 5e-05, 'epoch': 2.572e-05}
+[Stage 6/16 L=48] step 6440 | loss_avg=0.0200(100) | First=98.50% | Full=97.25% | lr=5.00e-05 | grad_norm=24.88 | Speed=83.3 samples/s (80.3K toks/s) | 212.6 TFLOPs/s | Stage time=79.1m | seqs/step=192.0 | toks/step=184994 | eff=100.0%
+{'loss': 0.0835, 'grad_norm': 11.875, 'learning_rate': 5e-05, 'epoch': 2.576e-05}
+[Stage 6/16 L=48] step 6450 | loss_avg=0.0198(100) | First=97.38% | Full=95.62% | lr=5.00e-05 | grad_norm=11.88 | Speed=83.3 samples/s (80.3K toks/s) | 212.6 TFLOPs/s | Stage time=80.6m | seqs/step=192.0 | toks/step=185024 | eff=100.0%
+[CHECK] Stage 6 full=95.63% target>=98.00%
+{'loss': 0.0936, 'grad_norm': 27.5, 'learning_rate': 5e-05, 'epoch': 2.58e-05}
+[Stage 6/16 L=48] step 6460 | loss_avg=0.0205(100) | First=98.00% | Full=96.38% | lr=5.00e-05 | grad_norm=27.50 | Speed=83.3 samples/s (80.3K toks/s) | 212.7 TFLOPs/s | Stage time=82.2m | seqs/step=192.0 | toks/step=185072 | eff=100.0%
+{'loss': 0.0884, 'grad_norm': 6.9375, 'learning_rate': 5e-05, 'epoch': 2.584e-05}
+[Stage 6/16 L=48] step 6470 | loss_avg=0.0173(100) | First=97.88% | Full=96.00% | lr=5.00e-05 | grad_norm=6.94 | Speed=83.3 samples/s (80.4K toks/s) | 212.7 TFLOPs/s | Stage time=83.7m | seqs/step=192.0 | toks/step=185154 | eff=100.0%
+{'loss': 0.077, 'grad_norm': 8.3125, 'learning_rate': 5e-05, 'epoch': 2.588e-05}
+[CHECK] Stage 6 full=96.88% target>=98.00%
+[Stage 6/16 L=48] step 6480 | loss_avg=0.0177(100) | First=98.50% | Full=97.12% | lr=5.00e-05 | grad_norm=8.31 | Speed=83.3 samples/s (80.4K toks/s) | 212.8 TFLOPs/s | Stage time=85.3m | seqs/step=192.0 | toks/step=185188 | eff=100.0%
+{'loss': 0.0747, 'grad_norm': 27.25, 'learning_rate': 5e-05, 'epoch': 2.592e-05}
+[Stage 6/16 L=48] step 6490 | loss_avg=0.0186(100) | First=98.38% | Full=96.88% | lr=5.00e-05 | grad_norm=27.25 | Speed=83.3 samples/s (80.4K toks/s) | 212.8 TFLOPs/s | Stage time=86.8m | seqs/step=192.0 | toks/step=185227 | eff=100.0%
+{'loss': 0.0916, 'grad_norm': 11.8125, 'learning_rate': 5e-05, 'epoch': 2.596e-05}
+[Stage 6/16 L=48] step 6500 | loss_avg=0.0220(100) | First=97.62% | Full=96.38% | lr=5.00e-05 | grad_norm=11.81 | Speed=83.3 samples/s (80.4K toks/s) | 212.7 TFLOPs/s | Stage time=88.3m | seqs/step=192.0 | toks/step=185168 | eff=100.0%
+[CHECK] Stage 6 full=96.38% target>=98.00%
+{'loss': 0.0909, 'grad_norm': 11.125, 'learning_rate': 5e-05, 'epoch': 2.6e-05}
+[Stage 6/16 L=48] step 6510 | loss_avg=0.0237(100) | First=98.88% | Full=96.88% | lr=5.00e-05 | grad_norm=11.12 | Speed=83.2 samples/s (80.3K toks/s) | 212.5 TFLOPs/s | Stage time=90.0m | seqs/step=192.0 | toks/step=185167 | eff=100.0%
+{'loss': 0.0866, 'grad_norm': 14.5, 'learning_rate': 5e-05, 'epoch': 2.604e-05}
+[Stage 6/16 L=48] step 6520 | loss_avg=0.0227(100) | First=98.88% | Full=97.62% | lr=5.00e-05 | grad_norm=14.50 | Speed=83.2 samples/s (80.3K toks/s) | 212.5 TFLOPs/s | Stage time=91.5m | seqs/step=192.0 | toks/step=185159 | eff=100.0%
+{'loss': 0.0784, 'grad_norm': 11.0625, 'learning_rate': 5e-05, 'epoch': 2.608e-05}
+[CHECK] Stage 6 full=96.88% target>=98.00%
+[Stage 6/16 L=48] step 6530 | loss_avg=0.0212(100) | First=97.62% | Full=96.62% | lr=5.00e-05 | grad_norm=11.06 | Speed=83.3 samples/s (80.3K toks/s) | 212.5 TFLOPs/s | Stage time=93.0m | seqs/step=192.0 | toks/step=185113 | eff=100.0%
+{'loss': 0.079, 'grad_norm': 30.125, 'learning_rate': 5e-05, 'epoch': 2.612e-05}
