@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`, plus `--revision` support in `nl/tuning_nl.py`)
 **Branch:** `jackierwzhang/exp2-pythia14b-revisions`
 **VM Instances:** `nl-exp2-pythia14b` (`a2-highgpu-8g`, 8x A100-SXM4-40GB, `asia-southeast1-c`) + `nl-exp2-spot-step100000` (`a3-highgpu-4g` Spot, 4x H100-80GB)
-**Last updated:** 2026-10-10 09:33 UTC
+**Last updated:** 2026-10-10 09:50 UTC
 
 ## Shared Configuration
 
@@ -26,9 +26,9 @@
 
 | Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | GPUs 0,1,2,3 | Running | 49890 | 10/96 (`L=10`) | 95.00% | 97.00% | 0.0381 | 15,192.7 | 500.3 | 8.63h | ~74.6h (stg rate, 10.4% L) / 249.9h (500k cap @ 1,940 PF/h) |
-| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | GPUs 4,5,6,7 | Running | 41330 | 12/96 (`L=12`) | 97.62% | 98.88% | 0.0229 | 16,234.8 | 507.3 | 8.65h | ~60.7h (stg rate, 12.5% L) / 245.8h (500k cap @ 1,968 PF/h) |
-| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 34420 | 22/96 (`L=22`) | 96.25% | 97.00% | 0.0225 | 20,117.0 | 1241.7 | 5.42h | ~18.3h (stg rate, 22.9% L) / 99.6h (500k cap @ 4,819 PF/h) |
+| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | GPUs 0,1,2,3 | Running | 51280 | 10/96 (`L=10`) | 96.62% | 98.12% | 0.0387 | 15,765.9 | 499.9 | 8.92h | ~77.0h (stg rate, 10.4% L) / 250.0h (500k cap @ 1,937 PF/h) |
+| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | GPUs 4,5,6,7 | Running | 42520 | 12/96 (`L=12`) | 96.62% | 98.75% | 0.0181 | 16,779.5 | 507.3 | 8.93h | ~62.7h (stg rate, 12.5% L) / 245.6h (500k cap @ 1,968 PF/h) |
+| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 36130 | 23/96 (`L=23`) | 94.88% | 96.88% | 0.0277 | 21,510.7 | 1249.8 | 5.71h | ~18.2h (stg rate, 24.0% L) / 98.7h (500k cap @ 4,849 PF/h) |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`, every 8 stages)
 
