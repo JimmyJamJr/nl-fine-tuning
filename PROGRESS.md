@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`)
 **Branch:** `jackierwzhang/exp1-qwen06b-lora-vs-fullft`
 **VM:** `nl-exp1-qwen06b` (`a2-highgpu-8g`, 8x NVIDIA A100-SXM4-40GB, `asia-southeast1-c`)
-**Last updated:** 2026-10-10 00:32 UTC
+**Last updated:** 2026-10-10 00:48 UTC
 
 ## Shared Configuration
 
@@ -25,11 +25,13 @@
 
 | Arm | Job ID | Mode | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Loss | PFLOPs | TFLOP/s | Wall Time |
 | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 60 | 1 (`L=8`) | 84.00% | 85.38% | 0.1036 | 34.31 | 193.9 | 0.04h |
-| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 30 | 1 (`L=8`) | 56.38% | 58.00% | 0.5292 | 17.11 | 113.2 | 0.03h |
+| Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Wave 1) | Running | 330 | 2 (`L=16`) | 90.50% | 92.62% | 0.0627 | 220.36 | 204.7 | 0.31h |
+| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 4,5,6,7 (Wave 1) | Running | 290 | 1 (`L=8`) | 94.25% | 95.75% | 0.0399 | 165.92 | 113.8 | 0.31h |
 | LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
 | LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | Queued (Wave 2) | Queued | 0 | - | - | - | - | 0.00 | - | 0.00h |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`)
 
-_Stage evaluation metrics populate here as stages complete._
+| Arm | Stage | Step | $L$ | Stage $\alpha$ | TF Loss ($\alpha=1.0$) | Greedy First ($\alpha=1.0$) | Greedy Full ($\alpha=1.0$) | Greedy First (Stage $\alpha$) | Greedy Full (Stage $\alpha$) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Full-FT | 1 | 250 | 8 | 0.067 | 0.5895 | 38.60% | 38.40% | 98.80% | 98.20% |
