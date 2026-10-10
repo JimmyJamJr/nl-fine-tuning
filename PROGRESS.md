@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`, plus `--revision` support in `nl/tuning_nl.py`)
 **Branch:** `jackierwzhang/exp2-pythia14b-revisions`
 **VM Instance:** `nl-exp2-pythia14b` (`a2-highgpu-8g`, 8x NVIDIA A100-SXM4-40GB, `asia-southeast1-c`)
-**Last updated:** 2026-10-10 02:55 UTC
+**Last updated:** 2026-10-10 03:05 UTC
 
 ## Shared Configuration
 
@@ -24,11 +24,11 @@
 
 ## Run Status
 
-| Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time |
-| :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | GPUs 0,1,2,3 | Running | 15190 | 5/96 (`L=5`) | 94.75% | 95.88% | 0.0404 | 3,094.3 | 432.3 | 2.02h |
-| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | GPUs 4,5,6,7 | Running | 12190 | 8/96 (`L=8`) | 97.12% | 98.62% | 0.0173 | 3,498.7 | 470.9 | 2.02h |
-| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Wave 2 (4 GPUs) | Queued | 0 | - | - | - | - | 0.0 | - | 0.00h |
+| Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time | Est. Remaining |
+| :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | GPUs 0,1,2,3 | Running | 16090 | 6/96 (`L=6`) | 91.38% | 92.88% | 0.0716 | 3,329.5 | 438.8 | 2.16h | ~32.9h (stg rate, 6.2% L) / 292.3h (500k cap @ 1,699 PF/h) |
+| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | GPUs 4,5,6,7 | Running | 12940 | 8/96 (`L=8`) | 98.00% | 98.88% | 0.0194 | 3,761.8 | 472.1 | 2.16h | ~23.8h (stg rate, 8.3% L) / 271.1h (500k cap @ 1,830 PF/h) |
+| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Wave 2 (4 GPUs) | Queued | 0 | - | - | - | - | 0.0 | - | 0.00h | Starts when Wave 1 slot frees (~20-25h if 96 stg / <=274h cap) |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`, every 8 stages)
 
