@@ -379,7 +379,7 @@ def parse_arm_metrics(spec: ArmSpec) -> Tuple[ArmLiveMetrics, List[StageEvalReco
     except OSError:
       pass
 
-  if (not last_log_tflops_valid or achieved_tflops is None) and recent_sparse_tflops is not None:
+  if recent_sparse_tflops is not None:
     achieved_tflops = recent_sparse_tflops
 
   curr_state_path = os.path.join(job_dir, "curriculum_state.json")
