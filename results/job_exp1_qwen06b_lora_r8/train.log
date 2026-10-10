@@ -1,0 +1,114 @@
+W1010 00:29:09.479000 24054 torch/distributed/run.py:792] 
+W1010 00:29:09.479000 24054 torch/distributed/run.py:792] *****************************************
+W1010 00:29:09.479000 24054 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1010 00:29:09.479000 24054 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=8 to 128, step=8
+[CURRICULUM] Expected stages: 16
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 8
+                  batch_size: 48
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 4
+      gradient_checkpointing: True
+                      job_id: exp1_qwen06b_lora_r8
+               learning_rate: 5e-05
+            linear_lookahead: True
+              lookahead_step: 8
+                lora_dropout: 0.1
+                   lora_rank: 8
+                   max_alpha: 1.0
+              max_input_size: 768
+               max_lookahead: 128
+            max_total_pflops: 0.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: Qwen/Qwen3-0.6B
+                    n_stages: 16
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp1_qwen06b_lora_r8
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 1
+                        task: search
+           use_chat_template: False
+                   use_liger: True
+                    use_lora: True
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp1_qwen06b_lora_r8 
+
+[CKPT] Fresh start
+[ATTN-KERNEL] NL_ATTN_KERNEL=fa2 -> attn_implementation=flash_attention_2 (hopper=False); in-run evals use sdpa
+[LIGER] liger-kernel not installed, continuing without
+[ATTENTION] Using: flash_attention_2
+[FLASH] flash_sdp_enabled: True
+[FLASH] mem_efficient_sdp_enabled: True
+[FLASH] math_sdp_enabled: True
+[ATTN-KERNEL] verified: config._attn_implementation=flash_attention_2; varlen kernel from flash_attn.flash_attn_interface; 28 qwen decoder layers are GradientCheckpointingLayer
+[MEM] model.config.use_cache = False (training)
+[INIT] Applying LoRA...
+[INIT] LoRA targets: ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+[MEM] Enabled input grads for Gradient Checkpointing + LoRA
+trainable params: 5,046,272 || all params: 601,096,192 || trainable%: 0.8395
+[EVAL-DATA] Generating eval sets (once for all evals)...
+[EVAL-DATA] Hard (alpha=1.0): n=500, fingerprint=7f8106bfe369
+[EVAL-DATA] Easy (alpha=0.1): n=500, fingerprint=5e3065b9a4da
+[DATASET] Using PackedSequenceDataset (batch_size=48)
+[DATASET] Packed Map-style | batch_size=48 | epoch_size=1000000000
+[DDP] cross-rank gradient averaging: OFF (status quo: compute_loss bypasses DistributedDataParallel.forward, so each rank trains its own replica between checkpoint reloads; set NL_DDP_GRAD_AVERAGE=1 to all-reduce)
+[HEAD] NL_HEAD=sparse: lm_head/argmax/CE on labelled rows only (valid_mask), in --ce_chunk_size=4096 row pieces; per-step rows logged as head_rows next to tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay 6N*tokens, which overstates this path)
+[FLOPS] Model has 0.60B params, ~3.6B FLOPs/token
+[FLOPS] Output head: N_head=155.6M params, 6*N_head=0.93B FLOPs per head row; NL_HEAD=sparse: achieved_tflops counts executed FLOPs (6(N-N_head)*tokens + 6*N_head*head_rows)
+[RANK 0] Saved config to /root/nl_output/search/job_exp1_qwen06b_lora_r8/run_config.json: {'batch_size': 48, 'grad_acc': 4, 'master_port': 29505, 'provenance': {'head': 'sparse', 'attn_implementation': 'flash_attention_2', 'NL_ATTN_KERNEL': 'fa2', 'NL_CKPT_EVERY_N_LAYERS': '1', 'NL_CKPT_RELAX_MAX_TOKENS': '0', 'NL_DDP_GRAD_AVERAGE': '0', 'FLASH_ATTENTION_DETERMINISTIC': None, 'CUBLAS_WORKSPACE_CONFIG': None, 'versions': {'torch': '2.6.0+cu124', 'transformers': '4.57.5', 'flash_attn': '2.7.4.post1', 'flash_attn_3': None, 'liger_kernel': '0.5.10', 'peft': '0.18.1'}}}
+
+[TRAIN] Starting training...
+
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+[CKPT-GATE] recomputing every 1 layer(s) at 9,732 tokens/micro-batch (every_n=1, relax_max=0)
+[Stage 1/16 L=8] step 10 | loss_avg=1.4960(40) | First=44.00% | Full=20.12% | lr=0.00e+00 | grad_norm=0.00 | Speed=198.9 samples/s (41.3K toks/s) | 111.2 TFLOPs/s | Stage time=0.6m | seqs/step=192.0 | toks/step=39850 | eff=100.0%
+{'loss': 6.0096, 'grad_norm': 15.593353271484375, 'learning_rate': 5e-05, 'epoch': 4e-08}
+[Stage 1/16 L=8] step 20 | loss_avg=0.9819(80) | First=49.25% | Full=48.25% | lr=5.00e-05 | grad_norm=15.59 | Speed=201.1 samples/s (41.6K toks/s) | 112.0 TFLOPs/s | Stage time=1.3m | seqs/step=192.0 | toks/step=39684 | eff=100.0%
+{'loss': 1.8736, 'grad_norm': 6.981559753417969, 'learning_rate': 5e-05, 'epoch': 8e-08}
+[Stage 1/16 L=8] step 30 | loss_avg=0.5292(100) | First=58.00% | Full=56.38% | lr=5.00e-05 | grad_norm=6.98 | Speed=202.2 samples/s (42.0K toks/s) | 113.2 TFLOPs/s | Stage time=1.9m | seqs/step=192.0 | toks/step=39869 | eff=100.0%
+{'loss': 1.1971, 'grad_norm': 4.837591648101807, 'learning_rate': 5e-05, 'epoch': 1.2e-07}

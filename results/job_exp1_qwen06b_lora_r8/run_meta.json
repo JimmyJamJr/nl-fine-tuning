@@ -1,0 +1,29 @@
+{
+  "job_id": "exp1_qwen06b_lora_r8",
+  "scratch_dir": "/scratch/user",
+  "output_root": "/root/nl_output",
+  "created_at": "2026-10-10T00:29:39.674569",
+  "resume_from": null,
+  "cli": "tuning_nl.py --task search --model_name Qwen/Qwen3-0.6B --seed 1234 --batch_size 48 --gradient_accumulation_steps 4 --learning_rate 5e-5 --linear_lookahead --base_lookahead 8 --lookahead_step 8 --n_stages 16 --max_input_size 768 --max_lookahead 128 --base_alpha 0.1 --max_alpha 1.0 --accuracy_threshold 0.98 --accuracy_window 800 --check_every 25 --min_steps_per_stage 200 --first_token_soft_weight 0.0 --ce_chunk_size 4096 --use_liger --gradient_checkpointing --do_stage_eval --eval_samples 500 --eval_every_steps 0 --save_steps 500 --save_total_limit 2 --persist_every 0 --output_dir /root/nl_output --job_id exp1_qwen06b_lora_r8 --use_lora --lora_rank 8",
+  "world_size": 4,
+  "eval_fingerprint_hard": "7f8106bfe369",
+  "eval_fingerprint_easy": "5e3065b9a4da",
+  "provenance": {
+    "head": "sparse",
+    "attn_implementation": "flash_attention_2",
+    "NL_ATTN_KERNEL": "fa2",
+    "NL_CKPT_EVERY_N_LAYERS": "1",
+    "NL_CKPT_RELAX_MAX_TOKENS": "0",
+    "NL_DDP_GRAD_AVERAGE": "0",
+    "FLASH_ATTENTION_DETERMINISTIC": null,
+    "CUBLAS_WORKSPACE_CONFIG": null,
+    "versions": {
+      "torch": "2.6.0+cu124",
+      "transformers": "4.57.5",
+      "flash_attn": "2.7.4.post1",
+      "flash_attn_3": null,
+      "liger_kernel": "0.5.10",
+      "peft": "0.18.1"
+    }
+  }
+}
