@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`, plus `--revision` support in `nl/tuning_nl.py`)
 **Branch:** `jackierwzhang/exp2-pythia14b-revisions`
 **VM Instances:** `nl-exp2-spot-step1000`, `nl-exp2-spot-step10000`, `nl-exp2-spot-step100000` (3x `a3-highgpu-4g` Spot, 4x H100-80GB each)
-**Last updated:** 2026-10-11 10:44 UTC
+**Last updated:** 2026-10-11 11:03 UTC
 
 ## Shared Configuration
 
@@ -26,9 +26,9 @@
 
 | Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | Spot 4x H100 (europe-west4-b) | Running | 178880 | 16/96 (`L=16`) | 96.00% | 97.75% | 0.0224 | 82,691.8 | 1177.7 | 33.77h | ~169.3h (stg rate, 16.7% L) / 91.4h (500k cap @ 4,568 PF/h) |
-| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 150640 | 19/96 (`L=19`) | 96.75% | 98.25% | 0.0269 | 85,038.3 | 1065.8 | 33.58h | ~136.4h (stg rate, 19.8% L) / 84.9h (500k cap @ 4,888 PF/h) |
-| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 140760 | 43/96 (`L=43`) | 95.38% | 97.38% | 0.0255 | 144,423.0 | 1294.6 | 30.60h | ~37.8h (stg rate, 44.8% L) / 70.8h (500k cap @ 5,023 PF/h) |
+| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | Spot 4x H100 (europe-west4-b) | Running | 180980 | 17/96 (`L=17`) | 95.88% | 97.75% | 0.0288 | 84,011.0 | 1195.8 | 34.08h | ~158.8h (stg rate, 17.7% L) / 89.7h (500k cap @ 4,638 PF/h) |
+| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 152650 | 20/96 (`L=20`) | 95.12% | 96.75% | 0.0299 | 86,514.4 | 1228.5 | 33.89h | ~129.2h (stg rate, 20.8% L) / 86.7h (500k cap @ 4,767 PF/h) |
+| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 141820 | 43/96 (`L=43`) | 95.38% | 97.25% | 0.0275 | 145,962.6 | 1291.2 | 30.91h | ~38.2h (stg rate, 44.8% L) / 70.6h (500k cap @ 5,011 PF/h) |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`, every 8 stages)
 
@@ -37,6 +37,7 @@
 | Stage | Step | $L$ | Stage $\alpha$ | TF Loss ($\alpha=1.0$) | Greedy First ($\alpha=1.0$) | Greedy Full ($\alpha=1.0$) | Greedy First (Stage $\alpha$) | Greedy Full (Stage $\alpha$) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 8 | 36500 | 8 | 0.0895 | 0.7263 | 34.80% | 34.00% | 99.00% | 98.80% |
+| 16 | 179250 | 16 | 0.1737 | 0.5908 | 42.00% | 41.00% | 97.80% | 97.80% |
 
 ### Arm: `step10000` (`exp2_pythia14b_step10000`)
 
