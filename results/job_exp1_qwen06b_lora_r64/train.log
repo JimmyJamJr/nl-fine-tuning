@@ -4669,3 +4669,45 @@ Warning: The following arguments do not match the ones in the `trainer_state.jso
 {'loss': 0.0696, 'grad_norm': 3.002286911010742, 'learning_rate': 5e-05, 'epoch': 8.24e-06}
 [Stage 8/16 L=64] step 12570 | loss_avg=0.0227(100) | First=98.75% | Full=96.88% | lr=5.00e-05 | grad_norm=3.00 | Speed=109.3 samples/s (137.7K toks/s) | 397.7 TFLOPs/s | Stage time=389.0m | seqs/step=192.0 | toks/step=241945 | eff=100.0%
 {'loss': 0.0747, 'grad_norm': 3.1487505435943604, 'learning_rate': 5e-05, 'epoch': 8.28e-06}
+[CHECK] Stage 8 full=97.12% target>=98.00%
+[Stage 8/16 L=64] step 12580 | loss_avg=0.0201(100) | First=98.88% | Full=96.88% | lr=5.00e-05 | grad_norm=3.15 | Speed=109.1 samples/s (137.4K toks/s) | 397.0 TFLOPs/s | Stage time=390.8m | seqs/step=192.0 | toks/step=241947 | eff=100.0%
+{'loss': 0.0721, 'grad_norm': 12.868401527404785, 'learning_rate': 5e-05, 'epoch': 8.32e-06}
+[Stage 8/16 L=64] step 12590 | loss_avg=0.0184(100) | First=98.38% | Full=97.12% | lr=5.00e-05 | grad_norm=12.87 | Speed=108.9 samples/s (137.2K toks/s) | 396.3 TFLOPs/s | Stage time=392.7m | seqs/step=192.0 | toks/step=241947 | eff=100.0%
+{'loss': 0.0708, 'grad_norm': 6.1248860359191895, 'learning_rate': 5e-05, 'epoch': 8.36e-06}
+[Stage 8/16 L=64] step 12600 | loss_avg=0.0208(100) | First=99.38% | Full=98.50% | lr=5.00e-05 | grad_norm=6.12 | Speed=108.7 samples/s (136.9K toks/s) | 395.6 TFLOPs/s | Stage time=394.6m | seqs/step=192.0 | toks/step=241958 | eff=100.0%
+[CHECK] Stage 8 full=98.50% target>=98.00%
+[COMPLETE] Stage 8 complete in 3350 steps, 394.6 minutes | 2,572,800 samples | 108.7 samples/s
+
+[STAGE-EVAL] Stage 8 complete (step 12600, L=64), evaluating at alpha=1.0...
+[EVAL-TF] Loss=0.1526 (n=500)
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+`generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
+`generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
+`generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Also evaluating at stage alpha=0.5079 (L=64)...
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Stage 8 | Step 12600 | L=64 | TF Loss=0.1526 | Greedy: First=74.40%, Full=74.40%
+[STAGE-EVAL] Stage 8 | Step 12600 | L=64 (stage-alpha) | Greedy: First=98.40%, Full=98.40%
+[PLOT] Saved stage_eval.png (8 stages)
+[PLOT] Saved eval_acc_vs_step.png (8 evals)
+[PLOT] Saved eval_acc_vs_flops.png (8 evals)
+[STAGE-CKPT] Saving persistent checkpoint to /root/nl_output/search/job_exp1_qwen06b_lora_r64/stage_checkpoints/stage_8_step_12600_L64
+[STAGE-CKPT] Saved stage 8 checkpoint
+[PLOT] Saved loss_stage_8.png | Est. min=0.0156, half-life=1530 steps
+[PLOT] Saved loss_overall.png (3 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 1062.2 TFLOPs/s)
+
+[TRAIN-TIMING] Steps=8400 | DataWait=230.6ms (8.2%) | Compute=2588.0ms | Wall=2818.6ms | Throughput=0.4 steps/s
+
+ -> Advanced to stage 9 | alpha=0.571 | L=72/128
+{'loss': 0.0784, 'grad_norm': 5.221339225769043, 'learning_rate': 5e-05, 'epoch': 8.4e-06}
+[Stage 9/16 L=72] step 12610 | loss_avg=0.0224(100) | First=96.50% | Full=94.88% | lr=5.00e-05 | grad_norm=5.22 | Speed=63.0 samples/s (85.7K toks/s) | 247.6 TFLOPs/s | Stage time=2.0m | seqs/step=192.0 | toks/step=261018 | eff=100.0%
+{'loss': 0.1016, 'grad_norm': 141.66064453125, 'learning_rate': 5e-05, 'epoch': 8.44e-06}
+[Stage 9/16 L=72] step 12620 | loss_avg=0.0262(100) | First=97.88% | Full=95.88% | lr=5.00e-05 | grad_norm=141.66 | Speed=61.6 samples/s (85.4K toks/s) | 246.6 TFLOPs/s | Stage time=4.2m | seqs/step=192.0 | toks/step=266384 | eff=100.0%
+{'loss': 0.1138, 'grad_norm': 9.466806411743164, 'learning_rate': 5e-05, 'epoch': 8.48e-06}
+[Stage 9/16 L=72] step 12630 | loss_avg=0.0280(100) | First=96.62% | Full=95.12% | lr=5.00e-05 | grad_norm=9.47 | Speed=61.1 samples/s (85.4K toks/s) | 246.7 TFLOPs/s | Stage time=6.3m | seqs/step=192.0 | toks/step=268495 | eff=100.0%
+{'loss': 0.1088, 'grad_norm': 40.684303283691406, 'learning_rate': 5e-05, 'epoch': 8.52e-06}
