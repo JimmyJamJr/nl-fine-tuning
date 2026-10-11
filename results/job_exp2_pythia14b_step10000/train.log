@@ -29408,3 +29408,514 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [CHECK] Stage 19 full=94.38% target>=98.00%
 [Stage 19/96 L=19] step 121080 | loss_avg=0.0290(100) | First=96.88% | Full=94.62% | lr=2.70e-05 | grad_norm=9.88 | Speed=361.1 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=54.5m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
 {'loss': 0.0581, 'grad_norm': 3.859375, 'learning_rate': 2.7e-05, 'epoch': 3.516e-05}
+[Stage 19/96 L=19] step 121090 | loss_avg=0.0279(100) | First=96.62% | Full=94.88% | lr=2.70e-05 | grad_norm=3.86 | Speed=361.1 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=54.6m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+{'loss': 0.0655, 'grad_norm': 1.4921875, 'learning_rate': 2.7e-05, 'epoch': 3.518e-05}
+[Stage 19/96 L=19] step 121100 | loss_avg=0.0283(100) | First=96.75% | Full=94.75% | lr=2.70e-05 | grad_norm=1.49 | Speed=361.1 samples/s (154.4K toks/s) | 1216.6 TFLOPs/s | Stage time=54.7m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+[CHECK] Stage 19 full=94.75% target>=98.00%
+{'loss': 0.0549, 'grad_norm': 4.8125, 'learning_rate': 2.7e-05, 'epoch': 3.52e-05}
+[Stage 19/96 L=19] step 121110 | loss_avg=0.0280(100) | First=97.62% | Full=96.50% | lr=2.70e-05 | grad_norm=4.81 | Speed=361.1 samples/s (154.5K toks/s) | 1216.6 TFLOPs/s | Stage time=54.8m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0498, 'grad_norm': 5.1875, 'learning_rate': 2.7e-05, 'epoch': 3.522e-05}
+[Stage 19/96 L=19] step 121120 | loss_avg=0.0253(100) | First=97.50% | Full=96.62% | lr=2.70e-05 | grad_norm=5.19 | Speed=361.2 samples/s (154.5K toks/s) | 1216.6 TFLOPs/s | Stage time=54.9m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0496, 'grad_norm': 11.5625, 'learning_rate': 2.7e-05, 'epoch': 3.524e-05}
+[CHECK] Stage 19 full=95.50% target>=98.00%
+[Stage 19/96 L=19] step 121130 | loss_avg=0.0254(100) | First=98.50% | Full=97.00% | lr=2.70e-05 | grad_norm=11.56 | Speed=361.2 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=55.0m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0534, 'grad_norm': 7.625, 'learning_rate': 2.7e-05, 'epoch': 3.526e-05}
+[Stage 19/96 L=19] step 121140 | loss_avg=0.0262(100) | First=96.75% | Full=95.38% | lr=2.70e-05 | grad_norm=7.62 | Speed=361.2 samples/s (154.5K toks/s) | 1216.8 TFLOPs/s | Stage time=55.1m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0546, 'grad_norm': 4.46875, 'learning_rate': 2.7e-05, 'epoch': 3.528e-05}
+[Stage 19/96 L=19] step 121150 | loss_avg=0.0249(100) | First=97.25% | Full=94.62% | lr=2.70e-05 | grad_norm=4.47 | Speed=361.2 samples/s (154.5K toks/s) | 1216.9 TFLOPs/s | Stage time=55.1m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+[CHECK] Stage 19 full=94.63% target>=98.00%
+{'loss': 0.0519, 'grad_norm': 8.0, 'learning_rate': 2.7e-05, 'epoch': 3.53e-05}
+[Stage 19/96 L=19] step 121160 | loss_avg=0.0253(100) | First=96.88% | Full=94.62% | lr=2.70e-05 | grad_norm=8.00 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=55.2m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0601, 'grad_norm': 8.3125, 'learning_rate': 2.7e-05, 'epoch': 3.532e-05}
+[Stage 19/96 L=19] step 121170 | loss_avg=0.0289(100) | First=97.75% | Full=96.00% | lr=2.70e-05 | grad_norm=8.31 | Speed=361.3 samples/s (154.5K toks/s) | 1217.1 TFLOPs/s | Stage time=55.3m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+{'loss': 0.0523, 'grad_norm': 23.25, 'learning_rate': 2.7e-05, 'epoch': 3.534e-05}
+[CHECK] Stage 19 full=95.13% target>=98.00%
+[Stage 19/96 L=19] step 121180 | loss_avg=0.0295(100) | First=97.50% | Full=94.75% | lr=2.70e-05 | grad_norm=23.25 | Speed=361.3 samples/s (154.5K toks/s) | 1217.2 TFLOPs/s | Stage time=55.4m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+{'loss': 0.0596, 'grad_norm': 10.9375, 'learning_rate': 2.7e-05, 'epoch': 3.536e-05}
+[Stage 19/96 L=19] step 121190 | loss_avg=0.0287(100) | First=96.00% | Full=94.25% | lr=2.70e-05 | grad_norm=10.94 | Speed=361.3 samples/s (154.5K toks/s) | 1217.2 TFLOPs/s | Stage time=55.5m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+{'loss': 0.0499, 'grad_norm': 3.59375, 'learning_rate': 2.7e-05, 'epoch': 3.538e-05}
+[Stage 19/96 L=19] step 121200 | loss_avg=0.0303(100) | First=97.38% | Full=95.12% | lr=2.70e-05 | grad_norm=3.59 | Speed=361.3 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=55.6m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+[CHECK] Stage 19 full=95.13% target>=98.00%
+{'loss': 0.0544, 'grad_norm': 36.75, 'learning_rate': 2.7e-05, 'epoch': 3.54e-05}
+[Stage 19/96 L=19] step 121210 | loss_avg=0.0284(100) | First=98.00% | Full=97.12% | lr=2.70e-05 | grad_norm=36.75 | Speed=361.3 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=55.7m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+{'loss': 0.0431, 'grad_norm': 4.75, 'learning_rate': 2.7e-05, 'epoch': 3.542e-05}
+[Stage 19/96 L=19] step 121220 | loss_avg=0.0284(100) | First=97.88% | Full=95.25% | lr=2.70e-05 | grad_norm=4.75 | Speed=361.4 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=55.7m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0636, 'grad_norm': 4.375, 'learning_rate': 2.7e-05, 'epoch': 3.544e-05}
+[CHECK] Stage 19 full=94.63% target>=98.00%
+[Stage 19/96 L=19] step 121230 | loss_avg=0.0283(100) | First=97.38% | Full=96.12% | lr=2.70e-05 | grad_norm=4.38 | Speed=361.4 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=55.8m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+{'loss': 0.0544, 'grad_norm': 3.515625, 'learning_rate': 2.7e-05, 'epoch': 3.546e-05}
+[Stage 19/96 L=19] step 121240 | loss_avg=0.0293(100) | First=98.75% | Full=96.50% | lr=2.70e-05 | grad_norm=3.52 | Speed=361.4 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=55.9m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+{'loss': 0.0472, 'grad_norm': 9.25, 'learning_rate': 2.7e-05, 'epoch': 3.548e-05}
+[Stage 19/96 L=19] step 121250 | loss_avg=0.0301(100) | First=96.38% | Full=94.38% | lr=2.70e-05 | grad_norm=9.25 | Speed=361.4 samples/s (154.6K toks/s) | 1217.6 TFLOPs/s | Stage time=56.0m | seqs/step=48.0 | toks/step=20529 | eff=100.0%
+[CHECK] Stage 19 full=94.38% target>=98.00%
+{'loss': 0.0668, 'grad_norm': 3.265625, 'learning_rate': 2.7e-05, 'epoch': 3.55e-05}
+[Stage 19/96 L=19] step 121260 | loss_avg=0.0312(100) | First=97.25% | Full=95.12% | lr=2.70e-05 | grad_norm=3.27 | Speed=361.4 samples/s (154.6K toks/s) | 1217.6 TFLOPs/s | Stage time=56.1m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0498, 'grad_norm': 8.875, 'learning_rate': 2.7e-05, 'epoch': 3.552e-05}
+[Stage 19/96 L=19] step 121270 | loss_avg=0.0281(100) | First=97.62% | Full=95.50% | lr=2.70e-05 | grad_norm=8.88 | Speed=361.5 samples/s (154.6K toks/s) | 1217.7 TFLOPs/s | Stage time=56.2m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.049, 'grad_norm': 7.09375, 'learning_rate': 2.7e-05, 'epoch': 3.554e-05}
+[CHECK] Stage 19 full=95.75% target>=98.00%
+[Stage 19/96 L=19] step 121280 | loss_avg=0.0284(100) | First=97.75% | Full=95.75% | lr=2.70e-05 | grad_norm=7.09 | Speed=361.5 samples/s (154.6K toks/s) | 1217.7 TFLOPs/s | Stage time=56.3m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0561, 'grad_norm': 8.125, 'learning_rate': 2.7e-05, 'epoch': 3.556e-05}
+[Stage 19/96 L=19] step 121290 | loss_avg=0.0276(100) | First=97.75% | Full=96.12% | lr=2.70e-05 | grad_norm=8.12 | Speed=361.5 samples/s (154.6K toks/s) | 1217.8 TFLOPs/s | Stage time=56.3m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0552, 'grad_norm': 4.0, 'learning_rate': 2.7e-05, 'epoch': 3.558e-05}
+[Stage 19/96 L=19] step 121300 | loss_avg=0.0253(100) | First=97.12% | Full=95.62% | lr=2.70e-05 | grad_norm=4.00 | Speed=361.5 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=56.4m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+[CHECK] Stage 19 full=95.63% target>=98.00%
+{'loss': 0.0488, 'grad_norm': 8.125, 'learning_rate': 2.7e-05, 'epoch': 3.56e-05}
+[Stage 19/96 L=19] step 121310 | loss_avg=0.0264(100) | First=96.38% | Full=94.38% | lr=2.70e-05 | grad_norm=8.12 | Speed=361.5 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=56.5m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0654, 'grad_norm': 5.46875, 'learning_rate': 2.7e-05, 'epoch': 3.562e-05}
+[Stage 19/96 L=19] step 121320 | loss_avg=0.0285(100) | First=98.50% | Full=97.12% | lr=2.70e-05 | grad_norm=5.47 | Speed=361.6 samples/s (154.6K toks/s) | 1218.0 TFLOPs/s | Stage time=56.6m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0488, 'grad_norm': 9.5625, 'learning_rate': 2.7e-05, 'epoch': 3.564e-05}
+[CHECK] Stage 19 full=95.00% target>=98.00%
+[Stage 19/96 L=19] step 121330 | loss_avg=0.0291(100) | First=96.62% | Full=95.25% | lr=2.70e-05 | grad_norm=9.56 | Speed=361.6 samples/s (154.6K toks/s) | 1218.0 TFLOPs/s | Stage time=56.7m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0615, 'grad_norm': 10.8125, 'learning_rate': 2.7e-05, 'epoch': 3.566e-05}
+[Stage 19/96 L=19] step 121340 | loss_avg=0.0286(100) | First=98.75% | Full=97.50% | lr=2.70e-05 | grad_norm=10.81 | Speed=361.6 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=56.8m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+{'loss': 0.0378, 'grad_norm': 3.296875, 'learning_rate': 2.7e-05, 'epoch': 3.568e-05}
+[Stage 19/96 L=19] step 121350 | loss_avg=0.0285(100) | First=97.75% | Full=96.25% | lr=2.70e-05 | grad_norm=3.30 | Speed=361.6 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=56.9m | seqs/step=48.0 | toks/step=20528 | eff=100.0%
+[CHECK] Stage 19 full=96.25% target>=98.00%
+{'loss': 0.0486, 'grad_norm': 7.9375, 'learning_rate': 2.7e-05, 'epoch': 3.57e-05}
+[Stage 19/96 L=19] step 121360 | loss_avg=0.0264(100) | First=96.75% | Full=94.62% | lr=2.70e-05 | grad_norm=7.94 | Speed=361.6 samples/s (154.6K toks/s) | 1218.2 TFLOPs/s | Stage time=56.9m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0536, 'grad_norm': 5.25, 'learning_rate': 2.7e-05, 'epoch': 3.572e-05}
+[Stage 19/96 L=19] step 121370 | loss_avg=0.0271(100) | First=97.50% | Full=95.50% | lr=2.70e-05 | grad_norm=5.25 | Speed=361.6 samples/s (154.7K toks/s) | 1218.2 TFLOPs/s | Stage time=57.0m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0532, 'grad_norm': 10.75, 'learning_rate': 2.7e-05, 'epoch': 3.574e-05}
+[CHECK] Stage 19 full=94.38% target>=98.00%
+[Stage 19/96 L=19] step 121380 | loss_avg=0.0244(100) | First=97.38% | Full=96.00% | lr=2.70e-05 | grad_norm=10.75 | Speed=361.7 samples/s (154.7K toks/s) | 1218.3 TFLOPs/s | Stage time=57.1m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0565, 'grad_norm': 17.875, 'learning_rate': 2.7e-05, 'epoch': 3.576e-05}
+[Stage 19/96 L=19] step 121390 | loss_avg=0.0252(100) | First=96.88% | Full=94.62% | lr=2.70e-05 | grad_norm=17.88 | Speed=361.7 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=57.2m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0509, 'grad_norm': 7.21875, 'learning_rate': 2.7e-05, 'epoch': 3.578e-05}
+[Stage 19/96 L=19] step 121400 | loss_avg=0.0251(100) | First=97.12% | Full=95.12% | lr=2.70e-05 | grad_norm=7.22 | Speed=361.7 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=57.3m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+[CHECK] Stage 19 full=95.13% target>=98.00%
+{'loss': 0.0499, 'grad_norm': 14.8125, 'learning_rate': 2.7e-05, 'epoch': 3.58e-05}
+[Stage 19/96 L=19] step 121410 | loss_avg=0.0253(100) | First=97.75% | Full=96.38% | lr=2.70e-05 | grad_norm=14.81 | Speed=361.7 samples/s (154.7K toks/s) | 1218.5 TFLOPs/s | Stage time=57.4m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0464, 'grad_norm': 4.21875, 'learning_rate': 2.7e-05, 'epoch': 3.582e-05}
+[Stage 19/96 L=19] step 121420 | loss_avg=0.0237(100) | First=98.88% | Full=96.88% | lr=2.70e-05 | grad_norm=4.22 | Speed=361.8 samples/s (154.7K toks/s) | 1218.5 TFLOPs/s | Stage time=57.5m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.05, 'grad_norm': 5.28125, 'learning_rate': 2.7e-05, 'epoch': 3.584e-05}
+[CHECK] Stage 19 full=96.00% target>=98.00%
+[Stage 19/96 L=19] step 121430 | loss_avg=0.0245(100) | First=97.50% | Full=95.12% | lr=2.70e-05 | grad_norm=5.28 | Speed=361.8 samples/s (154.7K toks/s) | 1218.5 TFLOPs/s | Stage time=57.5m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0631, 'grad_norm': 10.4375, 'learning_rate': 2.7e-05, 'epoch': 3.586e-05}
+[Stage 19/96 L=19] step 121440 | loss_avg=0.0266(100) | First=97.38% | Full=94.62% | lr=2.70e-05 | grad_norm=10.44 | Speed=361.8 samples/s (154.7K toks/s) | 1218.6 TFLOPs/s | Stage time=57.6m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0684, 'grad_norm': 22.5, 'learning_rate': 2.7e-05, 'epoch': 3.588e-05}
+[Stage 19/96 L=19] step 121450 | loss_avg=0.0272(100) | First=98.25% | Full=96.38% | lr=2.70e-05 | grad_norm=22.50 | Speed=361.8 samples/s (154.7K toks/s) | 1218.6 TFLOPs/s | Stage time=57.7m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+[CHECK] Stage 19 full=96.38% target>=98.00%
+{'loss': 0.0486, 'grad_norm': 14.5, 'learning_rate': 2.7e-05, 'epoch': 3.59e-05}
+[Stage 19/96 L=19] step 121460 | loss_avg=0.0274(100) | First=97.25% | Full=96.00% | lr=2.70e-05 | grad_norm=14.50 | Speed=361.8 samples/s (154.7K toks/s) | 1218.7 TFLOPs/s | Stage time=57.8m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0589, 'grad_norm': 13.75, 'learning_rate': 2.7e-05, 'epoch': 3.592e-05}
+[Stage 19/96 L=19] step 121470 | loss_avg=0.0276(100) | First=97.50% | Full=95.00% | lr=2.70e-05 | grad_norm=13.75 | Speed=361.9 samples/s (154.7K toks/s) | 1218.8 TFLOPs/s | Stage time=57.9m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0535, 'grad_norm': 16.5, 'learning_rate': 2.7e-05, 'epoch': 3.594e-05}
+[CHECK] Stage 19 full=95.63% target>=98.00%
+[Stage 19/96 L=19] step 121480 | loss_avg=0.0289(100) | First=97.00% | Full=95.50% | lr=2.70e-05 | grad_norm=16.50 | Speed=361.9 samples/s (154.7K toks/s) | 1218.8 TFLOPs/s | Stage time=58.0m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.058, 'grad_norm': 4.25, 'learning_rate': 2.7e-05, 'epoch': 3.596e-05}
+[Stage 19/96 L=19] step 121490 | loss_avg=0.0275(100) | First=97.62% | Full=96.50% | lr=2.70e-05 | grad_norm=4.25 | Speed=361.9 samples/s (154.7K toks/s) | 1218.9 TFLOPs/s | Stage time=58.1m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0498, 'grad_norm': 14.8125, 'learning_rate': 2.7e-05, 'epoch': 3.598e-05}
+[Stage 19/96 L=19] step 121500 | loss_avg=0.0274(100) | First=98.12% | Full=96.00% | lr=2.70e-05 | grad_norm=14.81 | Speed=361.9 samples/s (154.7K toks/s) | 1219.0 TFLOPs/s | Stage time=58.1m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+[CHECK] Stage 19 full=96.00% target>=98.00%
+{'loss': 0.0541, 'grad_norm': 2.5, 'learning_rate': 2.7e-05, 'epoch': 3.6e-05}
+[Stage 19/96 L=19] step 121510 | loss_avg=0.0278(100) | First=97.75% | Full=95.62% | lr=2.70e-05 | grad_norm=2.50 | Speed=360.9 samples/s (154.3K toks/s) | 1215.8 TFLOPs/s | Stage time=58.4m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0585, 'grad_norm': 7.125, 'learning_rate': 2.7e-05, 'epoch': 3.602e-05}
+[Stage 19/96 L=19] step 121520 | loss_avg=0.0270(100) | First=97.75% | Full=95.75% | lr=2.70e-05 | grad_norm=7.12 | Speed=361.0 samples/s (154.4K toks/s) | 1215.9 TFLOPs/s | Stage time=58.5m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0499, 'grad_norm': 13.375, 'learning_rate': 2.7e-05, 'epoch': 3.604e-05}
+[CHECK] Stage 19 full=96.63% target>=98.00%
+[Stage 19/96 L=19] step 121530 | loss_avg=0.0273(100) | First=97.50% | Full=96.25% | lr=2.70e-05 | grad_norm=13.38 | Speed=361.0 samples/s (154.4K toks/s) | 1215.9 TFLOPs/s | Stage time=58.6m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0515, 'grad_norm': 9.3125, 'learning_rate': 2.7e-05, 'epoch': 3.606e-05}
+[Stage 19/96 L=19] step 121540 | loss_avg=0.0254(100) | First=97.75% | Full=96.12% | lr=2.70e-05 | grad_norm=9.31 | Speed=361.0 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=58.6m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0517, 'grad_norm': 6.84375, 'learning_rate': 2.7e-05, 'epoch': 3.608e-05}
+[Stage 19/96 L=19] step 121550 | loss_avg=0.0266(100) | First=97.75% | Full=95.75% | lr=2.70e-05 | grad_norm=6.84 | Speed=361.0 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=58.7m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+[CHECK] Stage 19 full=95.75% target>=98.00%
+{'loss': 0.0615, 'grad_norm': 11.625, 'learning_rate': 2.7e-05, 'epoch': 3.61e-05}
+[Stage 19/96 L=19] step 121560 | loss_avg=0.0262(100) | First=96.38% | Full=94.88% | lr=2.70e-05 | grad_norm=11.62 | Speed=361.0 samples/s (154.4K toks/s) | 1216.2 TFLOPs/s | Stage time=58.8m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0555, 'grad_norm': 32.25, 'learning_rate': 2.7e-05, 'epoch': 3.612e-05}
+[Stage 19/96 L=19] step 121570 | loss_avg=0.0263(100) | First=97.62% | Full=95.38% | lr=2.70e-05 | grad_norm=32.25 | Speed=361.1 samples/s (154.4K toks/s) | 1216.3 TFLOPs/s | Stage time=58.9m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0551, 'grad_norm': 11.3125, 'learning_rate': 2.7e-05, 'epoch': 3.614e-05}
+[CHECK] Stage 19 full=96.13% target>=98.00%
+[Stage 19/96 L=19] step 121580 | loss_avg=0.0260(100) | First=97.62% | Full=96.00% | lr=2.70e-05 | grad_norm=11.31 | Speed=361.1 samples/s (154.4K toks/s) | 1216.3 TFLOPs/s | Stage time=59.0m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0507, 'grad_norm': 8.1875, 'learning_rate': 2.7e-05, 'epoch': 3.616e-05}
+[Stage 19/96 L=19] step 121590 | loss_avg=0.0278(100) | First=97.62% | Full=95.75% | lr=2.70e-05 | grad_norm=8.19 | Speed=361.1 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=59.1m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0629, 'grad_norm': 10.375, 'learning_rate': 2.7e-05, 'epoch': 3.618e-05}
+[Stage 19/96 L=19] step 121600 | loss_avg=0.0271(100) | First=97.62% | Full=95.62% | lr=2.70e-05 | grad_norm=10.38 | Speed=361.1 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=59.1m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+[CHECK] Stage 19 full=95.63% target>=98.00%
+{'loss': 0.0522, 'grad_norm': 5.65625, 'learning_rate': 2.7e-05, 'epoch': 3.62e-05}
+[Stage 19/96 L=19] step 121610 | loss_avg=0.0270(100) | First=97.62% | Full=96.00% | lr=2.70e-05 | grad_norm=5.66 | Speed=361.1 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=59.2m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0527, 'grad_norm': 11.875, 'learning_rate': 2.7e-05, 'epoch': 3.622e-05}
+[Stage 19/96 L=19] step 121620 | loss_avg=0.0276(100) | First=96.88% | Full=94.50% | lr=2.70e-05 | grad_norm=11.88 | Speed=361.1 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=59.3m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0565, 'grad_norm': 15.375, 'learning_rate': 2.7e-05, 'epoch': 3.624e-05}
+[CHECK] Stage 19 full=94.50% target>=98.00%
+[Stage 19/96 L=19] step 121630 | loss_avg=0.0267(100) | First=97.75% | Full=96.00% | lr=2.70e-05 | grad_norm=15.38 | Speed=361.2 samples/s (154.4K toks/s) | 1216.6 TFLOPs/s | Stage time=59.4m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0495, 'grad_norm': 9.1875, 'learning_rate': 2.7e-05, 'epoch': 3.626e-05}
+[Stage 19/96 L=19] step 121640 | loss_avg=0.0268(100) | First=97.50% | Full=95.00% | lr=2.70e-05 | grad_norm=9.19 | Speed=361.2 samples/s (154.5K toks/s) | 1216.6 TFLOPs/s | Stage time=59.5m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0528, 'grad_norm': 3.5, 'learning_rate': 2.7e-05, 'epoch': 3.628e-05}
+[Stage 19/96 L=19] step 121650 | loss_avg=0.0235(100) | First=97.38% | Full=96.12% | lr=2.70e-05 | grad_norm=3.50 | Speed=361.2 samples/s (154.5K toks/s) | 1216.6 TFLOPs/s | Stage time=59.6m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+[CHECK] Stage 19 full=96.13% target>=98.00%
+{'loss': 0.0535, 'grad_norm': 4.21875, 'learning_rate': 2.7e-05, 'epoch': 3.63e-05}
+[Stage 19/96 L=19] step 121660 | loss_avg=0.0262(100) | First=97.38% | Full=95.50% | lr=2.70e-05 | grad_norm=4.22 | Speed=361.2 samples/s (154.5K toks/s) | 1216.6 TFLOPs/s | Stage time=59.7m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0574, 'grad_norm': 11.0, 'learning_rate': 2.7e-05, 'epoch': 3.632e-05}
+[Stage 19/96 L=19] step 121670 | loss_avg=0.0269(100) | First=96.25% | Full=94.62% | lr=2.70e-05 | grad_norm=11.00 | Speed=361.2 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=59.8m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0698, 'grad_norm': 10.5625, 'learning_rate': 2.7e-05, 'epoch': 3.634e-05}
+[CHECK] Stage 19 full=94.38% target>=98.00%
+[Stage 19/96 L=19] step 121680 | loss_avg=0.0270(100) | First=97.50% | Full=95.88% | lr=2.70e-05 | grad_norm=10.56 | Speed=361.3 samples/s (154.5K toks/s) | 1216.8 TFLOPs/s | Stage time=59.8m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0576, 'grad_norm': 11.25, 'learning_rate': 2.7e-05, 'epoch': 3.636e-05}
+[Stage 19/96 L=19] step 121690 | loss_avg=0.0261(100) | First=96.38% | Full=94.38% | lr=2.70e-05 | grad_norm=11.25 | Speed=361.3 samples/s (154.5K toks/s) | 1216.9 TFLOPs/s | Stage time=59.9m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.057, 'grad_norm': 14.375, 'learning_rate': 2.7e-05, 'epoch': 3.638e-05}
+[Stage 19/96 L=19] step 121700 | loss_avg=0.0293(100) | First=97.38% | Full=95.62% | lr=2.70e-05 | grad_norm=14.38 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=60.0m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+[CHECK] Stage 19 full=95.63% target>=98.00%
+{'loss': 0.0658, 'grad_norm': 7.875, 'learning_rate': 2.7e-05, 'epoch': 3.64e-05}
+[Stage 19/96 L=19] step 121710 | loss_avg=0.0277(100) | First=96.75% | Full=94.38% | lr=2.70e-05 | grad_norm=7.88 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=60.1m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0581, 'grad_norm': 10.625, 'learning_rate': 2.7e-05, 'epoch': 3.642e-05}
+[Stage 19/96 L=19] step 121720 | loss_avg=0.0255(100) | First=97.62% | Full=95.75% | lr=2.70e-05 | grad_norm=10.62 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=60.2m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0509, 'grad_norm': 0.765625, 'learning_rate': 2.7e-05, 'epoch': 3.644e-05}
+[CHECK] Stage 19 full=95.75% target>=98.00%
+[Stage 19/96 L=19] step 121730 | loss_avg=0.0260(100) | First=96.38% | Full=95.00% | lr=2.70e-05 | grad_norm=0.77 | Speed=361.3 samples/s (154.5K toks/s) | 1217.1 TFLOPs/s | Stage time=60.3m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0576, 'grad_norm': 11.375, 'learning_rate': 2.7e-05, 'epoch': 3.646e-05}
+[Stage 19/96 L=19] step 121740 | loss_avg=0.0257(100) | First=97.00% | Full=94.50% | lr=2.70e-05 | grad_norm=11.38 | Speed=361.3 samples/s (154.5K toks/s) | 1217.1 TFLOPs/s | Stage time=60.4m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0581, 'grad_norm': 11.6875, 'learning_rate': 2.7e-05, 'epoch': 3.648e-05}
+[Stage 19/96 L=19] step 121750 | loss_avg=0.0251(100) | First=98.25% | Full=95.75% | lr=2.70e-05 | grad_norm=11.69 | Speed=361.4 samples/s (154.5K toks/s) | 1217.2 TFLOPs/s | Stage time=60.4m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+[CHECK] Stage 19 full=95.75% target>=98.00%
+{'loss': 0.0538, 'grad_norm': 16.0, 'learning_rate': 2.7e-05, 'epoch': 3.65e-05}
+[Stage 19/96 L=19] step 121760 | loss_avg=0.0255(100) | First=97.38% | Full=95.38% | lr=2.70e-05 | grad_norm=16.00 | Speed=361.4 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=60.5m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0615, 'grad_norm': 9.4375, 'learning_rate': 2.7e-05, 'epoch': 3.652e-05}
+[Stage 19/96 L=19] step 121770 | loss_avg=0.0293(100) | First=97.50% | Full=95.88% | lr=2.70e-05 | grad_norm=9.44 | Speed=361.4 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=60.6m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0589, 'grad_norm': 6.125, 'learning_rate': 2.7e-05, 'epoch': 3.654e-05}
+[CHECK] Stage 19 full=95.50% target>=98.00%
+[Stage 19/96 L=19] step 121780 | loss_avg=0.0280(100) | First=98.38% | Full=96.38% | lr=2.70e-05 | grad_norm=6.12 | Speed=361.4 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=60.7m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0509, 'grad_norm': 4.53125, 'learning_rate': 2.7e-05, 'epoch': 3.656e-05}
+[Stage 19/96 L=19] step 121790 | loss_avg=0.0283(100) | First=96.50% | Full=94.38% | lr=2.70e-05 | grad_norm=4.53 | Speed=361.4 samples/s (154.6K toks/s) | 1217.4 TFLOPs/s | Stage time=60.8m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0495, 'grad_norm': 6.375, 'learning_rate': 2.7e-05, 'epoch': 3.658e-05}
+[Stage 19/96 L=19] step 121800 | loss_avg=0.0300(100) | First=97.12% | Full=94.25% | lr=2.70e-05 | grad_norm=6.38 | Speed=361.5 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=60.9m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+[CHECK] Stage 19 full=94.25% target>=98.00%
+{'loss': 0.0591, 'grad_norm': 7.15625, 'learning_rate': 2.7e-05, 'epoch': 3.66e-05}
+[Stage 19/96 L=19] step 121810 | loss_avg=0.0293(100) | First=97.88% | Full=96.00% | lr=2.70e-05 | grad_norm=7.16 | Speed=361.5 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=61.0m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0622, 'grad_norm': 7.40625, 'learning_rate': 2.7e-05, 'epoch': 3.662e-05}
+[Stage 19/96 L=19] step 121820 | loss_avg=0.0260(100) | First=97.38% | Full=96.12% | lr=2.70e-05 | grad_norm=7.41 | Speed=361.5 samples/s (154.6K toks/s) | 1217.6 TFLOPs/s | Stage time=61.0m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0526, 'grad_norm': 6.96875, 'learning_rate': 2.7e-05, 'epoch': 3.664e-05}
+[CHECK] Stage 19 full=96.00% target>=98.00%
+[Stage 19/96 L=19] step 121830 | loss_avg=0.0291(100) | First=97.75% | Full=95.38% | lr=2.70e-05 | grad_norm=6.97 | Speed=361.5 samples/s (154.6K toks/s) | 1217.7 TFLOPs/s | Stage time=61.1m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0633, 'grad_norm': 3.703125, 'learning_rate': 2.7e-05, 'epoch': 3.666e-05}
+[Stage 19/96 L=19] step 121840 | loss_avg=0.0285(100) | First=97.75% | Full=95.38% | lr=2.70e-05 | grad_norm=3.70 | Speed=361.5 samples/s (154.6K toks/s) | 1217.7 TFLOPs/s | Stage time=61.2m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0487, 'grad_norm': 3.0625, 'learning_rate': 2.7e-05, 'epoch': 3.668e-05}
+[Stage 19/96 L=19] step 121850 | loss_avg=0.0273(100) | First=96.75% | Full=94.38% | lr=2.70e-05 | grad_norm=3.06 | Speed=361.5 samples/s (154.6K toks/s) | 1217.8 TFLOPs/s | Stage time=61.3m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+[CHECK] Stage 19 full=94.38% target>=98.00%
+{'loss': 0.0555, 'grad_norm': 12.0, 'learning_rate': 2.7e-05, 'epoch': 3.67e-05}
+[Stage 19/96 L=19] step 121860 | loss_avg=0.0280(100) | First=97.00% | Full=95.50% | lr=2.70e-05 | grad_norm=12.00 | Speed=361.6 samples/s (154.6K toks/s) | 1217.8 TFLOPs/s | Stage time=61.4m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0466, 'grad_norm': 6.6875, 'learning_rate': 2.7e-05, 'epoch': 3.672e-05}
+[Stage 19/96 L=19] step 121870 | loss_avg=0.0290(100) | First=96.88% | Full=95.38% | lr=2.70e-05 | grad_norm=6.69 | Speed=361.6 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=61.5m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0586, 'grad_norm': 11.0, 'learning_rate': 2.7e-05, 'epoch': 3.674e-05}
+[CHECK] Stage 19 full=95.25% target>=98.00%
+[Stage 19/96 L=19] step 121880 | loss_avg=0.0280(100) | First=97.25% | Full=95.12% | lr=2.70e-05 | grad_norm=11.00 | Speed=361.6 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=61.5m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.061, 'grad_norm': 6.6875, 'learning_rate': 2.7e-05, 'epoch': 3.676e-05}
+[Stage 19/96 L=19] step 121890 | loss_avg=0.0276(100) | First=97.50% | Full=95.50% | lr=2.70e-05 | grad_norm=6.69 | Speed=361.6 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=61.6m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0516, 'grad_norm': 5.34375, 'learning_rate': 2.7e-05, 'epoch': 3.678e-05}
+[Stage 19/96 L=19] step 121900 | loss_avg=0.0256(100) | First=98.50% | Full=97.50% | lr=2.70e-05 | grad_norm=5.34 | Speed=361.6 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=61.7m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+[CHECK] Stage 19 full=97.50% target>=98.00%
+{'loss': 0.0432, 'grad_norm': 1.515625, 'learning_rate': 2.7e-05, 'epoch': 3.68e-05}
+[Stage 19/96 L=19] step 121910 | loss_avg=0.0256(100) | First=96.62% | Full=94.88% | lr=2.70e-05 | grad_norm=1.52 | Speed=361.7 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=61.8m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0483, 'grad_norm': 4.25, 'learning_rate': 2.7e-05, 'epoch': 3.682e-05}
+[Stage 19/96 L=19] step 121920 | loss_avg=0.0277(100) | First=96.75% | Full=94.62% | lr=2.70e-05 | grad_norm=4.25 | Speed=361.7 samples/s (154.7K toks/s) | 1218.2 TFLOPs/s | Stage time=61.9m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.057, 'grad_norm': 24.5, 'learning_rate': 2.7e-05, 'epoch': 3.684e-05}
+[CHECK] Stage 19 full=95.38% target>=98.00%
+[Stage 19/96 L=19] step 121930 | loss_avg=0.0264(100) | First=96.62% | Full=95.25% | lr=2.70e-05 | grad_norm=24.50 | Speed=361.7 samples/s (154.7K toks/s) | 1218.3 TFLOPs/s | Stage time=62.0m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.051, 'grad_norm': 7.0625, 'learning_rate': 2.7e-05, 'epoch': 3.686e-05}
+[Stage 19/96 L=19] step 121940 | loss_avg=0.0290(100) | First=97.38% | Full=94.12% | lr=2.70e-05 | grad_norm=7.06 | Speed=361.7 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=62.1m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0584, 'grad_norm': 8.8125, 'learning_rate': 2.7e-05, 'epoch': 3.688e-05}
+[Stage 19/96 L=19] step 121950 | loss_avg=0.0301(100) | First=96.50% | Full=95.25% | lr=2.70e-05 | grad_norm=8.81 | Speed=361.7 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=62.1m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+[CHECK] Stage 19 full=95.25% target>=98.00%
+{'loss': 0.0665, 'grad_norm': 7.8125, 'learning_rate': 2.7e-05, 'epoch': 3.69e-05}
+[Stage 19/96 L=19] step 121960 | loss_avg=0.0299(100) | First=97.25% | Full=95.50% | lr=2.70e-05 | grad_norm=7.81 | Speed=361.7 samples/s (154.7K toks/s) | 1218.5 TFLOPs/s | Stage time=62.2m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0491, 'grad_norm': 8.625, 'learning_rate': 2.7e-05, 'epoch': 3.692e-05}
+[Stage 19/96 L=19] step 121970 | loss_avg=0.0311(100) | First=96.50% | Full=94.62% | lr=2.70e-05 | grad_norm=8.62 | Speed=361.8 samples/s (154.7K toks/s) | 1218.5 TFLOPs/s | Stage time=62.3m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0605, 'grad_norm': 14.875, 'learning_rate': 2.7e-05, 'epoch': 3.694e-05}
+[CHECK] Stage 19 full=95.88% target>=98.00%
+[Stage 19/96 L=19] step 121980 | loss_avg=0.0315(100) | First=97.50% | Full=95.38% | lr=2.70e-05 | grad_norm=14.88 | Speed=361.8 samples/s (154.7K toks/s) | 1218.6 TFLOPs/s | Stage time=62.4m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0621, 'grad_norm': 7.78125, 'learning_rate': 2.7e-05, 'epoch': 3.696e-05}
+[Stage 19/96 L=19] step 121990 | loss_avg=0.0294(100) | First=97.75% | Full=96.50% | lr=2.70e-05 | grad_norm=7.78 | Speed=361.8 samples/s (154.7K toks/s) | 1218.7 TFLOPs/s | Stage time=62.5m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0457, 'grad_norm': 10.0625, 'learning_rate': 2.7e-05, 'epoch': 3.698e-05}
+[Stage 19/96 L=19] step 122000 | loss_avg=0.0311(100) | First=96.50% | Full=94.62% | lr=2.70e-05 | grad_norm=10.06 | Speed=361.8 samples/s (154.7K toks/s) | 1218.8 TFLOPs/s | Stage time=62.6m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+[CHECK] Stage 19 full=94.63% target>=98.00%
+{'loss': 0.0549, 'grad_norm': 11.0625, 'learning_rate': 2.7e-05, 'epoch': 3.7e-05}
+[Stage 19/96 L=19] step 122010 | loss_avg=0.0315(100) | First=97.38% | Full=96.12% | lr=2.70e-05 | grad_norm=11.06 | Speed=361.0 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=62.8m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0525, 'grad_norm': 14.5625, 'learning_rate': 2.7e-05, 'epoch': 3.702e-05}
+[Stage 19/96 L=19] step 122020 | loss_avg=0.0306(100) | First=97.12% | Full=95.00% | lr=2.70e-05 | grad_norm=14.56 | Speed=361.0 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=62.9m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0689, 'grad_norm': 7.8125, 'learning_rate': 2.7e-05, 'epoch': 3.704e-05}
+[CHECK] Stage 19 full=95.13% target>=98.00%
+[Stage 19/96 L=19] step 122030 | loss_avg=0.0319(100) | First=96.50% | Full=94.75% | lr=2.70e-05 | grad_norm=7.81 | Speed=361.0 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=63.0m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0544, 'grad_norm': 9.4375, 'learning_rate': 2.7e-05, 'epoch': 3.706e-05}
+[Stage 19/96 L=19] step 122040 | loss_avg=0.0331(100) | First=97.25% | Full=95.25% | lr=2.70e-05 | grad_norm=9.44 | Speed=361.0 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=63.1m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0529, 'grad_norm': 6.4375, 'learning_rate': 2.7e-05, 'epoch': 3.708e-05}
+[Stage 19/96 L=19] step 122050 | loss_avg=0.0325(100) | First=96.50% | Full=93.88% | lr=2.70e-05 | grad_norm=6.44 | Speed=361.1 samples/s (154.4K toks/s) | 1216.2 TFLOPs/s | Stage time=63.1m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+[CHECK] Stage 19 full=93.88% target>=98.00%
+{'loss': 0.0597, 'grad_norm': 18.125, 'learning_rate': 2.7e-05, 'epoch': 3.71e-05}
+[Stage 19/96 L=19] step 122060 | loss_avg=0.0296(100) | First=97.12% | Full=95.25% | lr=2.70e-05 | grad_norm=18.12 | Speed=361.1 samples/s (154.4K toks/s) | 1216.3 TFLOPs/s | Stage time=63.2m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0567, 'grad_norm': 2.40625, 'learning_rate': 2.7e-05, 'epoch': 3.712e-05}
+[Stage 19/96 L=19] step 122070 | loss_avg=0.0282(100) | First=97.38% | Full=95.38% | lr=2.70e-05 | grad_norm=2.41 | Speed=361.1 samples/s (154.4K toks/s) | 1216.3 TFLOPs/s | Stage time=63.3m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0628, 'grad_norm': 9.5, 'learning_rate': 2.7e-05, 'epoch': 3.714e-05}
+[CHECK] Stage 19 full=95.25% target>=98.00%
+[Stage 19/96 L=19] step 122080 | loss_avg=0.0255(100) | First=97.00% | Full=95.00% | lr=2.70e-05 | grad_norm=9.50 | Speed=361.1 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=63.4m | seqs/step=48.0 | toks/step=20527 | eff=100.0%
+{'loss': 0.0568, 'grad_norm': 8.75, 'learning_rate': 2.7e-05, 'epoch': 3.716e-05}
+[Stage 19/96 L=19] step 122090 | loss_avg=0.0246(100) | First=97.50% | Full=95.75% | lr=2.70e-05 | grad_norm=8.75 | Speed=361.1 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=63.5m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0522, 'grad_norm': 5.09375, 'learning_rate': 2.7e-05, 'epoch': 3.718e-05}
+[Stage 19/96 L=19] step 122100 | loss_avg=0.0273(100) | First=96.75% | Full=94.75% | lr=2.70e-05 | grad_norm=5.09 | Speed=361.1 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=63.6m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+[CHECK] Stage 19 full=94.75% target>=98.00%
+{'loss': 0.0632, 'grad_norm': 11.4375, 'learning_rate': 2.7e-05, 'epoch': 3.72e-05}
+[Stage 19/96 L=19] step 122110 | loss_avg=0.0306(100) | First=97.50% | Full=94.50% | lr=2.70e-05 | grad_norm=11.44 | Speed=361.2 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=63.7m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0544, 'grad_norm': 5.625, 'learning_rate': 2.7e-05, 'epoch': 3.722e-05}
+[Stage 19/96 L=19] step 122120 | loss_avg=0.0284(100) | First=97.38% | Full=96.00% | lr=2.70e-05 | grad_norm=5.62 | Speed=361.2 samples/s (154.4K toks/s) | 1216.6 TFLOPs/s | Stage time=63.7m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0392, 'grad_norm': 19.0, 'learning_rate': 2.7e-05, 'epoch': 3.724e-05}
+[CHECK] Stage 19 full=95.63% target>=98.00%
+[Stage 19/96 L=19] step 122130 | loss_avg=0.0279(100) | First=96.88% | Full=94.88% | lr=2.70e-05 | grad_norm=19.00 | Speed=361.2 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=63.8m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0639, 'grad_norm': 22.75, 'learning_rate': 2.7e-05, 'epoch': 3.726e-05}
+[Stage 19/96 L=19] step 122140 | loss_avg=0.0304(100) | First=97.75% | Full=96.25% | lr=2.70e-05 | grad_norm=22.75 | Speed=361.2 samples/s (154.5K toks/s) | 1216.6 TFLOPs/s | Stage time=63.9m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0532, 'grad_norm': 6.46875, 'learning_rate': 2.7e-05, 'epoch': 3.728e-05}
+[Stage 19/96 L=19] step 122150 | loss_avg=0.0275(100) | First=96.50% | Full=93.75% | lr=2.70e-05 | grad_norm=6.47 | Speed=361.2 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=64.0m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+[CHECK] Stage 19 full=93.75% target>=98.00%
+{'loss': 0.0626, 'grad_norm': 37.25, 'learning_rate': 2.7e-05, 'epoch': 3.73e-05}
+[Stage 19/96 L=19] step 122160 | loss_avg=0.0253(100) | First=97.25% | Full=95.75% | lr=2.70e-05 | grad_norm=37.25 | Speed=361.3 samples/s (154.5K toks/s) | 1216.8 TFLOPs/s | Stage time=64.1m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0546, 'grad_norm': 5.09375, 'learning_rate': 2.7e-05, 'epoch': 3.732e-05}
+[Stage 19/96 L=19] step 122170 | loss_avg=0.0262(100) | First=97.88% | Full=96.25% | lr=2.70e-05 | grad_norm=5.09 | Speed=361.3 samples/s (154.5K toks/s) | 1216.9 TFLOPs/s | Stage time=64.2m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0529, 'grad_norm': 17.625, 'learning_rate': 2.7e-05, 'epoch': 3.734e-05}
+[CHECK] Stage 19 full=96.13% target>=98.00%
+[Stage 19/96 L=19] step 122180 | loss_avg=0.0279(100) | First=96.75% | Full=94.62% | lr=2.70e-05 | grad_norm=17.62 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=64.3m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0554, 'grad_norm': 6.28125, 'learning_rate': 2.7e-05, 'epoch': 3.736e-05}
+[Stage 19/96 L=19] step 122190 | loss_avg=0.0276(100) | First=96.12% | Full=93.88% | lr=2.70e-05 | grad_norm=6.28 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=64.3m | seqs/step=48.0 | toks/step=20526 | eff=100.0%
+{'loss': 0.0639, 'grad_norm': 19.75, 'learning_rate': 2.7e-05, 'epoch': 3.738e-05}
+[Stage 19/96 L=19] step 122200 | loss_avg=0.0261(100) | First=98.00% | Full=96.00% | lr=2.70e-05 | grad_norm=19.75 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=64.4m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+[CHECK] Stage 19 full=96.00% target>=98.00%
+{'loss': 0.0527, 'grad_norm': 4.6875, 'learning_rate': 2.7e-05, 'epoch': 3.74e-05}
+[Stage 19/96 L=19] step 122210 | loss_avg=0.0282(100) | First=97.62% | Full=96.12% | lr=2.70e-05 | grad_norm=4.69 | Speed=361.3 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=64.5m | seqs/step=48.0 | toks/step=20525 | eff=100.0%
+{'loss': 0.0556, 'grad_norm': 6.0, 'learning_rate': 2.7e-05, 'epoch': 3.742e-05}
+[Stage 19/96 L=19] step 122220 | loss_avg=0.0307(100) | First=97.62% | Full=96.00% | lr=2.70e-05 | grad_norm=6.00 | Speed=361.4 samples/s (154.5K toks/s) | 1217.1 TFLOPs/s | Stage time=64.6m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0584, 'grad_norm': 7.78125, 'learning_rate': 2.7e-05, 'epoch': 3.744e-05}
+[CHECK] Stage 19 full=94.50% target>=98.00%
+[Stage 19/96 L=19] step 122230 | loss_avg=0.0303(100) | First=97.50% | Full=95.62% | lr=2.70e-05 | grad_norm=7.78 | Speed=361.4 samples/s (154.5K toks/s) | 1217.1 TFLOPs/s | Stage time=64.7m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0538, 'grad_norm': 14.0, 'learning_rate': 2.7e-05, 'epoch': 3.746e-05}
+[Stage 19/96 L=19] step 122240 | loss_avg=0.0288(100) | First=96.88% | Full=94.12% | lr=2.70e-05 | grad_norm=14.00 | Speed=361.4 samples/s (154.5K toks/s) | 1217.2 TFLOPs/s | Stage time=64.8m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0611, 'grad_norm': 3.109375, 'learning_rate': 2.7e-05, 'epoch': 3.748e-05}
+[Stage 19/96 L=19] step 122250 | loss_avg=0.0308(100) | First=98.38% | Full=96.25% | lr=2.70e-05 | grad_norm=3.11 | Speed=361.4 samples/s (154.5K toks/s) | 1217.2 TFLOPs/s | Stage time=64.9m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+[CHECK] Stage 19 full=96.25% target>=98.00%
+{'loss': 0.0478, 'grad_norm': 5.96875, 'learning_rate': 2.7e-05, 'epoch': 3.75e-05}
+[Stage 19/96 L=19] step 122260 | loss_avg=0.0297(100) | First=96.88% | Full=95.25% | lr=2.70e-05 | grad_norm=5.97 | Speed=361.4 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=64.9m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0577, 'grad_norm': 15.875, 'learning_rate': 2.7e-05, 'epoch': 3.752e-05}
+[Stage 19/96 L=19] step 122270 | loss_avg=0.0293(100) | First=98.25% | Full=96.62% | lr=2.70e-05 | grad_norm=15.88 | Speed=361.4 samples/s (154.5K toks/s) | 1217.4 TFLOPs/s | Stage time=65.0m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0533, 'grad_norm': 9.625, 'learning_rate': 2.7e-05, 'epoch': 3.754e-05}
+[CHECK] Stage 19 full=95.25% target>=98.00%
+[Stage 19/96 L=19] step 122280 | loss_avg=0.0288(100) | First=97.62% | Full=95.25% | lr=2.70e-05 | grad_norm=9.62 | Speed=361.5 samples/s (154.6K toks/s) | 1217.4 TFLOPs/s | Stage time=65.1m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+{'loss': 0.0531, 'grad_norm': 3.125, 'learning_rate': 2.7e-05, 'epoch': 3.756e-05}
+[Stage 19/96 L=19] step 122290 | loss_avg=0.0297(100) | First=97.50% | Full=94.88% | lr=2.70e-05 | grad_norm=3.12 | Speed=361.5 samples/s (154.5K toks/s) | 1217.4 TFLOPs/s | Stage time=65.2m | seqs/step=48.0 | toks/step=20523 | eff=100.0%
+{'loss': 0.0594, 'grad_norm': 11.875, 'learning_rate': 2.7e-05, 'epoch': 3.758e-05}
+[Stage 19/96 L=19] step 122300 | loss_avg=0.0300(100) | First=97.88% | Full=96.00% | lr=2.70e-05 | grad_norm=11.88 | Speed=361.5 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=65.3m | seqs/step=48.0 | toks/step=20524 | eff=100.0%
+[CHECK] Stage 19 full=96.00% target>=98.00%
+{'loss': 0.0482, 'grad_norm': 21.5, 'learning_rate': 2.7e-05, 'epoch': 3.76e-05}
+[Stage 19/96 L=19] step 122310 | loss_avg=0.0300(100) | First=98.00% | Full=96.50% | lr=2.70e-05 | grad_norm=21.50 | Speed=361.5 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=65.4m | seqs/step=48.0 | toks/step=20523 | eff=100.0%
+{'loss': 0.0484, 'grad_norm': 38.0, 'learning_rate': 2.7e-05, 'epoch': 3.762e-05}
+[Stage 19/96 L=19] step 122320 | loss_avg=0.0276(100) | First=97.25% | Full=95.50% | lr=2.70e-05 | grad_norm=38.00 | Speed=361.5 samples/s (154.6K toks/s) | 1217.6 TFLOPs/s | Stage time=65.5m | seqs/step=48.0 | toks/step=20523 | eff=100.0%
+{'loss': 0.0496, 'grad_norm': 6.9375, 'learning_rate': 2.7e-05, 'epoch': 3.764e-05}
+[CHECK] Stage 19 full=94.13% target>=98.00%
+[Stage 19/96 L=19] step 122330 | loss_avg=0.0276(100) | First=97.38% | Full=96.62% | lr=2.70e-05 | grad_norm=6.94 | Speed=361.5 samples/s (154.6K toks/s) | 1217.7 TFLOPs/s | Stage time=65.5m | seqs/step=48.0 | toks/step=20523 | eff=100.0%
+{'loss': 0.0514, 'grad_norm': 14.3125, 'learning_rate': 2.7e-05, 'epoch': 3.766e-05}
+[Stage 19/96 L=19] step 122340 | loss_avg=0.0257(100) | First=97.88% | Full=96.25% | lr=2.70e-05 | grad_norm=14.31 | Speed=361.6 samples/s (154.6K toks/s) | 1217.6 TFLOPs/s | Stage time=65.6m | seqs/step=48.0 | toks/step=20523 | eff=100.0%
+{'loss': 0.0507, 'grad_norm': 5.875, 'learning_rate': 2.7e-05, 'epoch': 3.768e-05}
+[Stage 19/96 L=19] step 122350 | loss_avg=0.0220(100) | First=97.38% | Full=95.50% | lr=2.70e-05 | grad_norm=5.88 | Speed=361.6 samples/s (154.6K toks/s) | 1217.7 TFLOPs/s | Stage time=65.7m | seqs/step=48.0 | toks/step=20523 | eff=100.0%
+[CHECK] Stage 19 full=95.50% target>=98.00%
+{'loss': 0.0554, 'grad_norm': 8.6875, 'learning_rate': 2.7e-05, 'epoch': 3.77e-05}
+[Stage 19/96 L=19] step 122360 | loss_avg=0.0227(100) | First=97.12% | Full=94.62% | lr=2.70e-05 | grad_norm=8.69 | Speed=361.6 samples/s (154.6K toks/s) | 1217.8 TFLOPs/s | Stage time=65.8m | seqs/step=48.0 | toks/step=20523 | eff=100.0%
+{'loss': 0.0616, 'grad_norm': 21.0, 'learning_rate': 2.7e-05, 'epoch': 3.772e-05}
+[Stage 19/96 L=19] step 122370 | loss_avg=0.0224(100) | First=96.50% | Full=94.75% | lr=2.70e-05 | grad_norm=21.00 | Speed=361.6 samples/s (154.6K toks/s) | 1217.8 TFLOPs/s | Stage time=65.9m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.0588, 'grad_norm': 17.375, 'learning_rate': 2.7e-05, 'epoch': 3.774e-05}
+[CHECK] Stage 19 full=96.00% target>=98.00%
+[Stage 19/96 L=19] step 122380 | loss_avg=0.0255(100) | First=97.38% | Full=95.12% | lr=2.70e-05 | grad_norm=17.38 | Speed=361.6 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=66.0m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.0585, 'grad_norm': 11.5, 'learning_rate': 2.7e-05, 'epoch': 3.776e-05}
+[Stage 19/96 L=19] step 122390 | loss_avg=0.0240(100) | First=96.00% | Full=94.25% | lr=2.70e-05 | grad_norm=11.50 | Speed=361.6 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=66.1m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.0499, 'grad_norm': 4.78125, 'learning_rate': 2.7e-05, 'epoch': 3.778e-05}
+[Stage 19/96 L=19] step 122400 | loss_avg=0.0263(100) | First=98.00% | Full=95.88% | lr=2.70e-05 | grad_norm=4.78 | Speed=361.6 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=66.1m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+[CHECK] Stage 19 full=95.88% target>=98.00%
+{'loss': 0.057, 'grad_norm': 8.3125, 'learning_rate': 2.7e-05, 'epoch': 3.78e-05}
+[Stage 19/96 L=19] step 122410 | loss_avg=0.0291(100) | First=97.12% | Full=94.50% | lr=2.70e-05 | grad_norm=8.31 | Speed=361.7 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=66.2m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.066, 'grad_norm': 29.375, 'learning_rate': 2.7e-05, 'epoch': 3.782e-05}
+[Stage 19/96 L=19] step 122420 | loss_avg=0.0321(100) | First=98.38% | Full=96.75% | lr=2.70e-05 | grad_norm=29.38 | Speed=361.7 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=66.3m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.0529, 'grad_norm': 8.125, 'learning_rate': 2.7e-05, 'epoch': 3.784e-05}
+[CHECK] Stage 19 full=94.75% target>=98.00%
+[Stage 19/96 L=19] step 122430 | loss_avg=0.0299(100) | First=97.00% | Full=95.50% | lr=2.70e-05 | grad_norm=8.12 | Speed=361.7 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=66.4m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.0545, 'grad_norm': 11.5, 'learning_rate': 2.7e-05, 'epoch': 3.786e-05}
+[Stage 19/96 L=19] step 122440 | loss_avg=0.0330(100) | First=97.38% | Full=95.25% | lr=2.70e-05 | grad_norm=11.50 | Speed=361.7 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=66.5m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.0662, 'grad_norm': 10.25, 'learning_rate': 2.7e-05, 'epoch': 3.788e-05}
+[Stage 19/96 L=19] step 122450 | loss_avg=0.0337(100) | First=97.25% | Full=95.25% | lr=2.70e-05 | grad_norm=10.25 | Speed=361.7 samples/s (154.7K toks/s) | 1218.2 TFLOPs/s | Stage time=66.6m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+[CHECK] Stage 19 full=95.25% target>=98.00%
+{'loss': 0.0544, 'grad_norm': 29.375, 'learning_rate': 2.7e-05, 'epoch': 3.79e-05}
+[Stage 19/96 L=19] step 122460 | loss_avg=0.0313(100) | First=97.00% | Full=94.62% | lr=2.70e-05 | grad_norm=29.38 | Speed=361.7 samples/s (154.7K toks/s) | 1218.3 TFLOPs/s | Stage time=66.7m | seqs/step=48.0 | toks/step=20522 | eff=100.0%
+{'loss': 0.0587, 'grad_norm': 1.515625, 'learning_rate': 2.7e-05, 'epoch': 3.792e-05}
+[Stage 19/96 L=19] step 122470 | loss_avg=0.0311(100) | First=97.62% | Full=95.62% | lr=2.70e-05 | grad_norm=1.52 | Speed=361.8 samples/s (154.7K toks/s) | 1218.3 TFLOPs/s | Stage time=66.7m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0612, 'grad_norm': 2.28125, 'learning_rate': 2.7e-05, 'epoch': 3.794e-05}
+[CHECK] Stage 19 full=95.88% target>=98.00%
+[Stage 19/96 L=19] step 122480 | loss_avg=0.0323(100) | First=97.38% | Full=95.25% | lr=2.70e-05 | grad_norm=2.28 | Speed=361.8 samples/s (154.7K toks/s) | 1218.3 TFLOPs/s | Stage time=66.8m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0604, 'grad_norm': 12.75, 'learning_rate': 2.7e-05, 'epoch': 3.796e-05}
+[Stage 19/96 L=19] step 122490 | loss_avg=0.0323(100) | First=97.88% | Full=95.88% | lr=2.70e-05 | grad_norm=12.75 | Speed=361.8 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=66.9m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0569, 'grad_norm': 17.875, 'learning_rate': 2.7e-05, 'epoch': 3.798e-05}
+[Stage 19/96 L=19] step 122500 | loss_avg=0.0312(100) | First=97.62% | Full=95.88% | lr=2.70e-05 | grad_norm=17.88 | Speed=361.8 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=67.0m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+[CHECK] Stage 19 full=95.88% target>=98.00%
+{'loss': 0.0565, 'grad_norm': 11.0, 'learning_rate': 2.7e-05, 'epoch': 3.8e-05}
+[Stage 19/96 L=19] step 122510 | loss_avg=0.0300(100) | First=98.12% | Full=96.50% | lr=2.70e-05 | grad_norm=11.00 | Speed=361.0 samples/s (154.3K toks/s) | 1215.7 TFLOPs/s | Stage time=67.2m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0537, 'grad_norm': 10.1875, 'learning_rate': 2.7e-05, 'epoch': 3.802e-05}
+[Stage 19/96 L=19] step 122520 | loss_avg=0.0286(100) | First=97.00% | Full=95.50% | lr=2.70e-05 | grad_norm=10.19 | Speed=361.0 samples/s (154.3K toks/s) | 1215.7 TFLOPs/s | Stage time=67.3m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.055, 'grad_norm': 6.09375, 'learning_rate': 2.7e-05, 'epoch': 3.804e-05}
+[CHECK] Stage 19 full=96.50% target>=98.00%
+[Stage 19/96 L=19] step 122530 | loss_avg=0.0266(100) | First=97.62% | Full=95.12% | lr=2.70e-05 | grad_norm=6.09 | Speed=361.0 samples/s (154.4K toks/s) | 1215.8 TFLOPs/s | Stage time=67.4m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.052, 'grad_norm': 7.84375, 'learning_rate': 2.7e-05, 'epoch': 3.806e-05}
+[Stage 19/96 L=19] step 122540 | loss_avg=0.0260(100) | First=97.62% | Full=94.75% | lr=2.70e-05 | grad_norm=7.84 | Speed=361.1 samples/s (154.4K toks/s) | 1215.9 TFLOPs/s | Stage time=67.5m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0534, 'grad_norm': 5.3125, 'learning_rate': 2.7e-05, 'epoch': 3.808e-05}
+[Stage 19/96 L=19] step 122550 | loss_avg=0.0277(100) | First=97.50% | Full=95.62% | lr=2.70e-05 | grad_norm=5.31 | Speed=361.1 samples/s (154.4K toks/s) | 1215.9 TFLOPs/s | Stage time=67.6m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+[CHECK] Stage 19 full=95.63% target>=98.00%
+{'loss': 0.0576, 'grad_norm': 6.625, 'learning_rate': 2.7e-05, 'epoch': 3.81e-05}
+[Stage 19/96 L=19] step 122560 | loss_avg=0.0287(100) | First=97.12% | Full=95.12% | lr=2.70e-05 | grad_norm=6.62 | Speed=361.1 samples/s (154.4K toks/s) | 1215.9 TFLOPs/s | Stage time=67.7m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0616, 'grad_norm': 5.0625, 'learning_rate': 2.7e-05, 'epoch': 3.812e-05}
+[Stage 19/96 L=19] step 122570 | loss_avg=0.0296(100) | First=97.00% | Full=95.12% | lr=2.70e-05 | grad_norm=5.06 | Speed=361.1 samples/s (154.4K toks/s) | 1215.9 TFLOPs/s | Stage time=67.7m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.06, 'grad_norm': 9.0, 'learning_rate': 2.7e-05, 'epoch': 3.814e-05}
+[CHECK] Stage 19 full=95.38% target>=98.00%
+[Stage 19/96 L=19] step 122580 | loss_avg=0.0305(100) | First=96.38% | Full=94.88% | lr=2.70e-05 | grad_norm=9.00 | Speed=361.1 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=67.8m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.061, 'grad_norm': 9.1875, 'learning_rate': 2.7e-05, 'epoch': 3.816e-05}
+[Stage 19/96 L=19] step 122590 | loss_avg=0.0292(100) | First=97.50% | Full=95.62% | lr=2.70e-05 | grad_norm=9.19 | Speed=361.1 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=67.9m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0574, 'grad_norm': 10.5625, 'learning_rate': 2.7e-05, 'epoch': 3.818e-05}
+[Stage 19/96 L=19] step 122600 | loss_avg=0.0291(100) | First=97.25% | Full=95.38% | lr=2.70e-05 | grad_norm=10.56 | Speed=361.2 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=68.0m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+[CHECK] Stage 19 full=95.38% target>=98.00%
+{'loss': 0.0567, 'grad_norm': 12.3125, 'learning_rate': 2.7e-05, 'epoch': 3.82e-05}
+[Stage 19/96 L=19] step 122610 | loss_avg=0.0260(100) | First=96.75% | Full=95.38% | lr=2.70e-05 | grad_norm=12.31 | Speed=361.2 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=68.1m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.041, 'grad_norm': 4.15625, 'learning_rate': 2.7e-05, 'epoch': 3.822e-05}
+[Stage 19/96 L=19] step 122620 | loss_avg=0.0276(100) | First=96.75% | Full=94.62% | lr=2.70e-05 | grad_norm=4.16 | Speed=361.2 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=68.2m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0614, 'grad_norm': 4.71875, 'learning_rate': 2.7e-05, 'epoch': 3.824e-05}
+[CHECK] Stage 19 full=96.13% target>=98.00%
+[Stage 19/96 L=19] step 122630 | loss_avg=0.0279(100) | First=96.25% | Full=94.38% | lr=2.70e-05 | grad_norm=4.72 | Speed=361.2 samples/s (154.4K toks/s) | 1216.2 TFLOPs/s | Stage time=68.3m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0574, 'grad_norm': 8.5, 'learning_rate': 2.7e-05, 'epoch': 3.826e-05}
+[Stage 19/96 L=19] step 122640 | loss_avg=0.0292(100) | First=96.62% | Full=94.50% | lr=2.70e-05 | grad_norm=8.50 | Speed=361.2 samples/s (154.4K toks/s) | 1216.2 TFLOPs/s | Stage time=68.3m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0528, 'grad_norm': 14.1875, 'learning_rate': 2.7e-05, 'epoch': 3.828e-05}
+[Stage 19/96 L=19] step 122650 | loss_avg=0.0289(100) | First=97.75% | Full=95.12% | lr=2.70e-05 | grad_norm=14.19 | Speed=361.2 samples/s (154.4K toks/s) | 1216.3 TFLOPs/s | Stage time=68.4m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+[CHECK] Stage 19 full=95.13% target>=98.00%
+{'loss': 0.0536, 'grad_norm': 28.375, 'learning_rate': 2.7e-05, 'epoch': 3.83e-05}
+[Stage 19/96 L=19] step 122660 | loss_avg=0.0329(100) | First=96.38% | Full=94.38% | lr=2.70e-05 | grad_norm=28.38 | Speed=361.3 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=68.5m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0609, 'grad_norm': 7.4375, 'learning_rate': 2.7e-05, 'epoch': 3.832e-05}
+[Stage 19/96 L=19] step 122670 | loss_avg=0.0300(100) | First=96.88% | Full=95.88% | lr=2.70e-05 | grad_norm=7.44 | Speed=361.3 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=68.6m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0639, 'grad_norm': 8.8125, 'learning_rate': 2.7e-05, 'epoch': 3.834e-05}
+[CHECK] Stage 19 full=94.75% target>=98.00%
+[Stage 19/96 L=19] step 122680 | loss_avg=0.0274(100) | First=97.50% | Full=96.00% | lr=2.70e-05 | grad_norm=8.81 | Speed=361.3 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=68.7m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0464, 'grad_norm': 6.125, 'learning_rate': 2.7e-05, 'epoch': 3.836e-05}
+[Stage 19/96 L=19] step 122690 | loss_avg=0.0269(100) | First=97.62% | Full=96.12% | lr=2.70e-05 | grad_norm=6.12 | Speed=361.3 samples/s (154.4K toks/s) | 1216.6 TFLOPs/s | Stage time=68.8m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0521, 'grad_norm': 12.4375, 'learning_rate': 2.7e-05, 'epoch': 3.838e-05}
+[Stage 19/96 L=19] step 122700 | loss_avg=0.0252(100) | First=97.88% | Full=95.00% | lr=2.70e-05 | grad_norm=12.44 | Speed=361.3 samples/s (154.5K toks/s) | 1216.6 TFLOPs/s | Stage time=68.9m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+[CHECK] Stage 19 full=95.00% target>=98.00%
+{'loss': 0.0576, 'grad_norm': 3.140625, 'learning_rate': 2.7e-05, 'epoch': 3.84e-05}
+[Stage 19/96 L=19] step 122710 | loss_avg=0.0277(100) | First=96.88% | Full=94.75% | lr=2.70e-05 | grad_norm=3.14 | Speed=361.3 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=68.9m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0668, 'grad_norm': 14.75, 'learning_rate': 2.7e-05, 'epoch': 3.842e-05}
+[Stage 19/96 L=19] step 122720 | loss_avg=0.0278(100) | First=97.88% | Full=95.88% | lr=2.70e-05 | grad_norm=14.75 | Speed=361.3 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=69.0m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.053, 'grad_norm': 4.5, 'learning_rate': 2.7e-05, 'epoch': 3.844e-05}
+[CHECK] Stage 19 full=94.38% target>=98.00%
+[Stage 19/96 L=19] step 122730 | loss_avg=0.0309(100) | First=97.25% | Full=94.88% | lr=2.70e-05 | grad_norm=4.50 | Speed=361.4 samples/s (154.5K toks/s) | 1216.8 TFLOPs/s | Stage time=69.1m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0545, 'grad_norm': 8.1875, 'learning_rate': 2.7e-05, 'epoch': 3.846e-05}
+[Stage 19/96 L=19] step 122740 | loss_avg=0.0311(100) | First=97.50% | Full=95.75% | lr=2.70e-05 | grad_norm=8.19 | Speed=361.4 samples/s (154.5K toks/s) | 1216.8 TFLOPs/s | Stage time=69.2m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0593, 'grad_norm': 8.5, 'learning_rate': 2.7e-05, 'epoch': 3.848e-05}
+[Stage 19/96 L=19] step 122750 | loss_avg=0.0313(100) | First=97.00% | Full=94.50% | lr=2.70e-05 | grad_norm=8.50 | Speed=361.4 samples/s (154.5K toks/s) | 1216.9 TFLOPs/s | Stage time=69.3m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+[CHECK] Stage 19 full=94.50% target>=98.00%
+{'loss': 0.0534, 'grad_norm': 14.6875, 'learning_rate': 2.7e-05, 'epoch': 3.85e-05}
+[Stage 19/96 L=19] step 122760 | loss_avg=0.0253(100) | First=97.62% | Full=95.88% | lr=2.70e-05 | grad_norm=14.69 | Speed=361.4 samples/s (154.5K toks/s) | 1217.0 TFLOPs/s | Stage time=69.4m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0534, 'grad_norm': 6.25, 'learning_rate': 2.7e-05, 'epoch': 3.852e-05}
+[Stage 19/96 L=19] step 122770 | loss_avg=0.0285(100) | First=96.25% | Full=94.38% | lr=2.70e-05 | grad_norm=6.25 | Speed=361.4 samples/s (154.5K toks/s) | 1217.1 TFLOPs/s | Stage time=69.5m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0626, 'grad_norm': 10.75, 'learning_rate': 2.7e-05, 'epoch': 3.854e-05}
+[CHECK] Stage 19 full=95.50% target>=98.00%
+[Stage 19/96 L=19] step 122780 | loss_avg=0.0265(100) | First=97.88% | Full=95.75% | lr=2.70e-05 | grad_norm=10.75 | Speed=361.5 samples/s (154.5K toks/s) | 1217.1 TFLOPs/s | Stage time=69.5m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0464, 'grad_norm': 2.25, 'learning_rate': 2.7e-05, 'epoch': 3.856e-05}
+[Stage 19/96 L=19] step 122790 | loss_avg=0.0264(100) | First=97.38% | Full=96.50% | lr=2.70e-05 | grad_norm=2.25 | Speed=361.5 samples/s (154.5K toks/s) | 1217.2 TFLOPs/s | Stage time=69.6m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0456, 'grad_norm': 4.96875, 'learning_rate': 2.7e-05, 'epoch': 3.858e-05}
+[Stage 19/96 L=19] step 122800 | loss_avg=0.0276(100) | First=97.12% | Full=95.00% | lr=2.70e-05 | grad_norm=4.97 | Speed=361.5 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=69.7m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+[CHECK] Stage 19 full=95.00% target>=98.00%
+{'loss': 0.0515, 'grad_norm': 12.9375, 'learning_rate': 2.7e-05, 'epoch': 3.86e-05}
+[Stage 19/96 L=19] step 122810 | loss_avg=0.0286(100) | First=97.75% | Full=96.38% | lr=2.70e-05 | grad_norm=12.94 | Speed=361.5 samples/s (154.5K toks/s) | 1217.3 TFLOPs/s | Stage time=69.8m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0524, 'grad_norm': 12.125, 'learning_rate': 2.7e-05, 'epoch': 3.862e-05}
+[Stage 19/96 L=19] step 122820 | loss_avg=0.0265(100) | First=96.00% | Full=93.75% | lr=2.70e-05 | grad_norm=12.12 | Speed=361.5 samples/s (154.6K toks/s) | 1217.4 TFLOPs/s | Stage time=69.9m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0651, 'grad_norm': 15.25, 'learning_rate': 2.7e-05, 'epoch': 3.864e-05}
+[CHECK] Stage 19 full=95.75% target>=98.00%
+[Stage 19/96 L=19] step 122830 | loss_avg=0.0290(100) | First=97.38% | Full=95.62% | lr=2.70e-05 | grad_norm=15.25 | Speed=361.5 samples/s (154.6K toks/s) | 1217.4 TFLOPs/s | Stage time=70.0m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0614, 'grad_norm': 9.6875, 'learning_rate': 2.7e-05, 'epoch': 3.866e-05}
+[Stage 19/96 L=19] step 122840 | loss_avg=0.0296(100) | First=96.88% | Full=95.12% | lr=2.70e-05 | grad_norm=9.69 | Speed=361.6 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=70.1m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0569, 'grad_norm': 5.6875, 'learning_rate': 2.7e-05, 'epoch': 3.868e-05}
+[Stage 19/96 L=19] step 122850 | loss_avg=0.0295(100) | First=97.25% | Full=94.25% | lr=2.70e-05 | grad_norm=5.69 | Speed=361.6 samples/s (154.6K toks/s) | 1217.5 TFLOPs/s | Stage time=70.1m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+[CHECK] Stage 19 full=94.25% target>=98.00%
+{'loss': 0.0536, 'grad_norm': 6.8125, 'learning_rate': 2.7e-05, 'epoch': 3.87e-05}
+[Stage 19/96 L=19] step 122860 | loss_avg=0.0299(100) | First=97.75% | Full=96.25% | lr=2.70e-05 | grad_norm=6.81 | Speed=361.6 samples/s (154.6K toks/s) | 1217.6 TFLOPs/s | Stage time=70.2m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0531, 'grad_norm': 15.875, 'learning_rate': 2.7e-05, 'epoch': 3.872e-05}
+[Stage 19/96 L=19] step 122870 | loss_avg=0.0308(100) | First=96.50% | Full=95.12% | lr=2.70e-05 | grad_norm=15.88 | Speed=361.6 samples/s (154.6K toks/s) | 1217.7 TFLOPs/s | Stage time=70.3m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0525, 'grad_norm': 22.25, 'learning_rate': 2.7e-05, 'epoch': 3.874e-05}
+[CHECK] Stage 19 full=95.50% target>=98.00%
+[Stage 19/96 L=19] step 122880 | loss_avg=0.0292(100) | First=97.12% | Full=95.50% | lr=2.70e-05 | grad_norm=22.25 | Speed=361.6 samples/s (154.6K toks/s) | 1217.8 TFLOPs/s | Stage time=70.4m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0532, 'grad_norm': 11.25, 'learning_rate': 2.7e-05, 'epoch': 3.876e-05}
+[Stage 19/96 L=19] step 122890 | loss_avg=0.0300(100) | First=97.38% | Full=95.25% | lr=2.70e-05 | grad_norm=11.25 | Speed=361.7 samples/s (154.6K toks/s) | 1217.9 TFLOPs/s | Stage time=70.5m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0547, 'grad_norm': 6.125, 'learning_rate': 2.7e-05, 'epoch': 3.878e-05}
+[Stage 19/96 L=19] step 122900 | loss_avg=0.0313(100) | First=96.88% | Full=95.25% | lr=2.70e-05 | grad_norm=6.12 | Speed=361.7 samples/s (154.6K toks/s) | 1218.0 TFLOPs/s | Stage time=70.6m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+[CHECK] Stage 19 full=95.25% target>=98.00%
+{'loss': 0.0575, 'grad_norm': 5.875, 'learning_rate': 2.7e-05, 'epoch': 3.88e-05}
+[Stage 19/96 L=19] step 122910 | loss_avg=0.0317(100) | First=97.12% | Full=94.62% | lr=2.70e-05 | grad_norm=5.88 | Speed=361.7 samples/s (154.6K toks/s) | 1218.0 TFLOPs/s | Stage time=70.6m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0543, 'grad_norm': 9.75, 'learning_rate': 2.7e-05, 'epoch': 3.882e-05}
+[Stage 19/96 L=19] step 122920 | loss_avg=0.0308(100) | First=97.38% | Full=95.62% | lr=2.70e-05 | grad_norm=9.75 | Speed=361.7 samples/s (154.6K toks/s) | 1218.0 TFLOPs/s | Stage time=70.7m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0529, 'grad_norm': 2.875, 'learning_rate': 2.7e-05, 'epoch': 3.884e-05}
+[CHECK] Stage 19 full=96.00% target>=98.00%
+[Stage 19/96 L=19] step 122930 | loss_avg=0.0298(100) | First=97.88% | Full=95.88% | lr=2.70e-05 | grad_norm=2.88 | Speed=361.7 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=70.8m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0494, 'grad_norm': 5.53125, 'learning_rate': 2.7e-05, 'epoch': 3.886e-05}
+[Stage 19/96 L=19] step 122940 | loss_avg=0.0299(100) | First=97.62% | Full=95.25% | lr=2.70e-05 | grad_norm=5.53 | Speed=361.7 samples/s (154.6K toks/s) | 1218.1 TFLOPs/s | Stage time=70.9m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0516, 'grad_norm': 17.25, 'learning_rate': 2.7e-05, 'epoch': 3.888e-05}
+[Stage 19/96 L=19] step 122950 | loss_avg=0.0283(100) | First=97.25% | Full=96.12% | lr=2.70e-05 | grad_norm=17.25 | Speed=361.7 samples/s (154.6K toks/s) | 1218.2 TFLOPs/s | Stage time=71.0m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+[CHECK] Stage 19 full=96.13% target>=98.00%
+{'loss': 0.0495, 'grad_norm': 13.3125, 'learning_rate': 2.7e-05, 'epoch': 3.89e-05}
+[Stage 19/96 L=19] step 122960 | loss_avg=0.0279(100) | First=97.00% | Full=95.38% | lr=2.70e-05 | grad_norm=13.31 | Speed=361.8 samples/s (154.7K toks/s) | 1218.2 TFLOPs/s | Stage time=71.1m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0531, 'grad_norm': 15.875, 'learning_rate': 2.7e-05, 'epoch': 3.892e-05}
+[Stage 19/96 L=19] step 122970 | loss_avg=0.0260(100) | First=97.12% | Full=94.62% | lr=2.70e-05 | grad_norm=15.88 | Speed=361.8 samples/s (154.7K toks/s) | 1218.3 TFLOPs/s | Stage time=71.2m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0615, 'grad_norm': 9.0625, 'learning_rate': 2.7e-05, 'epoch': 3.894e-05}
+[CHECK] Stage 19 full=96.00% target>=98.00%
+[Stage 19/96 L=19] step 122980 | loss_avg=0.0277(100) | First=96.75% | Full=94.38% | lr=2.70e-05 | grad_norm=9.06 | Speed=361.8 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=71.2m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0511, 'grad_norm': 6.59375, 'learning_rate': 2.7e-05, 'epoch': 3.896e-05}
+[Stage 19/96 L=19] step 122990 | loss_avg=0.0255(100) | First=97.62% | Full=96.62% | lr=2.70e-05 | grad_norm=6.59 | Speed=361.8 samples/s (154.7K toks/s) | 1218.4 TFLOPs/s | Stage time=71.3m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.052, 'grad_norm': 13.8125, 'learning_rate': 2.7e-05, 'epoch': 3.898e-05}
+[Stage 19/96 L=19] step 123000 | loss_avg=0.0250(100) | First=96.25% | Full=94.38% | lr=2.70e-05 | grad_norm=13.81 | Speed=361.8 samples/s (154.7K toks/s) | 1218.5 TFLOPs/s | Stage time=71.4m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+[CHECK] Stage 19 full=94.38% target>=98.00%
+{'loss': 0.0526, 'grad_norm': 3.546875, 'learning_rate': 2.7e-05, 'epoch': 3.9e-05}
+[Stage 19/96 L=19] step 123010 | loss_avg=0.0251(100) | First=98.38% | Full=96.38% | lr=2.70e-05 | grad_norm=3.55 | Speed=361.1 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=71.7m | seqs/step=48.0 | toks/step=20521 | eff=100.0%
+{'loss': 0.0529, 'grad_norm': 1.9765625, 'learning_rate': 2.7e-05, 'epoch': 3.902e-05}
+[Stage 19/96 L=19] step 123020 | loss_avg=0.0288(100) | First=97.62% | Full=96.25% | lr=2.70e-05 | grad_norm=1.98 | Speed=361.1 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=71.7m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.068, 'grad_norm': 3.5, 'learning_rate': 2.7e-05, 'epoch': 3.904e-05}
+[CHECK] Stage 19 full=95.50% target>=98.00%
+[Stage 19/96 L=19] step 123030 | loss_avg=0.0298(100) | First=98.25% | Full=95.38% | lr=2.70e-05 | grad_norm=3.50 | Speed=361.1 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=71.8m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0623, 'grad_norm': 12.0, 'learning_rate': 2.7e-05, 'epoch': 3.906e-05}
+[Stage 19/96 L=19] step 123040 | loss_avg=0.0313(100) | First=98.38% | Full=96.25% | lr=2.70e-05 | grad_norm=12.00 | Speed=361.1 samples/s (154.4K toks/s) | 1216.0 TFLOPs/s | Stage time=71.9m | seqs/step=48.0 | toks/step=20520 | eff=100.0%
+{'loss': 0.0504, 'grad_norm': 13.0, 'learning_rate': 2.7e-05, 'epoch': 3.908e-05}
+[Stage 19/96 L=19] step 123050 | loss_avg=0.0310(100) | First=97.62% | Full=95.75% | lr=2.70e-05 | grad_norm=13.00 | Speed=361.1 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=72.0m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+[CHECK] Stage 19 full=95.75% target>=98.00%
+{'loss': 0.0491, 'grad_norm': 5.375, 'learning_rate': 2.7e-05, 'epoch': 3.91e-05}
+[Stage 19/96 L=19] step 123060 | loss_avg=0.0320(100) | First=97.38% | Full=95.62% | lr=2.70e-05 | grad_norm=5.38 | Speed=361.2 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=72.1m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0535, 'grad_norm': 5.4375, 'learning_rate': 2.7e-05, 'epoch': 3.912e-05}
+[Stage 19/96 L=19] step 123070 | loss_avg=0.0299(100) | First=97.88% | Full=96.50% | lr=2.70e-05 | grad_norm=5.44 | Speed=361.2 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=72.2m | seqs/step=48.0 | toks/step=20519 | eff=100.0%
+{'loss': 0.0503, 'grad_norm': 11.0625, 'learning_rate': 2.7e-05, 'epoch': 3.914e-05}
+[CHECK] Stage 19 full=96.25% target>=98.00%
+[Stage 19/96 L=19] step 123080 | loss_avg=0.0280(100) | First=97.62% | Full=95.62% | lr=2.70e-05 | grad_norm=11.06 | Speed=361.2 samples/s (154.4K toks/s) | 1216.1 TFLOPs/s | Stage time=72.3m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0459, 'grad_norm': 11.0625, 'learning_rate': 2.7e-05, 'epoch': 3.916e-05}
+[Stage 19/96 L=19] step 123090 | loss_avg=0.0276(100) | First=97.75% | Full=96.25% | lr=2.70e-05 | grad_norm=11.06 | Speed=361.2 samples/s (154.4K toks/s) | 1216.2 TFLOPs/s | Stage time=72.3m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0521, 'grad_norm': 10.75, 'learning_rate': 2.7e-05, 'epoch': 3.918e-05}
+[Stage 19/96 L=19] step 123100 | loss_avg=0.0282(100) | First=97.25% | Full=95.50% | lr=2.70e-05 | grad_norm=10.75 | Speed=361.2 samples/s (154.4K toks/s) | 1216.2 TFLOPs/s | Stage time=72.4m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+[CHECK] Stage 19 full=95.50% target>=98.00%
+{'loss': 0.0514, 'grad_norm': 9.5, 'learning_rate': 2.7e-05, 'epoch': 3.92e-05}
+[Stage 19/96 L=19] step 123110 | loss_avg=0.0256(100) | First=98.38% | Full=96.62% | lr=2.70e-05 | grad_norm=9.50 | Speed=361.2 samples/s (154.4K toks/s) | 1216.3 TFLOPs/s | Stage time=72.5m | seqs/step=48.0 | toks/step=20518 | eff=100.0%
+{'loss': 0.0498, 'grad_norm': 3.71875, 'learning_rate': 2.7e-05, 'epoch': 3.922e-05}
+[Stage 19/96 L=19] step 123120 | loss_avg=0.0256(100) | First=96.88% | Full=94.50% | lr=2.70e-05 | grad_norm=3.72 | Speed=361.3 samples/s (154.4K toks/s) | 1216.3 TFLOPs/s | Stage time=72.6m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0596, 'grad_norm': 5.84375, 'learning_rate': 2.7e-05, 'epoch': 3.924e-05}
+[CHECK] Stage 19 full=95.38% target>=98.00%
+[Stage 19/96 L=19] step 123130 | loss_avg=0.0257(100) | First=96.75% | Full=95.62% | lr=2.70e-05 | grad_norm=5.84 | Speed=361.3 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=72.7m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0533, 'grad_norm': 6.1875, 'learning_rate': 2.7e-05, 'epoch': 3.926e-05}
+[Stage 19/96 L=19] step 123140 | loss_avg=0.0274(100) | First=96.25% | Full=95.00% | lr=2.70e-05 | grad_norm=6.19 | Speed=361.3 samples/s (154.4K toks/s) | 1216.4 TFLOPs/s | Stage time=72.8m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0624, 'grad_norm': 20.625, 'learning_rate': 2.7e-05, 'epoch': 3.928e-05}
+[Stage 19/96 L=19] step 123150 | loss_avg=0.0271(100) | First=97.62% | Full=96.12% | lr=2.70e-05 | grad_norm=20.62 | Speed=361.3 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=72.8m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+[CHECK] Stage 19 full=96.13% target>=98.00%
+{'loss': 0.0504, 'grad_norm': 11.1875, 'learning_rate': 2.7e-05, 'epoch': 3.93e-05}
+[Stage 19/96 L=19] step 123160 | loss_avg=0.0304(100) | First=97.75% | Full=95.50% | lr=2.70e-05 | grad_norm=11.19 | Speed=361.3 samples/s (154.4K toks/s) | 1216.5 TFLOPs/s | Stage time=72.9m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0536, 'grad_norm': 10.25, 'learning_rate': 2.7e-05, 'epoch': 3.932e-05}
+[Stage 19/96 L=19] step 123170 | loss_avg=0.0298(100) | First=97.00% | Full=94.88% | lr=2.70e-05 | grad_norm=10.25 | Speed=361.3 samples/s (154.4K toks/s) | 1216.6 TFLOPs/s | Stage time=73.0m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0589, 'grad_norm': 16.625, 'learning_rate': 2.7e-05, 'epoch': 3.934e-05}
+[CHECK] Stage 19 full=94.88% target>=98.00%
+[Stage 19/96 L=19] step 123180 | loss_avg=0.0292(100) | First=97.50% | Full=95.12% | lr=2.70e-05 | grad_norm=16.62 | Speed=361.4 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=73.1m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0596, 'grad_norm': 7.90625, 'learning_rate': 2.7e-05, 'epoch': 3.936e-05}
+[Stage 19/96 L=19] step 123190 | loss_avg=0.0282(100) | First=96.62% | Full=95.38% | lr=2.70e-05 | grad_norm=7.91 | Speed=361.4 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=73.2m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0538, 'grad_norm': 12.4375, 'learning_rate': 2.7e-05, 'epoch': 3.938e-05}
+[Stage 19/96 L=19] step 123200 | loss_avg=0.0284(100) | First=96.88% | Full=94.50% | lr=2.70e-05 | grad_norm=12.44 | Speed=361.4 samples/s (154.5K toks/s) | 1216.7 TFLOPs/s | Stage time=73.3m | seqs/step=48.0 | toks/step=20516 | eff=100.0%
+[CHECK] Stage 19 full=94.50% target>=98.00%
+{'loss': 0.0618, 'grad_norm': 4.4375, 'learning_rate': 2.7e-05, 'epoch': 3.94e-05}
+[Stage 19/96 L=19] step 123210 | loss_avg=0.0281(100) | First=97.38% | Full=94.38% | lr=2.70e-05 | grad_norm=4.44 | Speed=361.4 samples/s (154.5K toks/s) | 1216.8 TFLOPs/s | Stage time=73.4m | seqs/step=48.0 | toks/step=20517 | eff=100.0%
+{'loss': 0.0516, 'grad_norm': 14.0, 'learning_rate': 2.7e-05, 'epoch': 3.942e-05}
