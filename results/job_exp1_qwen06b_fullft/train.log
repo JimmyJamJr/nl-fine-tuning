@@ -2877,3 +2877,159 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 {'loss': 0.0922, 'grad_norm': 12.5, 'learning_rate': 5e-05, 'epoch': 4.392e-05}
 [Stage 9/16 L=72] step 10990 | loss_avg=0.0235(100) | First=97.50% | Full=96.50% | lr=5.00e-05 | grad_norm=12.50 | Speed=56.3 samples/s (79.5K toks/s) | 210.5 TFLOPs/s | Stage time=66.0m | seqs/step=192.0 | toks/step=271364 | eff=100.0%
 {'loss': 0.0963, 'grad_norm': 11.9375, 'learning_rate': 5e-05, 'epoch': 4.396e-05}
+[Stage 9/16 L=72] step 11000 | loss_avg=0.0225(100) | First=98.25% | Full=96.00% | lr=5.00e-05 | grad_norm=11.94 | Speed=56.3 samples/s (79.5K toks/s) | 210.5 TFLOPs/s | Stage time=68.2m | seqs/step=192.0 | toks/step=271346 | eff=100.0%
+[CHECK] Stage 9 full=96.00% target>=98.00%
+{'loss': 0.0887, 'grad_norm': 15.9375, 'learning_rate': 5e-05, 'epoch': 4.4e-05}
+[Stage 9/16 L=72] step 11010 | loss_avg=0.0223(100) | First=99.12% | Full=98.12% | lr=5.00e-05 | grad_norm=15.94 | Speed=56.2 samples/s (79.5K toks/s) | 210.3 TFLOPs/s | Stage time=70.6m | seqs/step=192.0 | toks/step=271417 | eff=100.0%
+{'loss': 0.0818, 'grad_norm': 13.875, 'learning_rate': 5e-05, 'epoch': 4.404e-05}
+[Stage 9/16 L=72] step 11020 | loss_avg=0.0233(100) | First=98.25% | Full=97.38% | lr=5.00e-05 | grad_norm=13.88 | Speed=56.2 samples/s (79.5K toks/s) | 210.2 TFLOPs/s | Stage time=72.9m | seqs/step=192.0 | toks/step=271388 | eff=100.0%
+{'loss': 0.0871, 'grad_norm': 7.25, 'learning_rate': 5e-05, 'epoch': 4.408e-05}
+[CHECK] Stage 9 full=95.38% target>=98.00%
+[Stage 9/16 L=72] step 11030 | loss_avg=0.0214(100) | First=98.12% | Full=97.12% | lr=5.00e-05 | grad_norm=7.25 | Speed=56.2 samples/s (79.5K toks/s) | 210.3 TFLOPs/s | Stage time=75.2m | seqs/step=192.0 | toks/step=271470 | eff=100.0%
+{'loss': 0.0874, 'grad_norm': 19.375, 'learning_rate': 5e-05, 'epoch': 4.412e-05}
+[Stage 9/16 L=72] step 11040 | loss_avg=0.0216(100) | First=97.75% | Full=96.25% | lr=5.00e-05 | grad_norm=19.38 | Speed=56.2 samples/s (79.5K toks/s) | 210.2 TFLOPs/s | Stage time=77.4m | seqs/step=192.0 | toks/step=271441 | eff=100.0%
+{'loss': 0.0847, 'grad_norm': 11.375, 'learning_rate': 5e-05, 'epoch': 4.416e-05}
+[Stage 9/16 L=72] step 11050 | loss_avg=0.0251(100) | First=97.50% | Full=95.38% | lr=5.00e-05 | grad_norm=11.38 | Speed=56.2 samples/s (79.5K toks/s) | 210.3 TFLOPs/s | Stage time=79.7m | seqs/step=192.0 | toks/step=271447 | eff=100.0%
+[CHECK] Stage 9 full=95.38% target>=98.00%
+{'loss': 0.0932, 'grad_norm': 10.3125, 'learning_rate': 5e-05, 'epoch': 4.42e-05}
+[Stage 9/16 L=72] step 11060 | loss_avg=0.0254(100) | First=97.25% | Full=95.25% | lr=5.00e-05 | grad_norm=10.31 | Speed=56.2 samples/s (79.5K toks/s) | 210.4 TFLOPs/s | Stage time=82.0m | seqs/step=192.0 | toks/step=271608 | eff=100.0%
+{'loss': 0.0945, 'grad_norm': 24.5, 'learning_rate': 5e-05, 'epoch': 4.424e-05}
+[Stage 9/16 L=72] step 11070 | loss_avg=0.0243(100) | First=97.75% | Full=96.88% | lr=5.00e-05 | grad_norm=24.50 | Speed=56.2 samples/s (79.5K toks/s) | 210.4 TFLOPs/s | Stage time=84.2m | seqs/step=192.0 | toks/step=271570 | eff=100.0%
+{'loss': 0.0867, 'grad_norm': 24.125, 'learning_rate': 5e-05, 'epoch': 4.428e-05}
+[CHECK] Stage 9 full=96.25% target>=98.00%
+[Stage 9/16 L=72] step 11080 | loss_avg=0.0218(100) | First=97.88% | Full=95.88% | lr=5.00e-05 | grad_norm=24.12 | Speed=56.2 samples/s (79.5K toks/s) | 210.4 TFLOPs/s | Stage time=86.5m | seqs/step=192.0 | toks/step=271573 | eff=100.0%
+{'loss': 0.0887, 'grad_norm': 15.3125, 'learning_rate': 5e-05, 'epoch': 4.432e-05}
+W1011 03:25:20.951000 24045 torch/distributed/elastic/agent/server/api.py:719] Received Signals.SIGTERM death signal, shutting down workers
+W1011 03:25:20.953000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24182 closing signal SIGTERM
+W1011 03:25:20.953000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24183 closing signal SIGTERM
+W1011 03:25:20.955000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24184 closing signal SIGTERM
+W1011 03:25:20.956000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24185 closing signal SIGTERM
+W1011 03:25:20.975000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24182 closing signal SIGTERM
+W1011 03:25:20.975000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24183 closing signal SIGTERM
+W1011 03:25:20.975000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24184 closing signal SIGTERM
+W1011 03:25:20.975000 24045 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24185 closing signal SIGTERM
+[Sun Oct 11 03:27:37 UTC 2026] Starting/Resuming exp1_qwen06b_fullft (Full-FT) on nl-exp1-spot-fullft (us-east4-a)
+W1011 03:27:40.428000 24934 torch/distributed/run.py:792] 
+W1011 03:27:40.428000 24934 torch/distributed/run.py:792] *****************************************
+W1011 03:27:40.428000 24934 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1011 03:27:40.428000 24934 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.C++ module `generator` loaded.
+
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=8 to 128, step=8
+[CURRICULUM] Expected stages: 16
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 8
+                  batch_size: 48
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 4
+      gradient_checkpointing: True
+                      job_id: exp1_qwen06b_fullft
+               learning_rate: 5e-05
+            linear_lookahead: True
+              lookahead_step: 8
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 768
+               max_lookahead: 128
+            max_total_pflops: 0.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: Qwen/Qwen3-0.6B
+                    n_stages: 16
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp1_qwen06b_fullft
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 1
+                        task: search
+           use_chat_template: False
+                   use_liger: True
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp1_qwen06b_fullft 
+
+[CKPT] Auto-resuming from local run: /root/nl_output/search/job_exp1_qwen06b_fullft/checkpoint-11000
+[ATTN-KERNEL] NL_ATTN_KERNEL=fa2 -> attn_implementation=flash_attention_2 (hopper=True); in-run evals use sdpa
+[LIGER] liger-kernel not installed, continuing without
+[ATTENTION] Using: flash_attention_2
+[FLASH] flash_sdp_enabled: True
+[FLASH] mem_efficient_sdp_enabled: True
+[FLASH] math_sdp_enabled: True
+[ATTN-KERNEL] verified: config._attn_implementation=flash_attention_2; varlen kernel from flash_attn.flash_attn_interface; 28 qwen decoder layers are GradientCheckpointingLayer
+[MEM] model.config.use_cache = False (training)
+trainable params: 596,049,920 || all params: 596,049,920 || trainable%: 100.0000
+[EVAL-DATA] Generating eval sets (once for all evals)...
+[EVAL-DATA] Hard (alpha=1.0): n=500, fingerprint=7f8106bfe369
+[EVAL-DATA] Easy (alpha=0.1): n=500, fingerprint=5e3065b9a4da
+[DATASET] Using PackedSequenceDataset (batch_size=48)
+[DATASET] Packed Map-style | batch_size=48 | epoch_size=1000000000
+[CURRICULUM] Restored stage=9, stage_start_step=10700, wall_time_offset=95821.4s from /root/nl_output/search/job_exp1_qwen06b_fullft/checkpoint-11000/curriculum_state.json
+[CURRICULUM] Restored 11000 loss records from JSONL (truncated to step 11000)
+[CURRICULUM] Will mark next entry as resume point (step ~11000)
+[CURRICULUM] Restored 8 stage eval records
+[CURRICULUM] Synced state with checkpoint: /root/nl_output/search/job_exp1_qwen06b_fullft/checkpoint-11000
+[LOSS] Wrote 11000 records to JSONL in /root/nl_output/search/job_exp1_qwen06b_fullft
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+[DDP] cross-rank gradient averaging: OFF (status quo: compute_loss bypasses DistributedDataParallel.forward, so each rank trains its own replica between checkpoint reloads; set NL_DDP_GRAD_AVERAGE=1 to all-reduce)
+[HEAD] NL_HEAD=sparse: lm_head/argmax/CE on labelled rows only (valid_mask), in --ce_chunk_size=4096 row pieces; per-step rows logged as head_rows next to tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay 6N*tokens, which overstates this path)
+[CURRICULUM] Restored 800 first_token_correct entries
+[CURRICULUM] Restored 800 full_word_correct entries
+[CURRICULUM] Restored 100 recent_losses entries
+[FLOPS] Model has 0.60B params, ~3.6B FLOPs/token
+[FLOPS] Output head: N_head=155.6M params, 6*N_head=0.93B FLOPs per head row; NL_HEAD=sparse: achieved_tflops counts executed FLOPs (6(N-N_head)*tokens + 6*N_head*head_rows)
+There were missing keys in the checkpoint model loaded: ['lm_head.weight'].
+
+[TRAIN] Starting training...
+
+[CURRICULUM] Resuming from step 11000
+There were missing keys in the checkpoint model loaded: ['lm_head.weight'].
+There were missing keys in the checkpoint model loaded: ['lm_head.weight'].
+[CKPT-GATE] recomputing every 1 layer(s) at 70,696 tokens/micro-batch (every_n=1, relax_max=0)
+[Stage 9/16 L=72] step 11010 | loss_avg=0.0234(100) | First=98.12% | Full=96.88% | lr=0.00e+00 | grad_norm=0.00 | Speed=3469.5 samples/s (4904.6K toks/s) | 12977.5 TFLOPs/s | Stage time=1.1m | seqs/step=192.0 | toks/step=271414 | eff=100.0%
+{'loss': 0.089, 'grad_norm': 12.75, 'learning_rate': 5e-05, 'epoch': 4e-08}
+[Stage 9/16 L=72] step 11020 | loss_avg=0.0252(100) | First=97.50% | Full=96.62% | lr=5.00e-05 | grad_norm=12.75 | Speed=1809.2 samples/s (2557.3K toks/s) | 6766.6 TFLOPs/s | Stage time=2.3m | seqs/step=192.0 | toks/step=271391 | eff=100.0%
+{'loss': 0.095, 'grad_norm': 6.28125, 'learning_rate': 5e-05, 'epoch': 8e-08}
+[CHECK] Stage 9 full=95.63% target>=98.00%
+[Stage 9/16 L=72] step 11030 | loss_avg=0.0241(100) | First=97.12% | Full=95.88% | lr=5.00e-05 | grad_norm=6.28 | Speed=1244.6 samples/s (1759.8K toks/s) | 4656.3 TFLOPs/s | Stage time=3.4m | seqs/step=192.0 | toks/step=271474 | eff=100.0%
+{'loss': 0.0901, 'grad_norm': 28.25, 'learning_rate': 5e-05, 'epoch': 1.2e-07}
