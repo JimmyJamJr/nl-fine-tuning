@@ -5383,3 +5383,32 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [CHECK] Stage 8 full=96.75% target>=98.00%
 [Stage 8/16 L=64] step 20780 | loss_avg=0.0216(100) | First=97.88% | Full=95.88% | lr=5.00e-05 | grad_norm=4.00 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=622.0m | seqs/step=192.0 | toks/step=241869 | eff=100.0%
 {'loss': 0.0867, 'grad_norm': 6.575763702392578, 'learning_rate': 5e-05, 'epoch': 7.112e-05}
+[Stage 8/16 L=64] step 20790 | loss_avg=0.0231(100) | First=97.62% | Full=96.12% | lr=5.00e-05 | grad_norm=6.58 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=623.7m | seqs/step=192.0 | toks/step=241864 | eff=100.0%
+{'loss': 0.095, 'grad_norm': 6.957648277282715, 'learning_rate': 5e-05, 'epoch': 7.116e-05}
+[Stage 8/16 L=64] step 20800 | loss_avg=0.0225(100) | First=97.75% | Full=96.50% | lr=5.00e-05 | grad_norm=6.96 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=625.5m | seqs/step=192.0 | toks/step=241868 | eff=100.0%
+[CHECK] Stage 8 full=96.50% target>=98.00%
+{'loss': 0.0869, 'grad_norm': 6.360865592956543, 'learning_rate': 5e-05, 'epoch': 7.12e-05}
+[Stage 8/16 L=64] step 20810 | loss_avg=0.0219(100) | First=98.38% | Full=96.88% | lr=5.00e-05 | grad_norm=6.36 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=627.2m | seqs/step=192.0 | toks/step=241865 | eff=100.0%
+{'loss': 0.0865, 'grad_norm': 4.774919509887695, 'learning_rate': 5e-05, 'epoch': 7.124e-05}
+[Stage 8/16 L=64] step 20820 | loss_avg=0.0211(100) | First=98.75% | Full=96.88% | lr=5.00e-05 | grad_norm=4.77 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=628.9m | seqs/step=192.0 | toks/step=241871 | eff=100.0%
+{'loss': 0.0865, 'grad_norm': 3.4762070178985596, 'learning_rate': 5e-05, 'epoch': 7.128e-05}
+[CHECK] Stage 8 full=96.50% target>=98.00%
+[Stage 8/16 L=64] step 20830 | loss_avg=0.0223(100) | First=98.38% | Full=97.62% | lr=5.00e-05 | grad_norm=3.48 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=630.7m | seqs/step=192.0 | toks/step=241868 | eff=100.0%
+{'loss': 0.0848, 'grad_norm': 3.806912422180176, 'learning_rate': 5e-05, 'epoch': 7.132e-05}
+[Stage 8/16 L=64] step 20840 | loss_avg=0.0264(100) | First=96.50% | Full=95.12% | lr=5.00e-05 | grad_norm=3.81 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=632.4m | seqs/step=192.0 | toks/step=241879 | eff=100.0%
+{'loss': 0.0943, 'grad_norm': 9.283769607543945, 'learning_rate': 5e-05, 'epoch': 7.136e-05}
+[Stage 8/16 L=64] step 20850 | loss_avg=0.0263(100) | First=97.12% | Full=95.88% | lr=5.00e-05 | grad_norm=9.28 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=634.1m | seqs/step=192.0 | toks/step=241870 | eff=100.0%
+[CHECK] Stage 8 full=95.88% target>=98.00%
+{'loss': 0.0897, 'grad_norm': 15.705076217651367, 'learning_rate': 5e-05, 'epoch': 7.14e-05}
+[Stage 8/16 L=64] step 20860 | loss_avg=0.0239(100) | First=98.50% | Full=96.88% | lr=5.00e-05 | grad_norm=15.71 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=635.8m | seqs/step=192.0 | toks/step=241868 | eff=100.0%
+{'loss': 0.0763, 'grad_norm': 6.277860164642334, 'learning_rate': 5e-05, 'epoch': 7.144e-05}
+[Stage 8/16 L=64] step 20870 | loss_avg=0.0230(100) | First=98.50% | Full=97.25% | lr=5.00e-05 | grad_norm=6.28 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=637.6m | seqs/step=192.0 | toks/step=241868 | eff=100.0%
+{'loss': 0.0808, 'grad_norm': 3.0993669033050537, 'learning_rate': 5e-05, 'epoch': 7.148e-05}
+[CHECK] Stage 8 full=95.88% target>=98.00%
+[Stage 8/16 L=64] step 20880 | loss_avg=0.0221(100) | First=97.75% | Full=95.38% | lr=5.00e-05 | grad_norm=3.10 | Speed=74.2 samples/s (93.4K toks/s) | 250.1 TFLOPs/s | Stage time=639.3m | seqs/step=192.0 | toks/step=241863 | eff=100.0%
+{'loss': 0.0921, 'grad_norm': 5.348235130310059, 'learning_rate': 5e-05, 'epoch': 7.152e-05}
+[Stage 8/16 L=64] step 20890 | loss_avg=0.0225(100) | First=98.12% | Full=97.00% | lr=5.00e-05 | grad_norm=5.35 | Speed=74.2 samples/s (93.5K toks/s) | 250.1 TFLOPs/s | Stage time=641.0m | seqs/step=192.0 | toks/step=241866 | eff=100.0%
+{'loss': 0.0936, 'grad_norm': 8.221019744873047, 'learning_rate': 5e-05, 'epoch': 7.156e-05}
+[Stage 8/16 L=64] step 20900 | loss_avg=0.0227(100) | First=98.88% | Full=97.50% | lr=5.00e-05 | grad_norm=8.22 | Speed=74.2 samples/s (93.4K toks/s) | 250.1 TFLOPs/s | Stage time=642.7m | seqs/step=192.0 | toks/step=241859 | eff=100.0%
+[CHECK] Stage 8 full=97.50% target>=98.00%
+{'loss': 0.0805, 'grad_norm': 4.134540557861328, 'learning_rate': 5e-05, 'epoch': 7.16e-05}
