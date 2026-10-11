@@ -2813,3 +2813,44 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [CHECK] Stage 6 full=95.75% target>=98.00%
 [Stage 6/16 L=48] step 10930 | loss_avg=0.0276(100) | First=97.75% | Full=96.38% | lr=5.00e-05 | grad_norm=4.74 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=86.4m | seqs/step=192.0 | toks/step=184998 | eff=100.0%
 {'loss': 0.1038, 'grad_norm': 9.813913345336914, 'learning_rate': 5e-05, 'epoch': 4.372e-05}
+[Stage 6/16 L=48] step 10940 | loss_avg=0.0267(100) | First=96.38% | Full=95.50% | lr=5.00e-05 | grad_norm=9.81 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=88.4m | seqs/step=192.0 | toks/step=185032 | eff=100.0%
+{'loss': 0.1064, 'grad_norm': 58.23866271972656, 'learning_rate': 5e-05, 'epoch': 4.376e-05}
+[Stage 6/16 L=48] step 10950 | loss_avg=0.0276(100) | First=97.50% | Full=96.00% | lr=5.00e-05 | grad_norm=58.24 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=90.5m | seqs/step=192.0 | toks/step=185023 | eff=100.0%
+[CHECK] Stage 6 full=96.00% target>=98.00%
+{'loss': 0.1205, 'grad_norm': 5.323795795440674, 'learning_rate': 5e-05, 'epoch': 4.38e-05}
+[Stage 6/16 L=48] step 10960 | loss_avg=0.0264(100) | First=97.25% | Full=96.12% | lr=5.00e-05 | grad_norm=5.32 | Speed=63.7 samples/s (61.3K toks/s) | 221.9 TFLOPs/s | Stage time=92.5m | seqs/step=192.0 | toks/step=185016 | eff=100.0%
+{'loss': 0.1085, 'grad_norm': 3.391845703125, 'learning_rate': 5e-05, 'epoch': 4.384e-05}
+[Stage 6/16 L=48] step 10970 | loss_avg=0.0270(100) | First=97.38% | Full=95.38% | lr=5.00e-05 | grad_norm=3.39 | Speed=63.7 samples/s (61.3K toks/s) | 221.9 TFLOPs/s | Stage time=94.5m | seqs/step=192.0 | toks/step=184999 | eff=100.0%
+{'loss': 0.1176, 'grad_norm': 9.138362884521484, 'learning_rate': 5e-05, 'epoch': 4.388e-05}
+[CHECK] Stage 6 full=95.50% target>=98.00%
+[Stage 6/16 L=48] step 10980 | loss_avg=0.0259(100) | First=96.00% | Full=94.62% | lr=5.00e-05 | grad_norm=9.14 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=96.5m | seqs/step=192.0 | toks/step=185040 | eff=100.0%
+{'loss': 0.1201, 'grad_norm': 5.377593040466309, 'learning_rate': 5e-05, 'epoch': 4.392e-05}
+[Stage 6/16 L=48] step 10990 | loss_avg=0.0265(100) | First=95.62% | Full=94.12% | lr=5.00e-05 | grad_norm=5.38 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=98.5m | seqs/step=192.0 | toks/step=185053 | eff=100.0%
+{'loss': 0.1134, 'grad_norm': 3.946873188018799, 'learning_rate': 5e-05, 'epoch': 4.396e-05}
+[Stage 6/16 L=48] step 11000 | loss_avg=0.0274(100) | First=97.38% | Full=96.00% | lr=5.00e-05 | grad_norm=3.95 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=100.5m | seqs/step=192.0 | toks/step=185037 | eff=100.0%
+[CHECK] Stage 6 full=96.00% target>=98.00%
+{'loss': 0.1323, 'grad_norm': 6.827325820922852, 'learning_rate': 5e-05, 'epoch': 4.4e-05}
+[Stage 6/16 L=48] step 11010 | loss_avg=0.0227(100) | First=97.38% | Full=96.25% | lr=5.00e-05 | grad_norm=6.83 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=102.5m | seqs/step=192.0 | toks/step=185035 | eff=100.0%
+{'loss': 0.1212, 'grad_norm': 3.2043251991271973, 'learning_rate': 5e-05, 'epoch': 4.404e-05}
+[Stage 6/16 L=48] step 11020 | loss_avg=0.0232(100) | First=97.25% | Full=95.12% | lr=5.00e-05 | grad_norm=3.20 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=104.6m | seqs/step=192.0 | toks/step=185056 | eff=100.0%
+{'loss': 0.1074, 'grad_norm': 12.199647903442383, 'learning_rate': 5e-05, 'epoch': 4.408e-05}
+[CHECK] Stage 6 full=96.75% target>=98.00%
+[Stage 6/16 L=48] step 11030 | loss_avg=0.0268(100) | First=98.75% | Full=97.12% | lr=5.00e-05 | grad_norm=12.20 | Speed=63.7 samples/s (61.4K toks/s) | 222.0 TFLOPs/s | Stage time=106.6m | seqs/step=192.0 | toks/step=185101 | eff=100.0%
+{'loss': 0.1109, 'grad_norm': 1.739925742149353, 'learning_rate': 5e-05, 'epoch': 4.412e-05}
+[Stage 6/16 L=48] step 11040 | loss_avg=0.0289(100) | First=97.25% | Full=94.00% | lr=5.00e-05 | grad_norm=1.74 | Speed=63.7 samples/s (61.4K toks/s) | 222.0 TFLOPs/s | Stage time=108.6m | seqs/step=192.0 | toks/step=185114 | eff=100.0%
+{'loss': 0.105, 'grad_norm': 11.754094123840332, 'learning_rate': 5e-05, 'epoch': 4.416e-05}
+[Stage 6/16 L=48] step 11050 | loss_avg=0.0227(100) | First=96.75% | Full=95.75% | lr=5.00e-05 | grad_norm=11.75 | Speed=63.7 samples/s (61.4K toks/s) | 222.0 TFLOPs/s | Stage time=110.6m | seqs/step=192.0 | toks/step=185148 | eff=100.0%
+[CHECK] Stage 6 full=95.75% target>=98.00%
+{'loss': 0.1152, 'grad_norm': 8.076274871826172, 'learning_rate': 5e-05, 'epoch': 4.42e-05}
+[Stage 6/16 L=48] step 11060 | loss_avg=0.0215(100) | First=97.00% | Full=95.38% | lr=5.00e-05 | grad_norm=8.08 | Speed=63.7 samples/s (61.4K toks/s) | 222.0 TFLOPs/s | Stage time=112.6m | seqs/step=192.0 | toks/step=185134 | eff=100.0%
+{'loss': 0.1135, 'grad_norm': 3.6154377460479736, 'learning_rate': 5e-05, 'epoch': 4.424e-05}
+[Stage 6/16 L=48] step 11070 | loss_avg=0.0210(100) | First=97.75% | Full=95.62% | lr=5.00e-05 | grad_norm=3.62 | Speed=63.7 samples/s (61.4K toks/s) | 222.0 TFLOPs/s | Stage time=114.6m | seqs/step=192.0 | toks/step=185124 | eff=100.0%
+{'loss': 0.114, 'grad_norm': 3.830711603164673, 'learning_rate': 5e-05, 'epoch': 4.428e-05}
+[CHECK] Stage 6 full=96.63% target>=98.00%
+[Stage 6/16 L=48] step 11080 | loss_avg=0.0210(100) | First=98.38% | Full=95.88% | lr=5.00e-05 | grad_norm=3.83 | Speed=63.7 samples/s (61.4K toks/s) | 222.0 TFLOPs/s | Stage time=116.6m | seqs/step=192.0 | toks/step=185088 | eff=100.0%
+{'loss': 0.1034, 'grad_norm': 4.641177177429199, 'learning_rate': 5e-05, 'epoch': 4.432e-05}
+[Stage 6/16 L=48] step 11090 | loss_avg=0.0221(100) | First=98.50% | Full=96.62% | lr=5.00e-05 | grad_norm=4.64 | Speed=63.7 samples/s (61.4K toks/s) | 221.9 TFLOPs/s | Stage time=118.6m | seqs/step=192.0 | toks/step=185074 | eff=100.0%
+{'loss': 0.099, 'grad_norm': 3.6253879070281982, 'learning_rate': 5e-05, 'epoch': 4.436e-05}
+[Stage 6/16 L=48] step 11100 | loss_avg=0.0249(100) | First=98.25% | Full=97.00% | lr=5.00e-05 | grad_norm=3.63 | Speed=63.7 samples/s (61.4K toks/s) | 222.0 TFLOPs/s | Stage time=120.6m | seqs/step=192.0 | toks/step=185079 | eff=100.0%
+[CHECK] Stage 6 full=97.00% target>=98.00%
+{'loss': 0.0967, 'grad_norm': 5.773174285888672, 'learning_rate': 5e-05, 'epoch': 4.44e-05}
