@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`, plus `--revision` support in `nl/tuning_nl.py`)
 **Branch:** `jackierwzhang/exp2-pythia14b-revisions`
 **VM Instances:** `nl-exp2-spot-step1000`, `nl-exp2-spot-step10000`, `nl-exp2-spot-step100000` (3x `a3-highgpu-4g` Spot, 4x H100-80GB each)
-**Last updated:** 2026-10-12 19:54 UTC
+**Last updated:** 2026-10-12 20:09 UTC
 
 ## Shared Configuration
 
@@ -26,9 +26,9 @@
 
 | Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | Spot 4x H100 (europe-west4-b) | Running | 389970 | 23/96 (`L=23`) | 96.00% | 97.88% | 0.0292 | 238,065.5 | 1224.6 | 66.93h | ~212.9h (stg rate, 24.0% L) / 55.1h (500k cap @ 4,752 PF/h) |
-| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 341710 | 25/96 (`L=25`) | 95.75% | 97.62% | 0.0280 | 241,483.9 | 1247.1 | 66.21h | ~188.5h (stg rate, 26.0% L) / 53.4h (500k cap @ 4,840 PF/h) |
-| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 243640 | 52/96 (`L=52`) | 95.25% | 97.50% | 0.0282 | 310,050.4 | 1287.3 | 63.76h | ~54.1h (stg rate, 54.2% L) / 38.0h (500k cap @ 4,996 PF/h) |
+| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | Spot 4x H100 (europe-west4-b) | Running | 391440 | 23/96 (`L=23`) | 95.75% | 97.75% | 0.0286 | 239,277.6 | 1224.3 | 67.19h | ~213.8h (stg rate, 24.0% L) / 54.9h (500k cap @ 4,752 PF/h) |
+| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 343110 | 25/96 (`L=25`) | 95.75% | 96.75% | 0.0217 | 242,724.0 | 1246.8 | 66.47h | ~189.2h (stg rate, 26.0% L) / 53.2h (500k cap @ 4,837 PF/h) |
+| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 244380 | 52/96 (`L=52`) | 96.38% | 97.62% | 0.0282 | 311,329.8 | 1287.8 | 64.02h | ~54.3h (stg rate, 54.2% L) / 37.7h (500k cap @ 4,999 PF/h) |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`, every 8 stages)
 
