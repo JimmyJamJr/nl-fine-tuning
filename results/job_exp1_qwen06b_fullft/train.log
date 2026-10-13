@@ -7403,3 +7403,52 @@ Warning: The following arguments do not match the ones in the `trainer_state.jso
 {'loss': 0.0838, 'grad_norm': 13.9375, 'learning_rate': 5e-05, 'epoch': 6e-05}
 [Stage 16/16 L=128] step 27510 | loss_avg=0.0197(100) | First=98.88% | Full=97.25% | lr=5.00e-05 | grad_norm=13.94 | Speed=63.0 samples/s (152.9K toks/s) | 404.5 TFLOPs/s | Stage time=642.0m | seqs/step=192.0 | toks/step=466076 | eff=100.0%
 {'loss': 0.0793, 'grad_norm': 20.375, 'learning_rate': 5e-05, 'epoch': 6.004e-05}
+[Stage 16/16 L=128] step 27520 | loss_avg=0.0212(100) | First=98.38% | Full=96.62% | lr=5.00e-05 | grad_norm=20.38 | Speed=63.0 samples/s (152.9K toks/s) | 404.5 TFLOPs/s | Stage time=644.0m | seqs/step=192.0 | toks/step=466055 | eff=100.0%
+{'loss': 0.0771, 'grad_norm': 50.5, 'learning_rate': 5e-05, 'epoch': 6.008e-05}
+[CHECK] Stage 16 full=97.87% target>=98.00%
+[Stage 16/16 L=128] step 27530 | loss_avg=0.0198(100) | First=98.25% | Full=96.50% | lr=5.00e-05 | grad_norm=50.50 | Speed=63.0 samples/s (153.0K toks/s) | 404.5 TFLOPs/s | Stage time=646.0m | seqs/step=192.0 | toks/step=466084 | eff=100.0%
+{'loss': 0.0702, 'grad_norm': 18.125, 'learning_rate': 5e-05, 'epoch': 6.012e-05}
+[Stage 16/16 L=128] step 27540 | loss_avg=0.0183(100) | First=98.75% | Full=97.25% | lr=5.00e-05 | grad_norm=18.12 | Speed=63.0 samples/s (153.0K toks/s) | 404.5 TFLOPs/s | Stage time=648.0m | seqs/step=192.0 | toks/step=466080 | eff=100.0%
+{'loss': 0.0737, 'grad_norm': 12.6875, 'learning_rate': 5e-05, 'epoch': 6.016e-05}
+[Stage 16/16 L=128] step 27550 | loss_avg=0.0162(100) | First=97.75% | Full=96.75% | lr=5.00e-05 | grad_norm=12.69 | Speed=63.0 samples/s (153.0K toks/s) | 404.5 TFLOPs/s | Stage time=650.1m | seqs/step=192.0 | toks/step=466077 | eff=100.0%
+[CHECK] Stage 16 full=96.75% target>=98.00%
+{'loss': 0.0705, 'grad_norm': 19.375, 'learning_rate': 5e-05, 'epoch': 6.02e-05}
+[Stage 16/16 L=128] step 27560 | loss_avg=0.0179(100) | First=97.62% | Full=96.38% | lr=5.00e-05 | grad_norm=19.38 | Speed=63.0 samples/s (153.0K toks/s) | 404.5 TFLOPs/s | Stage time=652.1m | seqs/step=192.0 | toks/step=466061 | eff=100.0%
+{'loss': 0.0734, 'grad_norm': 44.25, 'learning_rate': 5e-05, 'epoch': 6.024e-05}
+[Stage 16/16 L=128] step 27570 | loss_avg=0.0163(100) | First=98.88% | Full=97.62% | lr=5.00e-05 | grad_norm=44.25 | Speed=63.0 samples/s (153.0K toks/s) | 404.5 TFLOPs/s | Stage time=654.1m | seqs/step=192.0 | toks/step=466056 | eff=100.0%
+{'loss': 0.0701, 'grad_norm': 12.1875, 'learning_rate': 5e-05, 'epoch': 6.028e-05}
+[CHECK] Stage 16 full=98.00% target>=98.00%
+[COMPLETE] Stage 16 complete in 3225 steps, 655.1 minutes | 2,476,800 samples | 63.0 samples/s
+
+[STAGE-EVAL] Stage 16 complete (step 27575, L=128), evaluating at alpha=1.0...
+[EVAL-TF] Loss=0.0222 (n=500)
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Stage 16 | Step 27575 | L=128 | TF Loss=0.0222 | Greedy: First=98.60%, Full=98.60%
+[PLOT] Saved stage_eval.png (16 stages)
+[PLOT] Saved eval_acc_vs_step.png (16 evals)
+[PLOT] Saved eval_acc_vs_flops.png (16 evals)
+[STAGE-CKPT] Saving persistent checkpoint to /root/nl_output/search/job_exp1_qwen06b_fullft/stage_checkpoints/stage_16_step_27575_L128
+[STAGE-CKPT] Saved stage 16 checkpoint
+[PLOT] Saved loss_stage_16.png
+[PLOT] Saved loss_overall.png (2 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 1539.5 TFLOPs/s)
+[FINISHED] Curriculum complete (reached max_lookahead)
+{'train_runtime': 150399.4364, 'train_samples_per_second': 10638.338, 'train_steps_per_second': 664.896, 'train_loss': 0.04787320580573268, 'epoch': 6.03e-05}
+
+[TRAIN] Training complete.
+
+[LOSS] Saved 27575 records
+[PLOT] Saved loss_overall.png (2 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 1539.5 TFLOPs/s)
+[PLOT] Saved stage_eval.png (16 stages)
+[PLOT] Saved eval_acc_vs_step.png (16 evals)
+[PLOT] Saved eval_acc_vs_flops.png (16 evals)
+
+[DONE] Training/evaluation complete.
+[rank0]:[W1013 00:36:15.726375967 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[Tue Oct 13 00:36:19 UTC 2026] Finished exp1_qwen06b_fullft with exit code 0
