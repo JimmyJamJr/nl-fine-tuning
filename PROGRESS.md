@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`, plus `--revision` support in `nl/tuning_nl.py`)
 **Branch:** `jackierwzhang/exp2-pythia14b-revisions`
 **VM Instances:** `nl-exp2-spot-step1000`, `nl-exp2-spot-step10000`, `nl-exp2-spot-step100000` (3x `a3-highgpu-4g` Spot, 4x H100-80GB each)
-**Last updated:** 2026-10-13 07:42 UTC
+**Last updated:** 2026-10-13 07:58 UTC
 
 ## Shared Configuration
 
@@ -27,8 +27,8 @@
 | Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
 | `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | Spot 4x H100 (us-east4-a) | Running | 453180 | 26/96 (`L=26`) | 95.00% | 96.88% | 0.0265 | 293,037.6 | 1219.5 | 78.52h | ~212.0h (stg rate, 27.1% L) / 43.8h (500k cap @ 4,730 PF/h) |
-| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 404630 | 26/96 (`L=26`) | 94.62% | 96.38% | 0.0284 | 298,064.1 | 1246.4 | 78.00h | ~210.6h (stg rate, 27.1% L) / 41.7h (500k cap @ 4,837 PF/h) |
-| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 276860 | 54/96 (`L=54`) | 95.75% | 97.25% | 0.0252 | 368,897.7 | 1286.6 | 75.55h | ~58.9h (stg rate, 56.2% L) / 26.3h (500k cap @ 4,993 PF/h) |
+| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 405990 | 26/96 (`L=26`) | 94.75% | 96.38% | 0.0247 | 299,337.1 | 1247.2 | 78.27h | ~211.3h (stg rate, 27.1% L) / 41.5h (500k cap @ 4,840 PF/h) |
+| `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Running | 277530 | 55/96 (`L=55`) | 95.88% | 97.75% | 0.0256 | 370,212.7 | 1284.5 | 75.82h | ~56.6h (stg rate, 57.3% L) / 26.0h (500k cap @ 4,987 PF/h) |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`, every 8 stages)
 
