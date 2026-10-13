@@ -165915,3 +165915,1453 @@ Root Cause (first observed failure):
   traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
 ============================================================
 [Tue Oct 13 09:43:30 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:43:39 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:43:40.124000 500584 torch/distributed/run.py:792] 
+W1013 09:43:40.124000 500584 torch/distributed/run.py:792] *****************************************
+W1013 09:43:40.124000 500584 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:43:40.124000 500584 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+W1013 09:43:43.650000 500584 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 500649 closing signal SIGTERM
+W1013 09:43:43.650000 500584 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 500650 closing signal SIGTERM
+W1013 09:43:43.650000 500584 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 500651 closing signal SIGTERM
+E1013 09:43:43.682000 500584 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 3 (pid: 500652) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:43:43
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 500652)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:43:43 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:43:52 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:43:53.867000 501330 torch/distributed/run.py:792] 
+W1013 09:43:53.867000 501330 torch/distributed/run.py:792] *****************************************
+W1013 09:43:53.867000 501330 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:43:53.867000 501330 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+E1013 09:43:57.490000 501330 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 501399) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:43:57
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 501400)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-13_09:43:57
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 501401)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-13_09:43:57
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 501402)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:43:57
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 501399)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:43:57 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:44:06 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:44:07.728000 502604 torch/distributed/run.py:792] 
+W1013 09:44:07.728000 502604 torch/distributed/run.py:792] *****************************************
+W1013 09:44:07.728000 502604 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:44:07.728000 502604 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+C++ module `generator` loaded.
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+E1013 09:44:11.351000 502604 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 502669) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:44:11
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 502670)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-13_09:44:11
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 502671)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-13_09:44:11
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 502672)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:44:11
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 502669)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:44:11 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:44:20 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:44:21.535000 503354 torch/distributed/run.py:792] 
+W1013 09:44:21.535000 503354 torch/distributed/run.py:792] *****************************************
+W1013 09:44:21.535000 503354 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:44:21.535000 503354 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+E1013 09:44:25.164000 503354 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 503419) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:44:25
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 503420)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-13_09:44:25
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 503421)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-13_09:44:25
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 503422)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:44:25
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 503419)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:44:25 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:44:34 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:44:35.346000 504103 torch/distributed/run.py:792] 
+W1013 09:44:35.346000 504103 torch/distributed/run.py:792] *****************************************
+W1013 09:44:35.346000 504103 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:44:35.346000 504103 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+W1013 09:44:38.871000 504103 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 504168 closing signal SIGTERM
+W1013 09:44:38.872000 504103 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 504169 closing signal SIGTERM
+W1013 09:44:38.872000 504103 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 504170 closing signal SIGTERM
+E1013 09:44:38.903000 504103 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 3 (pid: 504171) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:44:38
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 504171)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:44:39 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:44:48 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:44:49.107000 504849 torch/distributed/run.py:792] 
+W1013 09:44:49.107000 504849 torch/distributed/run.py:792] *****************************************
+W1013 09:44:49.107000 504849 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:44:49.107000 504849 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.C++ module `generator` loaded.
+
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+E1013 09:44:52.731000 504849 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 504918) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:44:52
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 504919)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-13_09:44:52
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 504920)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-13_09:44:52
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 504921)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:44:52
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 504918)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:44:52 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:45:01 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:45:02.939000 505595 torch/distributed/run.py:792] 
+W1013 09:45:02.939000 505595 torch/distributed/run.py:792] *****************************************
+W1013 09:45:02.939000 505595 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:45:02.939000 505595 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+    [CURRICULUM] Expected stages: 96torch._C._cuda_setDevice(device)
+
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+E1013 09:45:06.665000 505595 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 505683) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:45:06
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 505684)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-13_09:45:06
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 505685)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-13_09:45:06
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 505686)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:45:06
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 505683)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:45:06 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:45:15 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:45:16.868000 506875 torch/distributed/run.py:792] 
+W1013 09:45:16.868000 506875 torch/distributed/run.py:792] *****************************************
+W1013 09:45:16.868000 506875 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:45:16.868000 506875 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+C++ module `generator` loaded.
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+C++ module `generator` loaded.
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+E1013 09:45:20.495000 506875 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 506940) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:45:20
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 506941)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-13_09:45:20
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 506942)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-13_09:45:20
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 506943)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:45:20
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 506940)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:45:20 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:45:29 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:45:30.681000 507626 torch/distributed/run.py:792] 
+W1013 09:45:30.681000 507626 torch/distributed/run.py:792] *****************************************
+W1013 09:45:30.681000 507626 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:45:30.681000 507626 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+W1013 09:45:34.212000 507626 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 507692 closing signal SIGTERM
+W1013 09:45:34.212000 507626 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 507693 closing signal SIGTERM
+W1013 09:45:34.212000 507626 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 507694 closing signal SIGTERM
+E1013 09:45:34.244000 507626 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 507691) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:45:34
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 507691)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:45:34 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:45:43 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:45:44.640000 508374 torch/distributed/run.py:792] 
+W1013 09:45:44.640000 508374 torch/distributed/run.py:792] *****************************************
+W1013 09:45:44.640000 508374 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:45:44.640000 508374 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+W1013 09:45:48.263000 508374 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 508439 closing signal SIGTERM
+W1013 09:45:48.263000 508374 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 508441 closing signal SIGTERM
+E1013 09:45:48.295000 508374 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 1 (pid: 508440) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:45:48
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 508442)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:45:48
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 508440)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:45:48 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:45:57 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:45:58.469000 509120 torch/distributed/run.py:792] 
+W1013 09:45:58.469000 509120 torch/distributed/run.py:792] *****************************************
+W1013 09:45:58.469000 509120 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:45:58.469000 509120 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.C++ module `generator` loaded.
+
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+        sys.exit(main())sys.exit(main())
+
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+C++ module `generator` loaded.
+Traceback (most recent call last):
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+    sys.exit(main())
+  File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2813, in main
+    torch.cuda.set_device(local_rank)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 476, in set_device
+    torch._C._cuda_setDevice(device)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/cuda/__init__.py", line 319, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: No CUDA GPUs are available
+E1013 09:46:02.093000 509120 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 509189) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-13_09:46:02
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 509190)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-13_09:46:02
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 509191)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-10-13_09:46:02
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 509192)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-13_09:46:02
+  host      : nl-exp2-spot-step1000.us-east4-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 509189)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Tue Oct 13 09:46:02 UTC 2026] Finished exp2_pythia14b_step1000 with exit code 1
+[Tue Oct 13 09:46:11 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east4-a) Starting/Resuming exp2_pythia14b_step1000 (revision=step1000) on nl-exp2-spot-step1000
+W1013 09:46:12.331000 514893 torch/distributed/run.py:792] 
+W1013 09:46:12.331000 514893 torch/distributed/run.py:792] *****************************************
+W1013 09:46:12.331000 514893 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1013 09:46:12.331000 514893 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 1
+                  batch_size: 24
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 2
+      gradient_checkpointing: True
+                      job_id: exp2_pythia14b_step1000
+               learning_rate: 2.7e-05
+            linear_lookahead: True
+              lookahead_step: 1
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 576
+               max_lookahead: 96
+            max_total_pflops: 500000.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: EleutherAI/pythia-1.4b
+                    n_stages: 96
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp2_pythia14b_step1000
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+                    revision: step1000
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 8
+                        task: search
+           use_chat_template: False
+                   use_liger: False
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp2_pythia14b_step1000 
+
+[CKPT] Auto-resuming from local run: /root/nl_output/search/job_exp2_pythia14b_step1000/checkpoint-453000
+[ATTN-KERNEL] NL_ATTN_KERNEL=fa2 -> attn_implementation=flash_attention_2 (hopper=True); in-run evals use sdpa
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.76s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.76s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.84s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.84s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.16it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.01it/s]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.16it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.01it/s]
+[INIT] Loaded EleutherAI/pythia-1.4b at revision=step1000
+[ATTENTION] Using: flash_attention_2
+[FLASH] flash_sdp_enabled: True
+[FLASH] mem_efficient_sdp_enabled: True
+[FLASH] math_sdp_enabled: True
+[ATTN-KERNEL] verified: config._attn_implementation=flash_attention_2; varlen kernel from flash_attn.flash_attn_interface; 24 gpt_neox decoder layers are GradientCheckpointingLayer
+[MEM] model.config.use_cache = False (training)
+trainable params: 1,414,647,808 || all params: 1,414,647,808 || trainable%: 100.0000
+[EVAL-DATA] Generating eval sets (once for all evals)...
+Loading checkpoint shards: 100%|██████████| 2/2 [00:02<00:00,  1.11it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:02<00:00,  1.11it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:02<00:00,  1.04s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:02<00:00,  1.04s/it]
+[EVAL-DATA] Hard (alpha=1.0): n=500, fingerprint=ebe682697aee
+[EVAL-DATA] Easy (alpha=0.1): n=500, fingerprint=3fbd7826fc0b
+[DATASET] Using PackedSequenceDataset (batch_size=24)
+[DATASET] Packed Map-style | batch_size=24 | epoch_size=1000000000
+[PFLOPS] Will stop training at 500000.0 PFLOPS
+[CURRICULUM] Restored stage=25, stage_start_step=415075, wall_time_offset=282521.4s from /root/nl_output/search/job_exp2_pythia14b_step1000/checkpoint-453000/curriculum_state.json
+[CURRICULUM] Restored 453000 loss records from JSONL (truncated to step 453000)
+[CURRICULUM] Will mark next entry as resume point (step ~453000)
+[CURRICULUM] Restored 3 stage eval records
+[CURRICULUM] Synced state with checkpoint: /root/nl_output/search/job_exp2_pythia14b_step1000/checkpoint-453000
+[CURRICULUM] Loaded 2 existing resume points
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'pad_token_id': 0}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'pad_token_id': 0}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'pad_token_id': 0}.
+[LOSS] Wrote 453000 records to JSONL in /root/nl_output/search/job_exp2_pythia14b_step1000
+[DDP] cross-rank gradient averaging: OFF (status quo: compute_loss bypasses DistributedDataParallel.forward, so each rank trains its own replica between checkpoint reloads; set NL_DDP_GRAD_AVERAGE=1 to all-reduce)
+[HEAD] NL_HEAD=sparse: lm_head/argmax/CE on labelled rows only (valid_mask), in --ce_chunk_size=4096 row pieces; per-step rows logged as head_rows next to tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay 6N*tokens, which overstates this path)
+[CURRICULUM] Restored 800 first_token_correct entries
+[CURRICULUM] Restored 800 full_word_correct entries
+[CURRICULUM] Restored 100 recent_losses entries
+[FLOPS] Model has 1.41B params, ~8.5B FLOPs/token
+[FLOPS] Output head: N_head=103.0M params, 6*N_head=0.62B FLOPs per head row; NL_HEAD=sparse: achieved_tflops counts executed FLOPs (6(N-N_head)*tokens + 6*N_head*head_rows)
+
+[TRAIN] Starting training...
+
+[CURRICULUM] Resuming from step 453000
+[CKPT-GATE] recomputing every 1 layer(s) at 15,301 tokens/micro-batch (every_n=1, relax_max=0)
+[Stage 25/96 L=25] step 453010 | loss_avg=0.0282(100) | First=97.50% | Full=96.00% | lr=0.00e+00 | grad_norm=0.00 | Speed=965957.7 samples/s (528335.3K toks/s) | 4160863.8 TFLOPs/s | Stage time=0.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0428, 'grad_norm': 7.28125, 'learning_rate': 2.7e-05, 'epoch': 2e-08}
+[Stage 25/96 L=25] step 453020 | loss_avg=0.0286(100) | First=97.50% | Full=96.12% | lr=2.70e-05 | grad_norm=7.28 | Speed=515434.9 samples/s (281920.2K toks/s) | 2220240.3 TFLOPs/s | Stage time=0.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0609, 'grad_norm': 7.71875, 'learning_rate': 2.7e-05, 'epoch': 4e-08}
+[CHECK] Stage 25 full=96.13% target>=98.00%
+[Stage 25/96 L=25] step 453030 | loss_avg=0.0296(100) | First=96.50% | Full=95.00% | lr=2.70e-05 | grad_norm=7.72 | Speed=357888.7 samples/s (195748.7K toks/s) | 1541603.7 TFLOPs/s | Stage time=0.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0591, 'grad_norm': 62.0, 'learning_rate': 2.7e-05, 'epoch': 6e-08}
+[Stage 25/96 L=25] step 453040 | loss_avg=0.0281(100) | First=97.50% | Full=95.50% | lr=2.70e-05 | grad_norm=62.00 | Speed=272847.8 samples/s (149235.1K toks/s) | 1175289.6 TFLOPs/s | Stage time=0.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0583, 'grad_norm': 5.65625, 'learning_rate': 2.7e-05, 'epoch': 8e-08}
+[Stage 25/96 L=25] step 453050 | loss_avg=0.0279(100) | First=96.12% | Full=95.00% | lr=2.70e-05 | grad_norm=5.66 | Speed=221091.3 samples/s (120926.9K toks/s) | 952350.4 TFLOPs/s | Stage time=0.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=95.00% target>=98.00%
+{'loss': 0.0672, 'grad_norm': 7.6875, 'learning_rate': 2.7e-05, 'epoch': 1e-07}
+[Stage 25/96 L=25] step 453060 | loss_avg=0.0303(100) | First=97.00% | Full=95.12% | lr=2.70e-05 | grad_norm=7.69 | Speed=185439.9 samples/s (101427.6K toks/s) | 798785.5 TFLOPs/s | Stage time=0.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0578, 'grad_norm': 9.4375, 'learning_rate': 2.7e-05, 'epoch': 1.2e-07}
+[Stage 25/96 L=25] step 453070 | loss_avg=0.0314(100) | First=96.00% | Full=94.62% | lr=2.70e-05 | grad_norm=9.44 | Speed=160232.4 samples/s (87639.5K toks/s) | 690198.4 TFLOPs/s | Stage time=0.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0609, 'grad_norm': 33.75, 'learning_rate': 2.7e-05, 'epoch': 1.4e-07}
+[CHECK] Stage 25 full=95.50% target>=98.00%
+[Stage 25/96 L=25] step 453080 | loss_avg=0.0305(100) | First=96.00% | Full=94.38% | lr=2.70e-05 | grad_norm=33.75 | Speed=140498.5 samples/s (76845.7K toks/s) | 605192.1 TFLOPs/s | Stage time=0.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0632, 'grad_norm': 7.875, 'learning_rate': 2.7e-05, 'epoch': 1.6e-07}
+[Stage 25/96 L=25] step 453090 | loss_avg=0.0288(100) | First=97.25% | Full=95.50% | lr=2.70e-05 | grad_norm=7.88 | Speed=125057.5 samples/s (68400.1K toks/s) | 538679.9 TFLOPs/s | Stage time=1.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0596, 'grad_norm': 24.125, 'learning_rate': 2.7e-05, 'epoch': 1.8e-07}
+[Stage 25/96 L=25] step 453100 | loss_avg=0.0282(100) | First=97.12% | Full=95.38% | lr=2.70e-05 | grad_norm=24.12 | Speed=112863.0 samples/s (61730.8K toks/s) | 486156.3 TFLOPs/s | Stage time=1.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=95.38% target>=98.00%
+{'loss': 0.0499, 'grad_norm': 3.75, 'learning_rate': 2.7e-05, 'epoch': 2e-07}
+[Stage 25/96 L=25] step 453110 | loss_avg=0.0272(100) | First=95.88% | Full=95.00% | lr=2.70e-05 | grad_norm=3.75 | Speed=102528.2 samples/s (56078.2K toks/s) | 441639.3 TFLOPs/s | Stage time=1.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0568, 'grad_norm': 6.34375, 'learning_rate': 2.7e-05, 'epoch': 2.2e-07}
+[Stage 25/96 L=25] step 453120 | loss_avg=0.0259(100) | First=97.75% | Full=96.12% | lr=2.70e-05 | grad_norm=6.34 | Speed=94233.7 samples/s (51541.4K toks/s) | 405910.4 TFLOPs/s | Stage time=1.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0537, 'grad_norm': 5.59375, 'learning_rate': 2.7e-05, 'epoch': 2.4e-07}
+[CHECK] Stage 25 full=97.00% target>=98.00%
+[Stage 25/96 L=25] step 453130 | loss_avg=0.0231(100) | First=97.75% | Full=95.88% | lr=2.70e-05 | grad_norm=5.59 | Speed=86958.8 samples/s (47562.5K toks/s) | 374574.4 TFLOPs/s | Stage time=1.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0451, 'grad_norm': 10.625, 'learning_rate': 2.7e-05, 'epoch': 2.6e-07}
+[Stage 25/96 L=25] step 453140 | loss_avg=0.0228(100) | First=95.88% | Full=93.88% | lr=2.70e-05 | grad_norm=10.62 | Speed=80881.5 samples/s (44238.5K toks/s) | 348397.0 TFLOPs/s | Stage time=1.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0572, 'grad_norm': 12.8125, 'learning_rate': 2.7e-05, 'epoch': 2.8e-07}
+[Stage 25/96 L=25] step 453150 | loss_avg=0.0256(100) | First=97.38% | Full=96.12% | lr=2.70e-05 | grad_norm=12.81 | Speed=75505.3 samples/s (41298.2K toks/s) | 325240.5 TFLOPs/s | Stage time=1.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=96.13% target>=98.00%
+{'loss': 0.0647, 'grad_norm': 13.125, 'learning_rate': 2.7e-05, 'epoch': 3e-07}
+[Stage 25/96 L=25] step 453160 | loss_avg=0.0277(100) | First=97.00% | Full=95.88% | lr=2.70e-05 | grad_norm=13.12 | Speed=70916.6 samples/s (38788.7K toks/s) | 305477.0 TFLOPs/s | Stage time=1.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0611, 'grad_norm': 16.875, 'learning_rate': 2.7e-05, 'epoch': 3.2e-07}
+[Stage 25/96 L=25] step 453170 | loss_avg=0.0281(100) | First=96.75% | Full=95.25% | lr=2.70e-05 | grad_norm=16.88 | Speed=66832.3 samples/s (36554.6K toks/s) | 287883.0 TFLOPs/s | Stage time=1.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0564, 'grad_norm': 11.0, 'learning_rate': 2.7e-05, 'epoch': 3.4e-07}
+[CHECK] Stage 25 full=96.88% target>=98.00%
+[Stage 25/96 L=25] step 453180 | loss_avg=0.0306(100) | First=96.62% | Full=94.50% | lr=2.70e-05 | grad_norm=11.00 | Speed=63171.7 samples/s (34552.5K toks/s) | 272115.3 TFLOPs/s | Stage time=1.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0592, 'grad_norm': 15.75, 'learning_rate': 2.7e-05, 'epoch': 3.6e-07}
+[Stage 25/96 L=25] step 453190 | loss_avg=0.0319(100) | First=97.00% | Full=95.88% | lr=2.70e-05 | grad_norm=15.75 | Speed=59851.4 samples/s (32736.3K toks/s) | 257812.4 TFLOPs/s | Stage time=2.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0476, 'grad_norm': 16.25, 'learning_rate': 2.7e-05, 'epoch': 3.8e-07}
+[Stage 25/96 L=25] step 453200 | loss_avg=0.0289(100) | First=96.62% | Full=95.12% | lr=2.70e-05 | grad_norm=16.25 | Speed=56949.8 samples/s (31149.2K toks/s) | 245312.9 TFLOPs/s | Stage time=2.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=95.13% target>=98.00%
+{'loss': 0.054, 'grad_norm': 8.75, 'learning_rate': 2.7e-05, 'epoch': 4e-07}
+[Stage 25/96 L=25] step 453210 | loss_avg=0.0271(100) | First=97.50% | Full=95.12% | lr=2.70e-05 | grad_norm=8.75 | Speed=54289.5 samples/s (29694.2K toks/s) | 233854.2 TFLOPs/s | Stage time=2.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.058, 'grad_norm': 4.40625, 'learning_rate': 2.7e-05, 'epoch': 4.2e-07}
+[Stage 25/96 L=25] step 453220 | loss_avg=0.0254(100) | First=98.00% | Full=96.75% | lr=2.70e-05 | grad_norm=4.41 | Speed=51809.1 samples/s (28337.4K toks/s) | 223168.9 TFLOPs/s | Stage time=2.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0492, 'grad_norm': 11.3125, 'learning_rate': 2.7e-05, 'epoch': 4.4e-07}
+[CHECK] Stage 25 full=96.38% target>=98.00%
+[Stage 25/96 L=25] step 453230 | loss_avg=0.0239(100) | First=97.00% | Full=95.25% | lr=2.70e-05 | grad_norm=11.31 | Speed=49596.8 samples/s (27127.4K toks/s) | 213640.1 TFLOPs/s | Stage time=2.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0527, 'grad_norm': 12.375, 'learning_rate': 2.7e-05, 'epoch': 4.6e-07}
+[Stage 25/96 L=25] step 453240 | loss_avg=0.0241(100) | First=97.38% | Full=95.62% | lr=2.70e-05 | grad_norm=12.38 | Speed=47536.1 samples/s (26000.3K toks/s) | 204763.5 TFLOPs/s | Stage time=2.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0508, 'grad_norm': 5.09375, 'learning_rate': 2.7e-05, 'epoch': 4.8e-07}
+[Stage 25/96 L=25] step 453250 | loss_avg=0.0261(100) | First=97.38% | Full=96.00% | lr=2.70e-05 | grad_norm=5.09 | Speed=45670.9 samples/s (24980.2K toks/s) | 196729.4 TFLOPs/s | Stage time=2.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=96.00% target>=98.00%
+{'loss': 0.0534, 'grad_norm': 7.1875, 'learning_rate': 2.7e-05, 'epoch': 5e-07}
+[Stage 25/96 L=25] step 453260 | loss_avg=0.0243(100) | First=98.00% | Full=95.88% | lr=2.70e-05 | grad_norm=7.19 | Speed=43941.0 samples/s (24034.0K toks/s) | 189277.7 TFLOPs/s | Stage time=2.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0461, 'grad_norm': 1.0625, 'learning_rate': 2.7e-05, 'epoch': 5.2e-07}
+[Stage 25/96 L=25] step 453270 | loss_avg=0.0255(100) | First=97.88% | Full=95.88% | lr=2.70e-05 | grad_norm=1.06 | Speed=42339.1 samples/s (23157.9K toks/s) | 182378.4 TFLOPs/s | Stage time=2.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0487, 'grad_norm': 7.375, 'learning_rate': 2.7e-05, 'epoch': 5.4e-07}
+[CHECK] Stage 25 full=96.50% target>=98.00%
+[Stage 25/96 L=25] step 453280 | loss_avg=0.0266(100) | First=96.62% | Full=95.75% | lr=2.70e-05 | grad_norm=7.38 | Speed=40901.4 samples/s (22371.4K toks/s) | 176184.1 TFLOPs/s | Stage time=3.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0583, 'grad_norm': 10.125, 'learning_rate': 2.7e-05, 'epoch': 5.6e-07}
+[Stage 25/96 L=25] step 453290 | loss_avg=0.0257(100) | First=96.50% | Full=93.50% | lr=2.70e-05 | grad_norm=10.12 | Speed=39518.6 samples/s (21615.0K toks/s) | 170227.0 TFLOPs/s | Stage time=3.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0587, 'grad_norm': 18.25, 'learning_rate': 2.7e-05, 'epoch': 5.8e-07}
+[Stage 25/96 L=25] step 453300 | loss_avg=0.0242(100) | First=98.50% | Full=97.00% | lr=2.70e-05 | grad_norm=18.25 | Speed=38210.7 samples/s (20899.6K toks/s) | 164593.2 TFLOPs/s | Stage time=3.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=97.00% target>=98.00%
+{'loss': 0.0478, 'grad_norm': 6.09375, 'learning_rate': 2.7e-05, 'epoch': 6e-07}
+[Stage 25/96 L=25] step 453310 | loss_avg=0.0264(100) | First=97.25% | Full=95.62% | lr=2.70e-05 | grad_norm=6.09 | Speed=37008.2 samples/s (20241.9K toks/s) | 159413.8 TFLOPs/s | Stage time=3.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0565, 'grad_norm': 10.9375, 'learning_rate': 2.7e-05, 'epoch': 6.2e-07}
+[Stage 25/96 L=25] step 453320 | loss_avg=0.0253(100) | First=97.50% | Full=95.50% | lr=2.70e-05 | grad_norm=10.94 | Speed=35863.1 samples/s (19615.5K toks/s) | 154480.7 TFLOPs/s | Stage time=3.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0493, 'grad_norm': 26.625, 'learning_rate': 2.7e-05, 'epoch': 6.4e-07}
+[CHECK] Stage 25 full=96.75% target>=98.00%
+[Stage 25/96 L=25] step 453330 | loss_avg=0.0255(100) | First=98.12% | Full=97.00% | lr=2.70e-05 | grad_norm=26.62 | Speed=34808.3 samples/s (19038.6K toks/s) | 149936.9 TFLOPs/s | Stage time=3.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0452, 'grad_norm': 2.890625, 'learning_rate': 2.7e-05, 'epoch': 6.6e-07}
+[Stage 25/96 L=25] step 453340 | loss_avg=0.0237(100) | First=97.00% | Full=95.12% | lr=2.70e-05 | grad_norm=2.89 | Speed=33792.7 samples/s (18483.0K toks/s) | 145561.5 TFLOPs/s | Stage time=3.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0555, 'grad_norm': 4.78125, 'learning_rate': 2.7e-05, 'epoch': 6.8e-07}
+[Stage 25/96 L=25] step 453350 | loss_avg=0.0248(100) | First=97.38% | Full=95.38% | lr=2.70e-05 | grad_norm=4.78 | Speed=32834.3 samples/s (17958.7K toks/s) | 141432.5 TFLOPs/s | Stage time=3.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=95.38% target>=98.00%
+{'loss': 0.0697, 'grad_norm': 6.09375, 'learning_rate': 2.7e-05, 'epoch': 7e-07}
+[Stage 25/96 L=25] step 453360 | loss_avg=0.0226(100) | First=97.62% | Full=96.12% | lr=2.70e-05 | grad_norm=6.09 | Speed=31947.8 samples/s (17473.8K toks/s) | 137613.9 TFLOPs/s | Stage time=3.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0449, 'grad_norm': 1.484375, 'learning_rate': 2.7e-05, 'epoch': 7.2e-07}
+[Stage 25/96 L=25] step 453370 | loss_avg=0.0230(100) | First=97.88% | Full=95.25% | lr=2.70e-05 | grad_norm=1.48 | Speed=31078.2 samples/s (16998.2K toks/s) | 133868.0 TFLOPs/s | Stage time=3.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0471, 'grad_norm': 5.6875, 'learning_rate': 2.7e-05, 'epoch': 7.4e-07}
+[CHECK] Stage 25 full=96.13% target>=98.00%
+[Stage 25/96 L=25] step 453380 | loss_avg=0.0224(100) | First=97.38% | Full=95.50% | lr=2.70e-05 | grad_norm=5.69 | Speed=30266.4 samples/s (16554.2K toks/s) | 130371.4 TFLOPs/s | Stage time=4.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0573, 'grad_norm': 46.75, 'learning_rate': 2.7e-05, 'epoch': 7.6e-07}
+[Stage 25/96 L=25] step 453390 | loss_avg=0.0235(100) | First=97.75% | Full=96.25% | lr=2.70e-05 | grad_norm=46.75 | Speed=29495.6 samples/s (16132.6K toks/s) | 127051.1 TFLOPs/s | Stage time=4.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0473, 'grad_norm': 12.6875, 'learning_rate': 2.7e-05, 'epoch': 7.8e-07}
+[Stage 25/96 L=25] step 453400 | loss_avg=0.0251(100) | First=96.62% | Full=94.88% | lr=2.70e-05 | grad_norm=12.69 | Speed=28757.9 samples/s (15729.1K toks/s) | 123873.7 TFLOPs/s | Stage time=4.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=94.88% target>=98.00%
+{'loss': 0.065, 'grad_norm': 10.125, 'learning_rate': 2.7e-05, 'epoch': 8e-07}
+[Stage 25/96 L=25] step 453410 | loss_avg=0.0268(100) | First=97.12% | Full=94.75% | lr=2.70e-05 | grad_norm=10.12 | Speed=28060.2 samples/s (15347.7K toks/s) | 120869.2 TFLOPs/s | Stage time=4.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0561, 'grad_norm': 7.75, 'learning_rate': 2.7e-05, 'epoch': 8.2e-07}
+[Stage 25/96 L=25] step 453420 | loss_avg=0.0290(100) | First=97.62% | Full=95.25% | lr=2.70e-05 | grad_norm=7.75 | Speed=27409.5 samples/s (14991.7K toks/s) | 118066.2 TFLOPs/s | Stage time=4.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0604, 'grad_norm': 9.0, 'learning_rate': 2.7e-05, 'epoch': 8.4e-07}
+[CHECK] Stage 25 full=95.75% target>=98.00%
+[Stage 25/96 L=25] step 453430 | loss_avg=0.0299(100) | First=97.38% | Full=96.38% | lr=2.70e-05 | grad_norm=9.00 | Speed=26754.1 samples/s (14633.3K toks/s) | 115243.8 TFLOPs/s | Stage time=4.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0528, 'grad_norm': 8.0625, 'learning_rate': 2.7e-05, 'epoch': 8.6e-07}
+[Stage 25/96 L=25] step 453440 | loss_avg=0.0303(100) | First=97.38% | Full=95.75% | lr=2.70e-05 | grad_norm=8.06 | Speed=26159.1 samples/s (14307.9K toks/s) | 112680.7 TFLOPs/s | Stage time=4.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0508, 'grad_norm': 2.578125, 'learning_rate': 2.7e-05, 'epoch': 8.8e-07}
+[Stage 25/96 L=25] step 453450 | loss_avg=0.0275(100) | First=96.75% | Full=94.50% | lr=2.70e-05 | grad_norm=2.58 | Speed=25568.2 samples/s (13984.7K toks/s) | 110135.7 TFLOPs/s | Stage time=4.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=94.50% target>=98.00%
+{'loss': 0.067, 'grad_norm': 6.09375, 'learning_rate': 2.7e-05, 'epoch': 9e-07}
+[Stage 25/96 L=25] step 453460 | loss_avg=0.0261(100) | First=97.62% | Full=95.25% | lr=2.70e-05 | grad_norm=6.09 | Speed=25032.3 samples/s (13691.6K toks/s) | 107827.2 TFLOPs/s | Stage time=4.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0588, 'grad_norm': 3.53125, 'learning_rate': 2.7e-05, 'epoch': 9.2e-07}
+[Stage 25/96 L=25] step 453470 | loss_avg=0.0247(100) | First=97.00% | Full=96.12% | lr=2.70e-05 | grad_norm=3.53 | Speed=24498.6 samples/s (13399.8K toks/s) | 105529.1 TFLOPs/s | Stage time=5.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0479, 'grad_norm': 4.59375, 'learning_rate': 2.7e-05, 'epoch': 9.4e-07}
+[CHECK] Stage 25 full=96.50% target>=98.00%
+[Stage 25/96 L=25] step 453480 | loss_avg=0.0226(100) | First=97.62% | Full=96.00% | lr=2.70e-05 | grad_norm=4.59 | Speed=24000.1 samples/s (13127.1K toks/s) | 103381.7 TFLOPs/s | Stage time=5.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0548, 'grad_norm': 8.125, 'learning_rate': 2.7e-05, 'epoch': 9.6e-07}
+[Stage 25/96 L=25] step 453490 | loss_avg=0.0235(100) | First=95.12% | Full=93.75% | lr=2.70e-05 | grad_norm=8.12 | Speed=23514.7 samples/s (12861.7K toks/s) | 101291.0 TFLOPs/s | Stage time=5.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0626, 'grad_norm': 2.140625, 'learning_rate': 2.7e-05, 'epoch': 9.8e-07}
+[Stage 25/96 L=25] step 453500 | loss_avg=0.0233(100) | First=97.50% | Full=96.38% | lr=2.70e-05 | grad_norm=2.14 | Speed=23055.2 samples/s (12610.4K toks/s) | 99312.2 TFLOPs/s | Stage time=5.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=96.38% target>=98.00%
+{'loss': 0.0465, 'grad_norm': 61.25, 'learning_rate': 2.7e-05, 'epoch': 1e-06}
+[Stage 25/96 L=25] step 453510 | loss_avg=0.0222(100) | First=96.38% | Full=94.75% | lr=2.70e-05 | grad_norm=61.25 | Speed=21648.2 samples/s (11840.8K toks/s) | 93251.5 TFLOPs/s | Stage time=5.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0552, 'grad_norm': 2.84375, 'learning_rate': 2.7e-05, 'epoch': 1.02e-06}
+[Stage 25/96 L=25] step 453520 | loss_avg=0.0230(100) | First=97.62% | Full=95.12% | lr=2.70e-05 | grad_norm=2.84 | Speed=21251.4 samples/s (11623.8K toks/s) | 91542.6 TFLOPs/s | Stage time=5.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.057, 'grad_norm': 5.46875, 'learning_rate': 2.7e-05, 'epoch': 1.04e-06}
+[CHECK] Stage 25 full=96.00% target>=98.00%
+[Stage 25/96 L=25] step 453530 | loss_avg=0.0237(100) | First=97.88% | Full=96.50% | lr=2.70e-05 | grad_norm=5.47 | Speed=20869.8 samples/s (11415.1K toks/s) | 89898.9 TFLOPs/s | Stage time=5.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0575, 'grad_norm': 3.265625, 'learning_rate': 2.7e-05, 'epoch': 1.06e-06}
+[Stage 25/96 L=25] step 453540 | loss_avg=0.0258(100) | First=97.12% | Full=95.25% | lr=2.70e-05 | grad_norm=3.27 | Speed=20496.8 samples/s (11211.1K toks/s) | 88292.1 TFLOPs/s | Stage time=6.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0658, 'grad_norm': 7.125, 'learning_rate': 2.7e-05, 'epoch': 1.08e-06}
+[Stage 25/96 L=25] step 453550 | loss_avg=0.0278(100) | First=97.50% | Full=95.50% | lr=2.70e-05 | grad_norm=7.12 | Speed=20145.7 samples/s (11019.1K toks/s) | 86779.9 TFLOPs/s | Stage time=6.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=95.50% target>=98.00%
+{'loss': 0.0659, 'grad_norm': 26.25, 'learning_rate': 2.7e-05, 'epoch': 1.1e-06}
+[Stage 25/96 L=25] step 453560 | loss_avg=0.0315(100) | First=97.62% | Full=95.38% | lr=2.70e-05 | grad_norm=26.25 | Speed=19792.1 samples/s (10825.6K toks/s) | 85256.5 TFLOPs/s | Stage time=6.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0634, 'grad_norm': 13.0625, 'learning_rate': 2.7e-05, 'epoch': 1.12e-06}
+[Stage 25/96 L=25] step 453570 | loss_avg=0.0322(100) | First=96.88% | Full=95.38% | lr=2.70e-05 | grad_norm=13.06 | Speed=19466.5 samples/s (10647.6K toks/s) | 83854.0 TFLOPs/s | Stage time=6.3m | seqs/step=48.0 | toks/step=26255 | eff=100.0%
+{'loss': 0.0549, 'grad_norm': 24.875, 'learning_rate': 2.7e-05, 'epoch': 1.14e-06}
+[CHECK] Stage 25 full=95.75% target>=98.00%
+[Stage 25/96 L=25] step 453580 | loss_avg=0.0329(100) | First=97.25% | Full=95.62% | lr=2.70e-05 | grad_norm=24.88 | Speed=19145.6 samples/s (10472.1K toks/s) | 82471.8 TFLOPs/s | Stage time=6.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.053, 'grad_norm': 9.625, 'learning_rate': 2.7e-05, 'epoch': 1.16e-06}
+[Stage 25/96 L=25] step 453590 | loss_avg=0.0292(100) | First=97.12% | Full=95.75% | lr=2.70e-05 | grad_norm=9.62 | Speed=18835.2 samples/s (10302.3K toks/s) | 81134.7 TFLOPs/s | Stage time=6.5m | seqs/step=48.0 | toks/step=26255 | eff=100.0%
+{'loss': 0.0552, 'grad_norm': 4.46875, 'learning_rate': 2.7e-05, 'epoch': 1.18e-06}
+[Stage 25/96 L=25] step 453600 | loss_avg=0.0263(100) | First=97.75% | Full=96.00% | lr=2.70e-05 | grad_norm=4.47 | Speed=18543.8 samples/s (10142.8K toks/s) | 79879.2 TFLOPs/s | Stage time=6.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=96.00% target>=98.00%
+{'loss': 0.0482, 'grad_norm': 13.0625, 'learning_rate': 2.7e-05, 'epoch': 1.2e-06}
+[Stage 25/96 L=25] step 453610 | loss_avg=0.0239(100) | First=98.88% | Full=96.62% | lr=2.70e-05 | grad_norm=13.06 | Speed=18253.7 samples/s (9984.2K toks/s) | 78629.6 TFLOPs/s | Stage time=6.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0424, 'grad_norm': 232.0, 'learning_rate': 2.7e-05, 'epoch': 1.22e-06}
+[Stage 25/96 L=25] step 453620 | loss_avg=0.0218(100) | First=97.62% | Full=95.50% | lr=2.70e-05 | grad_norm=232.00 | Speed=17970.9 samples/s (9829.5K toks/s) | 77411.1 TFLOPs/s | Stage time=6.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0633, 'grad_norm': 6.59375, 'learning_rate': 2.7e-05, 'epoch': 1.24e-06}
+[CHECK] Stage 25 full=95.88% target>=98.00%
+[Stage 25/96 L=25] step 453630 | loss_avg=0.0218(100) | First=96.25% | Full=95.12% | lr=2.70e-05 | grad_norm=6.59 | Speed=17698.5 samples/s (9680.5K toks/s) | 76238.2 TFLOPs/s | Stage time=7.0m | seqs/step=48.0 | toks/step=26255 | eff=100.0%
+{'loss': 0.0524, 'grad_norm': 4.375, 'learning_rate': 2.7e-05, 'epoch': 1.26e-06}
+[Stage 25/96 L=25] step 453640 | loss_avg=0.0236(100) | First=97.38% | Full=95.62% | lr=2.70e-05 | grad_norm=4.38 | Speed=17434.1 samples/s (9535.9K toks/s) | 75099.4 TFLOPs/s | Stage time=7.1m | seqs/step=48.0 | toks/step=26255 | eff=100.0%
+{'loss': 0.0515, 'grad_norm': 5.75, 'learning_rate': 2.7e-05, 'epoch': 1.28e-06}
+[Stage 25/96 L=25] step 453650 | loss_avg=0.0251(100) | First=97.62% | Full=96.12% | lr=2.70e-05 | grad_norm=5.75 | Speed=17183.7 samples/s (9399.0K toks/s) | 74020.8 TFLOPs/s | Stage time=7.2m | seqs/step=48.0 | toks/step=26255 | eff=100.0%
+[CHECK] Stage 25 full=96.13% target>=98.00%
+{'loss': 0.0543, 'grad_norm': 15.5625, 'learning_rate': 2.7e-05, 'epoch': 1.3e-06}
+[Stage 25/96 L=25] step 453660 | loss_avg=0.0264(100) | First=98.00% | Full=94.88% | lr=2.70e-05 | grad_norm=15.56 | Speed=16935.5 samples/s (9263.2K toks/s) | 72951.4 TFLOPs/s | Stage time=7.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0607, 'grad_norm': 7.3125, 'learning_rate': 2.7e-05, 'epoch': 1.32e-06}
+[Stage 25/96 L=25] step 453670 | loss_avg=0.0266(100) | First=97.38% | Full=95.62% | lr=2.70e-05 | grad_norm=7.31 | Speed=16692.3 samples/s (9130.2K toks/s) | 71903.9 TFLOPs/s | Stage time=7.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0571, 'grad_norm': 7.625, 'learning_rate': 2.7e-05, 'epoch': 1.34e-06}
+[CHECK] Stage 25 full=95.00% target>=98.00%
+[Stage 25/96 L=25] step 453680 | loss_avg=0.0265(100) | First=96.88% | Full=95.62% | lr=2.70e-05 | grad_norm=7.62 | Speed=16462.1 samples/s (9004.2K toks/s) | 70912.1 TFLOPs/s | Stage time=7.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0533, 'grad_norm': 17.125, 'learning_rate': 2.7e-05, 'epoch': 1.36e-06}
+[Stage 25/96 L=25] step 453690 | loss_avg=0.0253(100) | First=97.25% | Full=96.12% | lr=2.70e-05 | grad_norm=17.12 | Speed=16236.1 samples/s (8880.6K toks/s) | 69938.6 TFLOPs/s | Stage time=7.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.049, 'grad_norm': 4.875, 'learning_rate': 2.7e-05, 'epoch': 1.38e-06}
+[Stage 25/96 L=25] step 453700 | loss_avg=0.0243(100) | First=96.62% | Full=94.88% | lr=2.70e-05 | grad_norm=4.88 | Speed=16014.6 samples/s (8759.5K toks/s) | 68984.4 TFLOPs/s | Stage time=7.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=94.88% target>=98.00%
+{'loss': 0.0571, 'grad_norm': 29.125, 'learning_rate': 2.7e-05, 'epoch': 1.4e-06}
+[Stage 25/96 L=25] step 453710 | loss_avg=0.0239(100) | First=97.50% | Full=96.62% | lr=2.70e-05 | grad_norm=29.12 | Speed=15804.3 samples/s (8644.4K toks/s) | 68078.4 TFLOPs/s | Stage time=7.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0473, 'grad_norm': 8.75, 'learning_rate': 2.7e-05, 'epoch': 1.42e-06}
+[Stage 25/96 L=25] step 453720 | loss_avg=0.0228(100) | First=98.38% | Full=97.12% | lr=2.70e-05 | grad_norm=8.75 | Speed=15590.3 samples/s (8527.4K toks/s) | 67156.5 TFLOPs/s | Stage time=7.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0495, 'grad_norm': 4.875, 'learning_rate': 2.7e-05, 'epoch': 1.44e-06}
+[CHECK] Stage 25 full=97.25% target>=98.00%
+[Stage 25/96 L=25] step 453730 | loss_avg=0.0210(100) | First=97.62% | Full=96.00% | lr=2.70e-05 | grad_norm=4.88 | Speed=15390.6 samples/s (8418.2K toks/s) | 66296.5 TFLOPs/s | Stage time=8.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0443, 'grad_norm': 20.25, 'learning_rate': 2.7e-05, 'epoch': 1.46e-06}
+[Stage 25/96 L=25] step 453740 | loss_avg=0.0235(100) | First=97.12% | Full=95.62% | lr=2.70e-05 | grad_norm=20.25 | Speed=15193.9 samples/s (8310.6K toks/s) | 65449.3 TFLOPs/s | Stage time=8.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0543, 'grad_norm': 29.75, 'learning_rate': 2.7e-05, 'epoch': 1.48e-06}
+[Stage 25/96 L=25] step 453750 | loss_avg=0.0266(100) | First=98.00% | Full=95.25% | lr=2.70e-05 | grad_norm=29.75 | Speed=14999.1 samples/s (8204.0K toks/s) | 64610.3 TFLOPs/s | Stage time=8.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=95.25% target>=98.00%
+{'loss': 0.0627, 'grad_norm': 29.125, 'learning_rate': 2.7e-05, 'epoch': 1.5e-06}
+[Stage 25/96 L=25] step 453760 | loss_avg=0.0292(100) | First=96.38% | Full=94.12% | lr=2.70e-05 | grad_norm=29.12 | Speed=14815.6 samples/s (8103.6K toks/s) | 63819.5 TFLOPs/s | Stage time=8.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0661, 'grad_norm': 31.25, 'learning_rate': 2.7e-05, 'epoch': 1.52e-06}
+[Stage 25/96 L=25] step 453770 | loss_avg=0.0309(100) | First=97.25% | Full=95.75% | lr=2.70e-05 | grad_norm=31.25 | Speed=14631.0 samples/s (8002.6K toks/s) | 63024.1 TFLOPs/s | Stage time=8.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0704, 'grad_norm': 13.0625, 'learning_rate': 2.7e-05, 'epoch': 1.54e-06}
+[CHECK] Stage 25 full=95.50% target>=98.00%
+[Stage 25/96 L=25] step 453780 | loss_avg=0.0339(100) | First=97.62% | Full=96.00% | lr=2.70e-05 | grad_norm=13.06 | Speed=14451.7 samples/s (7904.5K toks/s) | 62251.3 TFLOPs/s | Stage time=8.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0591, 'grad_norm': 6.5, 'learning_rate': 2.7e-05, 'epoch': 1.56e-06}
+[Stage 25/96 L=25] step 453790 | loss_avg=0.0316(100) | First=97.50% | Full=96.00% | lr=2.70e-05 | grad_norm=6.50 | Speed=14281.6 samples/s (7811.5K toks/s) | 61518.5 TFLOPs/s | Stage time=8.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0497, 'grad_norm': 7.875, 'learning_rate': 2.7e-05, 'epoch': 1.58e-06}
+[Stage 25/96 L=25] step 453800 | loss_avg=0.0278(100) | First=97.50% | Full=95.38% | lr=2.70e-05 | grad_norm=7.88 | Speed=14110.3 samples/s (7717.8K toks/s) | 60780.6 TFLOPs/s | Stage time=8.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=95.38% target>=98.00%
+{'loss': 0.0557, 'grad_norm': 18.25, 'learning_rate': 2.7e-05, 'epoch': 1.6e-06}
+[Stage 25/96 L=25] step 453810 | loss_avg=0.0264(100) | First=97.88% | Full=95.88% | lr=2.70e-05 | grad_norm=18.25 | Speed=13943.4 samples/s (7626.5K toks/s) | 60062.0 TFLOPs/s | Stage time=8.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0535, 'grad_norm': 9.875, 'learning_rate': 2.7e-05, 'epoch': 1.62e-06}
+[Stage 25/96 L=25] step 453820 | loss_avg=0.0277(100) | First=97.12% | Full=95.50% | lr=2.70e-05 | grad_norm=9.88 | Speed=13783.4 samples/s (7539.0K toks/s) | 59372.5 TFLOPs/s | Stage time=9.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0599, 'grad_norm': 28.125, 'learning_rate': 2.7e-05, 'epoch': 1.64e-06}
+[CHECK] Stage 25 full=96.25% target>=98.00%
+[Stage 25/96 L=25] step 453830 | loss_avg=0.0269(100) | First=97.75% | Full=95.88% | lr=2.70e-05 | grad_norm=28.12 | Speed=13620.7 samples/s (7450.0K toks/s) | 58672.0 TFLOPs/s | Stage time=9.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0577, 'grad_norm': 6.6875, 'learning_rate': 2.7e-05, 'epoch': 1.66e-06}
+[Stage 25/96 L=25] step 453840 | loss_avg=0.0311(100) | First=97.50% | Full=95.88% | lr=2.70e-05 | grad_norm=6.69 | Speed=13469.6 samples/s (7367.4K toks/s) | 58021.1 TFLOPs/s | Stage time=9.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0581, 'grad_norm': 24.0, 'learning_rate': 2.7e-05, 'epoch': 1.68e-06}
+[Stage 25/96 L=25] step 453850 | loss_avg=0.0319(100) | First=97.25% | Full=94.88% | lr=2.70e-05 | grad_norm=24.00 | Speed=13319.8 samples/s (7285.4K toks/s) | 57375.6 TFLOPs/s | Stage time=9.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=94.88% target>=98.00%
+{'loss': 0.0643, 'grad_norm': 9.0625, 'learning_rate': 2.7e-05, 'epoch': 1.7e-06}
+[Stage 25/96 L=25] step 453860 | loss_avg=0.0312(100) | First=97.88% | Full=96.25% | lr=2.70e-05 | grad_norm=9.06 | Speed=13169.5 samples/s (7203.2K toks/s) | 56728.2 TFLOPs/s | Stage time=9.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0556, 'grad_norm': 13.875, 'learning_rate': 2.7e-05, 'epoch': 1.72e-06}
+[Stage 25/96 L=25] step 453870 | loss_avg=0.0296(100) | First=98.12% | Full=96.38% | lr=2.70e-05 | grad_norm=13.88 | Speed=13027.7 samples/s (7125.6K toks/s) | 56117.1 TFLOPs/s | Stage time=9.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0518, 'grad_norm': 5.03125, 'learning_rate': 2.7e-05, 'epoch': 1.74e-06}
+[CHECK] Stage 25 full=94.88% target>=98.00%
+[Stage 25/96 L=25] step 453880 | loss_avg=0.0294(100) | First=98.12% | Full=95.75% | lr=2.70e-05 | grad_norm=5.03 | Speed=12884.9 samples/s (7047.5K toks/s) | 55501.9 TFLOPs/s | Stage time=9.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0568, 'grad_norm': 6.03125, 'learning_rate': 2.7e-05, 'epoch': 1.76e-06}
+[Stage 25/96 L=25] step 453890 | loss_avg=0.0266(100) | First=96.88% | Full=94.75% | lr=2.70e-05 | grad_norm=6.03 | Speed=12748.2 samples/s (6972.7K toks/s) | 54912.9 TFLOPs/s | Stage time=9.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.061, 'grad_norm': 108.5, 'learning_rate': 2.7e-05, 'epoch': 1.78e-06}
+[Stage 25/96 L=25] step 453900 | loss_avg=0.0274(100) | First=96.12% | Full=94.38% | lr=2.70e-05 | grad_norm=108.50 | Speed=12613.6 samples/s (6899.0K toks/s) | 54332.9 TFLOPs/s | Stage time=9.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=94.38% target>=98.00%
+{'loss': 0.0627, 'grad_norm': 13.5, 'learning_rate': 2.7e-05, 'epoch': 1.8e-06}
+[Stage 25/96 L=25] step 453910 | loss_avg=0.0276(100) | First=97.38% | Full=96.00% | lr=2.70e-05 | grad_norm=13.50 | Speed=12480.6 samples/s (6826.3K toks/s) | 53759.8 TFLOPs/s | Stage time=10.0m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0567, 'grad_norm': 6.03125, 'learning_rate': 2.7e-05, 'epoch': 1.82e-06}
+[Stage 25/96 L=25] step 453920 | loss_avg=0.0261(100) | First=97.25% | Full=95.75% | lr=2.70e-05 | grad_norm=6.03 | Speed=12353.3 samples/s (6756.6K toks/s) | 53211.5 TFLOPs/s | Stage time=10.1m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0497, 'grad_norm': 19.625, 'learning_rate': 2.7e-05, 'epoch': 1.84e-06}
+[CHECK] Stage 25 full=95.63% target>=98.00%
+[Stage 25/96 L=25] step 453930 | loss_avg=0.0252(100) | First=97.62% | Full=96.62% | lr=2.70e-05 | grad_norm=19.62 | Speed=12227.7 samples/s (6688.0K toks/s) | 52670.5 TFLOPs/s | Stage time=10.2m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0515, 'grad_norm': 1.203125, 'learning_rate': 2.7e-05, 'epoch': 1.86e-06}
+[Stage 25/96 L=25] step 453940 | loss_avg=0.0247(100) | First=97.25% | Full=95.25% | lr=2.70e-05 | grad_norm=1.20 | Speed=12101.0 samples/s (6618.7K toks/s) | 52124.7 TFLOPs/s | Stage time=10.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.054, 'grad_norm': 16.625, 'learning_rate': 2.7e-05, 'epoch': 1.88e-06}
+[Stage 25/96 L=25] step 453950 | loss_avg=0.0231(100) | First=98.00% | Full=96.62% | lr=2.70e-05 | grad_norm=16.62 | Speed=11981.3 samples/s (6553.2K toks/s) | 51609.1 TFLOPs/s | Stage time=10.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=96.63% target>=98.00%
+{'loss': 0.0486, 'grad_norm': 19.375, 'learning_rate': 2.7e-05, 'epoch': 1.9e-06}
+[Stage 25/96 L=25] step 453960 | loss_avg=0.0222(100) | First=96.88% | Full=94.38% | lr=2.70e-05 | grad_norm=19.38 | Speed=11861.5 samples/s (6487.7K toks/s) | 51093.3 TFLOPs/s | Stage time=10.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0596, 'grad_norm': 16.25, 'learning_rate': 2.7e-05, 'epoch': 1.92e-06}
+[Stage 25/96 L=25] step 453970 | loss_avg=0.0243(100) | First=99.12% | Full=98.12% | lr=2.70e-05 | grad_norm=16.25 | Speed=11745.9 samples/s (6424.4K toks/s) | 50595.2 TFLOPs/s | Stage time=10.6m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0565, 'grad_norm': 0.80859375, 'learning_rate': 2.7e-05, 'epoch': 1.94e-06}
+[CHECK] Stage 25 full=94.75% target>=98.00%
+[Stage 25/96 L=25] step 453980 | loss_avg=0.0281(100) | First=98.75% | Full=97.12% | lr=2.70e-05 | grad_norm=0.81 | Speed=11630.7 samples/s (6361.5K toks/s) | 50099.1 TFLOPs/s | Stage time=10.7m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0578, 'grad_norm': 6.125, 'learning_rate': 2.7e-05, 'epoch': 1.96e-06}
+[Stage 25/96 L=25] step 453990 | loss_avg=0.0277(100) | First=97.25% | Full=95.50% | lr=2.70e-05 | grad_norm=6.12 | Speed=11518.6 samples/s (6300.1K toks/s) | 49616.3 TFLOPs/s | Stage time=10.8m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0623, 'grad_norm': 3.90625, 'learning_rate': 2.7e-05, 'epoch': 1.98e-06}
+[Stage 25/96 L=25] step 454000 | loss_avg=0.0314(100) | First=97.25% | Full=94.88% | lr=2.70e-05 | grad_norm=3.91 | Speed=11410.9 samples/s (6241.3K toks/s) | 49152.7 TFLOPs/s | Stage time=10.9m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+[CHECK] Stage 25 full=94.88% target>=98.00%
+{'loss': 0.0586, 'grad_norm': 6.0625, 'learning_rate': 2.7e-05, 'epoch': 2e-06}
+[Stage 25/96 L=25] step 454010 | loss_avg=0.0318(100) | First=97.75% | Full=96.75% | lr=2.70e-05 | grad_norm=6.06 | Speed=11054.2 samples/s (6046.2K toks/s) | 47616.3 TFLOPs/s | Stage time=11.3m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0517, 'grad_norm': 6.21875, 'learning_rate': 2.7e-05, 'epoch': 2.02e-06}
+[Stage 25/96 L=25] step 454020 | loss_avg=0.0299(100) | First=97.25% | Full=95.62% | lr=2.70e-05 | grad_norm=6.22 | Speed=10952.3 samples/s (5990.4K toks/s) | 47177.2 TFLOPs/s | Stage time=11.4m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.0481, 'grad_norm': 9.875, 'learning_rate': 2.7e-05, 'epoch': 2.04e-06}
+[CHECK] Stage 25 full=96.13% target>=98.00%
+[Stage 25/96 L=25] step 454030 | loss_avg=0.0288(100) | First=96.75% | Full=94.75% | lr=2.70e-05 | grad_norm=9.88 | Speed=10854.6 samples/s (5937.0K toks/s) | 46756.3 TFLOPs/s | Stage time=11.5m | seqs/step=48.0 | toks/step=26254 | eff=100.0%
+{'loss': 0.059, 'grad_norm': 19.25, 'learning_rate': 2.7e-05, 'epoch': 2.06e-06}
