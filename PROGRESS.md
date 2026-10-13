@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`)
 **Branch:** `jackierwzhang/exp1-qwen06b-lora-vs-fullft`
 **VMs:** `nl-exp1-spot-fullft` (`europe-west1-c`, deleted after completion), `nl-exp1-spot-r8` (`a3-highgpu-4g`, 4x H100-80GB Spot, `us-east4-a`), `nl-exp1-spot-r64` (`a3-highgpu-4g`, 4x H100-80GB Spot, `europe-west1-c`), `nl-exp1-spot-r256` (`a3-highgpu-4g`, 4x H100-80GB Spot, `us-east4-b`)
-**Last updated:** 2026-10-13 15:19 UTC
+**Last updated:** 2026-10-13 15:35 UTC
 
 ## Shared Configuration
 
@@ -26,11 +26,11 @@
 | Arm | Job ID | Mode | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Loss | PFLOPs | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
 | Full-FT | `exp1_qwen06b_fullft` | Full FT | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-fullft, europe-west1-c) | Completed | 27570 | 16 (`L=128`) | 97.62% | 98.88% | 0.0163 | 116023.73 | 405.3 | 71.26h | 0.0h (Done) |
-| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r8, us-east4-a) | Running | 32370 | 13 (`L=104`) | 96.25% | 97.88% | 0.0201 | 97034.71 | 239.3 | 85.24h | ~43.6h (stage-wt) / ~0.0h (82k PFLOPs ref) |
-| LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r64, europe-west1-c) | Running | 23480 | 14 (`L=112`) | 96.88% | 97.88% | 0.0221 | 84175.53 | 220.8 | 78.18h | ~24.2h (stage-wt) / ~0.0h (82k PFLOPs ref) |
-| LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r256, us-east4-b) | Running | 24230 | 9 (`L=72`) | 95.75% | 97.12% | 0.0198 | 64838.95 | 160.6 | 83.62h | ~173.2h (stage-wt) / ~22.1h (82k PFLOPs ref) |
+| LoRA `R=8` | `exp1_qwen06b_lora_r8` | `--use_lora --lora_rank 8` (`alpha=16, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r8, us-east4-a) | Running | 32430 | 13 (`L=104`) | 96.50% | 97.75% | 0.0208 | 97363.99 | 239.8 | 85.52h | ~43.8h (stage-wt) / ~0.0h (82k PFLOPs ref) |
+| LoRA `R=64` | `exp1_qwen06b_lora_r64` | `--use_lora --lora_rank 64` (`alpha=128, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r64, europe-west1-c) | Running | 23540 | 14 (`L=112`) | 96.12% | 97.50% | 0.0196 | 84531.60 | 222.3 | 78.51h | ~24.3h (stage-wt) / ~0.0h (82k PFLOPs ref) |
+| LoRA `R=256` | `exp1_qwen06b_lora_r256` | `--use_lora --lora_rank 256` (`alpha=512, dropout=0.1`) | 0,1,2,3 (Spot 4x H100: nl-exp1-spot-r256, us-east4-b) | Running | 24290 | 9 (`L=72`) | 95.62% | 96.75% | 0.0219 | 65070.97 | 160.0 | 83.91h | ~173.8h (stage-wt) / ~21.8h (82k PFLOPs ref) |
 
-> **ETA Methodology & Overall Experiment 1 Completion (3 Active Arms on 12x Spot H100; Full-FT Completed):** `stage-wt` scales current wall time by remaining lookahead units ($\sum_{k=1}^{16} k = 136$); `82k PFLOPs ref` divides remaining compute against the collaborator's `Qwen3-0.6B` `step=8` cold-start reference (`82,000 PFLOPs` to `L=128`) by the arm's measured `PFLOPs/h` rate. Next arm completion is estimated in **~24.2h (stage-wt) / ~0.0h (82k PFLOPs ref)**; full 4-arm concurrent completion is bounded by the slowest arm at **~173.2h (stage-wt) to ~22.1h (82k PFLOPs ref)**.
+> **ETA Methodology & Overall Experiment 1 Completion (3 Active Arms on 12x Spot H100; Full-FT Completed):** `stage-wt` scales current wall time by remaining lookahead units ($\sum_{k=1}^{16} k = 136$); `82k PFLOPs ref` divides remaining compute against the collaborator's `Qwen3-0.6B` `step=8` cold-start reference (`82,000 PFLOPs` to `L=128`) by the arm's measured `PFLOPs/h` rate. Next arm completion is estimated in **~24.3h (stage-wt) / ~0.0h (82k PFLOPs ref)**; full 4-arm concurrent completion is bounded by the slowest arm at **~173.8h (stage-wt) to ~21.8h (82k PFLOPs ref)**.
 
 ## Stage Evaluation Summary (`stage_eval_history.json`)
 
