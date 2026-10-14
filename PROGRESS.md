@@ -3,7 +3,7 @@
 **Base commit:** `da7b19c` (`main`, plus `--revision` support in `nl/tuning_nl.py`)
 **Branch:** `jackierwzhang/exp2-pythia14b-revisions`
 **VM Instances:** `nl-exp2-spot-step1000`, `nl-exp2-spot-step10000`, `nl-exp2-spot-step100000` (3x `a3-highgpu-4g` Spot, 4x H100-80GB each)
-**Last updated:** 2026-10-14 17:03 UTC
+**Last updated:** 2026-10-14 17:19 UTC
 
 ## Shared Configuration
 
@@ -26,8 +26,8 @@
 
 | Arm | Revision | Pretraining Tokens | Job ID | GPUs | Status | Step | Stage / $L$ | Rolling Full Acc | Rolling First Acc | Recent Loss | PFLOPs / 500k | TFLOP/s | Wall Time | Est. Remaining |
 | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
-| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | Spot 4x H100 (us-east4-a) | Running | 614240 | 27/96 (`L=27`) | 96.50% | 97.50% | 0.0273 | 442,143.9 | 1237.9 | 109.72h | ~280.9h (stg rate, 28.1% L) / 12.0h (500k cap @ 4,803 PF/h) |
-| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 573410 | 28/96 (`L=28`) | 95.38% | 97.25% | 0.0246 | 458,680.8 | 1244.8 | 111.36h | ~271.1h (stg rate, 29.2% L) / 8.6h (500k cap @ 4,831 PF/h) |
+| `step1000` | `step1000` | ~2.1B | `exp2_pythia14b_step1000` | Spot 4x H100 (us-east4-a) | Running | 615540 | 27/96 (`L=27`) | 96.00% | 96.88% | 0.0261 | 443,403.9 | 1237.5 | 109.98h | ~281.6h (stg rate, 28.1% L) / 11.8h (500k cap @ 4,800 PF/h) |
+| `step10000` | `step10000` | ~21.0B | `exp2_pythia14b_step10000` | Spot 4x H100 (us-east4-a) | Running | 574690 | 28/96 (`L=28`) | 96.12% | 97.50% | 0.0260 | 459,948.9 | 1244.5 | 111.63h | ~271.6h (stg rate, 29.2% L) / 8.3h (500k cap @ 4,828 PF/h) |
 | `step100000` | `step100000` | ~209.7B | `exp2_pythia14b_step100000` | Spot 4x H100 (us-east4-b) | Completed | 347000 | 58/96 (`L=58`) | 94.88% | 96.88% | 0.0260 | 500,114.3 | 1290.1 | 101.85h | 0.0h (Done) |
 
 ## Stage Evaluation Summary (`stage_eval_history.json`, every 8 stages)
