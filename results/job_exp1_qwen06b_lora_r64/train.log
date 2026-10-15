@@ -9281,3 +9281,44 @@ Warning: The following arguments do not match the ones in the `trainer_state.jso
 [Stage 16/16 L=128] step 31170 | loss_avg=0.0259(100) | First=97.50% | Full=96.75% | lr=5.00e-05 | grad_norm=7.30 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=848.1m | seqs/step=192.0 | toks/step=466010 | eff=100.0%
 {'loss': 0.0863, 'grad_norm': 10.289172172546387, 'learning_rate': 5e-05, 'epoch': 8.268e-05}
 [CHECK] Stage 16 full=97.12% target>=98.00%
+[Stage 16/16 L=128] step 31180 | loss_avg=0.0255(100) | First=98.50% | Full=97.25% | lr=5.00e-05 | grad_norm=10.29 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=851.8m | seqs/step=192.0 | toks/step=466011 | eff=100.0%
+{'loss': 0.0847, 'grad_norm': 6.095509052276611, 'learning_rate': 5e-05, 'epoch': 8.272e-05}
+[Stage 16/16 L=128] step 31190 | loss_avg=0.0227(100) | First=98.25% | Full=96.88% | lr=5.00e-05 | grad_norm=6.10 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=855.6m | seqs/step=192.0 | toks/step=466015 | eff=100.0%
+{'loss': 0.0818, 'grad_norm': 5.8950700759887695, 'learning_rate': 5e-05, 'epoch': 8.276e-05}
+[Stage 16/16 L=128] step 31200 | loss_avg=0.0200(100) | First=98.75% | Full=98.00% | lr=5.00e-05 | grad_norm=5.90 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=859.3m | seqs/step=192.0 | toks/step=466008 | eff=100.0%
+[CHECK] Stage 16 full=98.00% target>=98.00%
+[COMPLETE] Stage 16 complete in 2300 steps, 859.3 minutes | 1,766,400 samples | 34.3 samples/s
+
+[STAGE-EVAL] Stage 16 complete (step 31200, L=128), evaluating at alpha=1.0...
+[EVAL-TF] Loss=0.0256 (n=500)
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Stage 16 | Step 31200 | L=128 | TF Loss=0.0256 | Greedy: First=97.60%, Full=97.40%
+[PLOT] Saved stage_eval.png (16 stages)
+[PLOT] Saved eval_acc_vs_step.png (16 evals)
+[PLOT] Saved eval_acc_vs_flops.png (16 evals)
+[STAGE-CKPT] Saving persistent checkpoint to /root/nl_output/search/job_exp1_qwen06b_lora_r64/stage_checkpoints/stage_16_step_31200_L128
+[STAGE-CKPT] Saved stage 16 checkpoint
+[PLOT] Saved loss_stage_16.png
+[PLOT] Saved loss_overall.png (3 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 1057.8 TFLOPs/s)
+[FINISHED] Curriculum complete (reached max_lookahead)
+{'loss': 0.0731, 'grad_norm': 16.9021053314209, 'learning_rate': 5e-05, 'epoch': 8.28e-05}
+{'train_runtime': 371060.902, 'train_samples_per_second': 4311.961, 'train_steps_per_second': 269.498, 'train_loss': 0.056383746950290144, 'epoch': 8.28e-05}
+
+[TRAIN] Training complete.
+
+[LOSS] Saved 31200 records
+[PLOT] Saved loss_overall.png (3 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 1057.8 TFLOPs/s)
+[PLOT] Saved stage_eval.png (16 stages)
+[PLOT] Saved eval_acc_vs_step.png (16 evals)
+[PLOT] Saved eval_acc_vs_flops.png (16 evals)
+
+[DONE] Training/evaluation complete.
+[rank0]:[W1015 13:28:57.963658255 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[Thu Oct 15 13:29:01 UTC 2026] Finished exp1_qwen06b_lora_r64 with exit code 0
