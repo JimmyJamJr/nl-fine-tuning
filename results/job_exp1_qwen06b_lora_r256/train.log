@@ -8139,3 +8139,15 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [Stage 10/16 L=80] step 32820 | loss_avg=0.0231(100) | First=98.62% | Full=96.62% | lr=5.00e-05 | grad_norm=27.64 | Speed=39.2 samples/s (61.3K toks/s) | 221.4 TFLOPs/s | Stage time=447.0m | seqs/step=192.0 | toks/step=299858 | eff=100.0%
 {'loss': 0.085, 'grad_norm': 9.94214916229248, 'learning_rate': 5e-05, 'epoch': 0.00013128}
 [CHECK] Stage 10 full=97.87% target>=98.00%
+[Stage 10/16 L=80] step 32830 | loss_avg=0.0211(100) | First=97.25% | Full=95.75% | lr=5.00e-05 | grad_norm=9.94 | Speed=39.2 samples/s (61.3K toks/s) | 221.5 TFLOPs/s | Stage time=450.3m | seqs/step=192.0 | toks/step=299857 | eff=100.0%
+{'loss': 0.0837, 'grad_norm': 22.48634910583496, 'learning_rate': 5e-05, 'epoch': 0.00013132}
+[Stage 10/16 L=80] step 32840 | loss_avg=0.0229(100) | First=98.50% | Full=96.75% | lr=5.00e-05 | grad_norm=22.49 | Speed=39.2 samples/s (61.3K toks/s) | 221.5 TFLOPs/s | Stage time=453.5m | seqs/step=192.0 | toks/step=299866 | eff=100.0%
+{'loss': 0.0964, 'grad_norm': 5.81728982925415, 'learning_rate': 5e-05, 'epoch': 0.00013136}
+[Stage 10/16 L=80] step 32850 | loss_avg=0.0225(100) | First=98.62% | Full=97.00% | lr=5.00e-05 | grad_norm=5.82 | Speed=39.2 samples/s (61.3K toks/s) | 221.5 TFLOPs/s | Stage time=456.8m | seqs/step=192.0 | toks/step=299867 | eff=100.0%
+[CHECK] Stage 10 full=97.00% target>=98.00%
+{'loss': 0.0827, 'grad_norm': 3.270408868789673, 'learning_rate': 5e-05, 'epoch': 0.0001314}
+[Stage 10/16 L=80] step 32860 | loss_avg=0.0201(100) | First=98.25% | Full=97.12% | lr=5.00e-05 | grad_norm=3.27 | Speed=39.2 samples/s (61.3K toks/s) | 221.5 TFLOPs/s | Stage time=460.0m | seqs/step=192.0 | toks/step=299863 | eff=100.0%
+{'loss': 0.0899, 'grad_norm': 3.717740535736084, 'learning_rate': 5e-05, 'epoch': 0.00013144}
+[Stage 10/16 L=80] step 32870 | loss_avg=0.0204(100) | First=97.88% | Full=97.25% | lr=5.00e-05 | grad_norm=3.72 | Speed=39.2 samples/s (61.3K toks/s) | 221.5 TFLOPs/s | Stage time=463.3m | seqs/step=192.0 | toks/step=299859 | eff=100.0%
+{'loss': 0.0999, 'grad_norm': 2.4606130123138428, 'learning_rate': 5e-05, 'epoch': 0.00013148}
+[CHECK] Stage 10 full=95.88% target>=98.00%
