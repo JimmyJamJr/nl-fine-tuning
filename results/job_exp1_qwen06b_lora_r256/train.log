@@ -7787,3 +7787,39 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [CHECK] Stage 9 full=96.63% target>=98.00%
 [Stage 9/16 L=72] step 31430 | loss_avg=0.0176(100) | First=98.12% | Full=96.75% | lr=5.00e-05 | grad_norm=7.39 | Speed=42.9 samples/s (60.8K toks/s) | 219.7 TFLOPs/s | Stage time=3639.2m | seqs/step=192.0 | toks/step=271773 | eff=100.0%
 {'loss': 0.0809, 'grad_norm': 7.098217487335205, 'learning_rate': 5e-05, 'epoch': 0.00012572}
+[Stage 9/16 L=72] step 31440 | loss_avg=0.0199(100) | First=98.75% | Full=97.38% | lr=5.00e-05 | grad_norm=7.10 | Speed=42.9 samples/s (60.8K toks/s) | 219.7 TFLOPs/s | Stage time=3642.1m | seqs/step=192.0 | toks/step=271770 | eff=100.0%
+{'loss': 0.0851, 'grad_norm': 14.033368110656738, 'learning_rate': 5e-05, 'epoch': 0.00012576}
+[Stage 9/16 L=72] step 31450 | loss_avg=0.0253(100) | First=98.88% | Full=98.00% | lr=5.00e-05 | grad_norm=14.03 | Speed=42.9 samples/s (60.8K toks/s) | 219.7 TFLOPs/s | Stage time=3645.1m | seqs/step=192.0 | toks/step=271771 | eff=100.0%
+[CHECK] Stage 9 full=98.00% target>=98.00%
+[COMPLETE] Stage 9 complete in 12225 steps, 3645.1 minutes | 9,388,800 samples | 42.9 samples/s
+
+[STAGE-EVAL] Stage 9 complete (step 31450, L=72), evaluating at alpha=1.0...
+[EVAL-TF] Loss=0.1056 (n=500)
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Also evaluating at stage alpha=0.5709 (L=72)...
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Stage 9 | Step 31450 | L=72 | TF Loss=0.1056 | Greedy: First=86.40%, Full=85.80%
+[STAGE-EVAL] Stage 9 | Step 31450 | L=72 (stage-alpha) | Greedy: First=98.80%, Full=98.40%
+[PLOT] Saved stage_eval.png (9 stages)
+[PLOT] Saved eval_acc_vs_step.png (9 evals)
+[PLOT] Saved eval_acc_vs_flops.png (9 evals)
+[STAGE-CKPT] Saving persistent checkpoint to /root/nl_output/search/job_exp1_qwen06b_lora_r256/stage_checkpoints/stage_9_step_31450_L72
+[STAGE-CKPT] Saved stage 9 checkpoint
+[PLOT] Saved loss_stage_9.png
+[PLOT] Saved loss_overall.png (1 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 953.2 TFLOPs/s)
+
+[TRAIN-TIMING] Steps=48900 | DataWait=362.8ms (8.1%) | Compute=4109.8ms | Wall=4472.5ms | Throughput=0.2 steps/s
+
+ -> Advanced to stage 10 | alpha=0.634 | L=80/128
+{'loss': 0.0869, 'grad_norm': 19.695310592651367, 'learning_rate': 5e-05, 'epoch': 0.0001258}
+[Stage 10/16 L=80] step 31460 | loss_avg=0.0269(100) | First=96.75% | Full=94.50% | lr=5.00e-05 | grad_norm=19.70 | Speed=40.6 samples/s (61.4K toks/s) | 221.8 TFLOPs/s | Stage time=3.2m | seqs/step=192.0 | toks/step=289959 | eff=100.0%
+{'loss': 0.0954, 'grad_norm': 18.93514633178711, 'learning_rate': 5e-05, 'epoch': 0.00012584}
+[Stage 10/16 L=80] step 31470 | loss_avg=0.0290(100) | First=95.62% | Full=94.00% | lr=5.00e-05 | grad_norm=18.94 | Speed=39.7 samples/s (61.5K toks/s) | 222.1 TFLOPs/s | Stage time=6.4m | seqs/step=192.0 | toks/step=297039 | eff=100.0%
+{'loss': 0.1335, 'grad_norm': 47.330078125, 'learning_rate': 5e-05, 'epoch': 0.00012588}
+[Stage 10/16 L=80] step 31480 | loss_avg=0.0307(100) | First=96.00% | Full=94.75% | lr=5.00e-05 | grad_norm=47.33 | Speed=39.6 samples/s (61.2K toks/s) | 221.4 TFLOPs/s | Stage time=9.7m | seqs/step=192.0 | toks/step=297271 | eff=100.0%
+{'loss': 0.1433, 'grad_norm': 14.428038597106934, 'learning_rate': 5e-05, 'epoch': 0.00012592}
