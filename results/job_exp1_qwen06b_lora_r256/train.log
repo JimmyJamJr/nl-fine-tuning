@@ -8333,3 +8333,21 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [CHECK] Stage 10 full=96.13% target>=98.00%
 [Stage 10/16 L=80] step 33630 | loss_avg=0.0206(100) | First=98.38% | Full=96.88% | lr=5.00e-05 | grad_norm=9.59 | Speed=39.2 samples/s (61.3K toks/s) | 221.4 TFLOPs/s | Stage time=711.4m | seqs/step=192.0 | toks/step=299858 | eff=100.0%
 {'loss': 0.0838, 'grad_norm': 29.537870407104492, 'learning_rate': 5e-05, 'epoch': 0.00013452}
+[Stage 10/16 L=80] step 33640 | loss_avg=0.0200(100) | First=98.25% | Full=96.00% | lr=5.00e-05 | grad_norm=29.54 | Speed=39.2 samples/s (61.3K toks/s) | 221.4 TFLOPs/s | Stage time=714.6m | seqs/step=192.0 | toks/step=299853 | eff=100.0%
+{'loss': 0.085, 'grad_norm': 11.046991348266602, 'learning_rate': 5e-05, 'epoch': 0.00013456}
+[Stage 10/16 L=80] step 33650 | loss_avg=0.0215(100) | First=97.62% | Full=96.00% | lr=5.00e-05 | grad_norm=11.05 | Speed=39.2 samples/s (61.3K toks/s) | 221.4 TFLOPs/s | Stage time=717.9m | seqs/step=192.0 | toks/step=299850 | eff=100.0%
+[CHECK] Stage 10 full=96.00% target>=98.00%
+{'loss': 0.0966, 'grad_norm': 19.772953033447266, 'learning_rate': 5e-05, 'epoch': 0.0001346}
+[Stage 10/16 L=80] step 33660 | loss_avg=0.0242(100) | First=98.62% | Full=97.62% | lr=5.00e-05 | grad_norm=19.77 | Speed=39.2 samples/s (61.3K toks/s) | 221.4 TFLOPs/s | Stage time=721.1m | seqs/step=192.0 | toks/step=299838 | eff=100.0%
+{'loss': 0.0908, 'grad_norm': 4.695859432220459, 'learning_rate': 5e-05, 'epoch': 0.00013464}
+[Stage 10/16 L=80] step 33670 | loss_avg=0.0254(100) | First=98.00% | Full=97.00% | lr=5.00e-05 | grad_norm=4.70 | Speed=39.2 samples/s (61.3K toks/s) | 221.4 TFLOPs/s | Stage time=724.4m | seqs/step=192.0 | toks/step=299855 | eff=100.0%
+{'loss': 0.0974, 'grad_norm': 7.638581275939941, 'learning_rate': 5e-05, 'epoch': 0.00013468}
+[CHECK] Stage 10 full=98.12% target>=98.00%
+[COMPLETE] Stage 10 complete in 2225 steps, 726.1 minutes | 1,708,800 samples | 39.2 samples/s
+
+[STAGE-EVAL] Stage 10 complete (step 33675, L=80), evaluating at alpha=1.0...
+[EVAL-TF] Loss=0.1143 (n=500)
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Also evaluating at stage alpha=0.6339 (L=80)...
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
