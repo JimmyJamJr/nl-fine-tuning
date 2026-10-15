@@ -9112,3 +9112,13 @@ Warning: The following arguments do not match the ones in the `trainer_state.jso
 {'loss': 0.0843, 'grad_norm': 8.010356903076172, 'learning_rate': 5e-05, 'epoch': 7.984e-05}
 [Stage 16/16 L=128] step 30470 | loss_avg=0.0214(100) | First=98.00% | Full=96.50% | lr=5.00e-05 | grad_norm=8.01 | Speed=34.3 samples/s (83.2K toks/s) | 240.2 TFLOPs/s | Stage time=586.4m | seqs/step=192.0 | toks/step=466071 | eff=100.0%
 {'loss': 0.0727, 'grad_norm': 7.986543655395508, 'learning_rate': 5e-05, 'epoch': 7.988e-05}
+[CHECK] Stage 16 full=97.25% target>=98.00%
+[Stage 16/16 L=128] step 30480 | loss_avg=0.0224(100) | First=98.12% | Full=96.88% | lr=5.00e-05 | grad_norm=7.99 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=590.2m | seqs/step=192.0 | toks/step=466067 | eff=100.0%
+{'loss': 0.0748, 'grad_norm': 12.471940994262695, 'learning_rate': 5e-05, 'epoch': 7.992e-05}
+[Stage 16/16 L=128] step 30490 | loss_avg=0.0254(100) | First=98.75% | Full=97.50% | lr=5.00e-05 | grad_norm=12.47 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=593.9m | seqs/step=192.0 | toks/step=466079 | eff=100.0%
+{'loss': 0.0851, 'grad_norm': 15.29167652130127, 'learning_rate': 5e-05, 'epoch': 7.996e-05}
+[Stage 16/16 L=128] step 30500 | loss_avg=0.0255(100) | First=97.88% | Full=96.38% | lr=5.00e-05 | grad_norm=15.29 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=597.7m | seqs/step=192.0 | toks/step=466081 | eff=100.0%
+[CHECK] Stage 16 full=96.38% target>=98.00%
+{'loss': 0.0779, 'grad_norm': 8.344529151916504, 'learning_rate': 5e-05, 'epoch': 8e-05}
+[Stage 16/16 L=128] step 30510 | loss_avg=0.0201(100) | First=97.75% | Full=97.00% | lr=5.00e-05 | grad_norm=8.34 | Speed=34.3 samples/s (83.2K toks/s) | 240.1 TFLOPs/s | Stage time=601.4m | seqs/step=192.0 | toks/step=466086 | eff=100.0%
+{'loss': 0.0741, 'grad_norm': 11.387431144714355, 'learning_rate': 5e-05, 'epoch': 8.004e-05}
