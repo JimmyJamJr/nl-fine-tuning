@@ -9196,3 +9196,15 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [Stage 11/16 L=88] step 37150 | loss_avg=0.0185(100) | First=98.00% | Full=97.00% | lr=5.00e-05 | grad_norm=4.49 | Speed=35.7 samples/s (61.0K toks/s) | 220.6 TFLOPs/s | Stage time=1247.1m | seqs/step=192.0 | toks/step=328488 | eff=100.0%
 [CHECK] Stage 11 full=97.00% target>=98.00%
 {'loss': 0.1048, 'grad_norm': 13.51060676574707, 'learning_rate': 5e-05, 'epoch': 0.0001486}
+[Stage 11/16 L=88] step 37160 | loss_avg=0.0166(100) | First=96.25% | Full=94.88% | lr=5.00e-05 | grad_norm=13.51 | Speed=35.7 samples/s (61.0K toks/s) | 220.6 TFLOPs/s | Stage time=1250.7m | seqs/step=192.0 | toks/step=328490 | eff=100.0%
+{'loss': 0.1082, 'grad_norm': 67.9459228515625, 'learning_rate': 5e-05, 'epoch': 0.00014864}
+[Stage 11/16 L=88] step 37170 | loss_avg=0.0170(100) | First=98.12% | Full=96.25% | lr=5.00e-05 | grad_norm=67.95 | Speed=35.7 samples/s (61.0K toks/s) | 220.6 TFLOPs/s | Stage time=1254.2m | seqs/step=192.0 | toks/step=328486 | eff=100.0%
+{'loss': 0.1052, 'grad_norm': 22.907123565673828, 'learning_rate': 5e-05, 'epoch': 0.00014868}
+[CHECK] Stage 11 full=97.62% target>=98.00%
+[Stage 11/16 L=88] step 37180 | loss_avg=0.0183(100) | First=98.75% | Full=97.25% | lr=5.00e-05 | grad_norm=22.91 | Speed=35.7 samples/s (61.0K toks/s) | 220.6 TFLOPs/s | Stage time=1257.8m | seqs/step=192.0 | toks/step=328491 | eff=100.0%
+{'loss': 0.0824, 'grad_norm': 14.275638580322266, 'learning_rate': 5e-05, 'epoch': 0.00014872}
+[Stage 11/16 L=88] step 37190 | loss_avg=0.0200(100) | First=98.50% | Full=96.12% | lr=5.00e-05 | grad_norm=14.28 | Speed=35.7 samples/s (61.0K toks/s) | 220.6 TFLOPs/s | Stage time=1261.4m | seqs/step=192.0 | toks/step=328499 | eff=100.0%
+{'loss': 0.0832, 'grad_norm': 12.024039268493652, 'learning_rate': 5e-05, 'epoch': 0.00014876}
+[Stage 11/16 L=88] step 37200 | loss_avg=0.0197(100) | First=98.12% | Full=97.12% | lr=5.00e-05 | grad_norm=12.02 | Speed=35.7 samples/s (61.0K toks/s) | 220.6 TFLOPs/s | Stage time=1265.0m | seqs/step=192.0 | toks/step=328490 | eff=100.0%
+[CHECK] Stage 11 full=97.12% target>=98.00%
+{'loss': 0.0857, 'grad_norm': 12.971051216125488, 'learning_rate': 5e-05, 'epoch': 0.0001488}
