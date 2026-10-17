@@ -11414,3 +11414,13 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [CKPT-GATE] recomputing every 1 layer(s) at 125,282 tokens/micro-batch (every_n=1, relax_max=0)
 [Stage 17/32 L=136] step 43130 | loss_avg=0.0171(100) | First=98.25% | Full=96.75% | lr=0.00e+00 | grad_norm=0.00 | Speed=34.3 samples/s (88.7K toks/s) | 237.2 TFLOPs/s | Stage time=1.9m | seqs/step=192.0 | toks/step=497144 | eff=100.0%
 {'loss': 0.0756, 'grad_norm': 2.7447874546051025, 'learning_rate': 5e-05, 'epoch': 2e-08}
+[Stage 17/32 L=136] step 43140 | loss_avg=0.0185(100) | First=98.12% | Full=97.00% | lr=5.00e-05 | grad_norm=2.74 | Speed=34.4 samples/s (88.9K toks/s) | 237.8 TFLOPs/s | Stage time=5.6m | seqs/step=192.0 | toks/step=495603 | eff=100.0%
+{'loss': 0.0862, 'grad_norm': 21.479312896728516, 'learning_rate': 5e-05, 'epoch': 6e-08}
+[Stage 17/32 L=136] step 43150 | loss_avg=0.0208(100) | First=96.50% | Full=95.12% | lr=5.00e-05 | grad_norm=21.48 | Speed=34.4 samples/s (89.1K toks/s) | 238.3 TFLOPs/s | Stage time=9.3m | seqs/step=192.0 | toks/step=496500 | eff=100.0%
+{'loss': 0.0902, 'grad_norm': 22.959186553955078, 'learning_rate': 5e-05, 'epoch': 1e-07}
+[Stage 17/32 L=136] step 43160 | loss_avg=0.0210(100) | First=97.25% | Full=95.00% | lr=5.00e-05 | grad_norm=22.96 | Speed=34.5 samples/s (89.5K toks/s) | 239.5 TFLOPs/s | Stage time=13.0m | seqs/step=192.0 | toks/step=498098 | eff=100.0%
+{'loss': 0.0803, 'grad_norm': 10.385128021240234, 'learning_rate': 5e-05, 'epoch': 1.4e-07}
+[Stage 17/32 L=136] step 43170 | loss_avg=0.0189(100) | First=98.25% | Full=97.25% | lr=5.00e-05 | grad_norm=10.39 | Speed=34.5 samples/s (89.5K toks/s) | 239.5 TFLOPs/s | Stage time=16.7m | seqs/step=192.0 | toks/step=498530 | eff=100.0%
+{'loss': 0.0782, 'grad_norm': 4.276309013366699, 'learning_rate': 5e-05, 'epoch': 1.8e-07}
+[Stage 17/32 L=136] step 43180 | loss_avg=0.0207(100) | First=98.38% | Full=96.75% | lr=5.00e-05 | grad_norm=4.28 | Speed=34.4 samples/s (89.4K toks/s) | 239.1 TFLOPs/s | Stage time=20.4m | seqs/step=192.0 | toks/step=498279 | eff=100.0%
+{'loss': 0.0894, 'grad_norm': 6.060725212097168, 'learning_rate': 5e-05, 'epoch': 2.2e-07}
