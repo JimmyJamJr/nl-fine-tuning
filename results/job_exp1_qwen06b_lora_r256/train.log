@@ -10382,3 +10382,68 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 {'loss': 0.1069, 'grad_norm': 2.5697901248931885, 'learning_rate': 5e-05, 'epoch': 0.00016744}
 [Stage 14/16 L=112] step 41870 | loss_avg=0.0224(100) | First=96.38% | Full=94.25% | lr=5.00e-05 | grad_norm=2.57 | Speed=28.1 samples/s (60.6K toks/s) | 219.1 TFLOPs/s | Stage time=567.2m | seqs/step=192.0 | toks/step=414343 | eff=100.0%
 {'loss': 0.1177, 'grad_norm': 26.49617576599121, 'learning_rate': 5e-05, 'epoch': 0.00016748}
+[CHECK] Stage 14 full=94.63% target>=98.00%
+[Stage 14/16 L=112] step 41880 | loss_avg=0.0235(100) | First=98.12% | Full=95.62% | lr=5.00e-05 | grad_norm=26.50 | Speed=28.1 samples/s (60.6K toks/s) | 219.1 TFLOPs/s | Stage time=571.7m | seqs/step=192.0 | toks/step=414334 | eff=100.0%
+{'loss': 0.1075, 'grad_norm': 17.488210678100586, 'learning_rate': 5e-05, 'epoch': 0.00016752}
+[Stage 14/16 L=112] step 41890 | loss_avg=0.0230(100) | First=95.38% | Full=94.12% | lr=5.00e-05 | grad_norm=17.49 | Speed=28.1 samples/s (60.6K toks/s) | 219.1 TFLOPs/s | Stage time=576.3m | seqs/step=192.0 | toks/step=414273 | eff=100.0%
+{'loss': 0.1113, 'grad_norm': 5.210553169250488, 'learning_rate': 5e-05, 'epoch': 0.00016756}
+[Stage 14/16 L=112] step 41900 | loss_avg=0.0240(100) | First=97.88% | Full=95.25% | lr=5.00e-05 | grad_norm=5.21 | Speed=28.1 samples/s (60.6K toks/s) | 219.1 TFLOPs/s | Stage time=580.8m | seqs/step=192.0 | toks/step=414268 | eff=100.0%
+[CHECK] Stage 14 full=95.25% target>=98.00%
+{'loss': 0.1195, 'grad_norm': 9.441811561584473, 'learning_rate': 5e-05, 'epoch': 0.0001676}
+[Stage 14/16 L=112] step 41910 | loss_avg=0.0239(100) | First=97.62% | Full=96.75% | lr=5.00e-05 | grad_norm=9.44 | Speed=28.1 samples/s (60.6K toks/s) | 219.1 TFLOPs/s | Stage time=585.4m | seqs/step=192.0 | toks/step=414238 | eff=100.0%
+{'loss': 0.0995, 'grad_norm': 4.825958251953125, 'learning_rate': 5e-05, 'epoch': 0.00016764}
+[Stage 14/16 L=112] step 41920 | loss_avg=0.0233(100) | First=97.75% | Full=96.12% | lr=5.00e-05 | grad_norm=4.83 | Speed=28.1 samples/s (60.6K toks/s) | 219.1 TFLOPs/s | Stage time=590.0m | seqs/step=192.0 | toks/step=414214 | eff=100.0%
+{'loss': 0.1101, 'grad_norm': 9.078393936157227, 'learning_rate': 5e-05, 'epoch': 0.00016768}
+[CHECK] Stage 14 full=96.50% target>=98.00%
+[Stage 14/16 L=112] step 41930 | loss_avg=0.0206(100) | First=95.50% | Full=94.50% | lr=5.00e-05 | grad_norm=9.08 | Speed=28.1 samples/s (60.6K toks/s) | 219.0 TFLOPs/s | Stage time=594.5m | seqs/step=192.0 | toks/step=414182 | eff=100.0%
+{'loss': 0.1115, 'grad_norm': 7.410518169403076, 'learning_rate': 5e-05, 'epoch': 0.00016772}
+W1017 21:32:42.449000 24042 torch/distributed/elastic/agent/server/api.py:719] Received Signals.SIGTERM death signal, shutting down workers
+W1017 21:32:42.449000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24152 closing signal SIGTERM
+W1017 21:32:42.450000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24153 closing signal SIGTERM
+W1017 21:32:42.451000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24154 closing signal SIGTERM
+W1017 21:32:42.451000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24155 closing signal SIGTERM
+W1017 21:32:42.468000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24152 closing signal SIGTERM
+W1017 21:32:42.468000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24153 closing signal SIGTERM
+W1017 21:32:42.468000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24154 closing signal SIGTERM
+W1017 21:32:42.468000 24042 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 24155 closing signal SIGTERM
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 711, in run
+    result = self._invoke_run(role)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 870, in _invoke_run
+    time.sleep(monitor_interval)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 24042 got signal: 15
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 260, in launch_agent
+    result = agent.run()
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 720, in run
+    self._shutdown(e.sigval)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py", line 372, in _shutdown
+    self._pcontext.close(death_sig)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 572, in close
+    self._close(death_sig=death_sig, timeout=timeout)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 909, in _close
+    handler.proc.wait(time_to_wait)
+  File "/var/tmp/nl_env/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/var/tmp/nl_env/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/subprocess.py", line 1953, in _wait
+    time.sleep(delay)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 24042 got signal: 15

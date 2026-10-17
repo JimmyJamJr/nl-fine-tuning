@@ -11149,3 +11149,268 @@ Warning: The following arguments do not match the ones in the `trainer_state.jso
 [DONE] Training/evaluation complete.
 [rank0]:[W1016 00:45:28.051354026 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
 [Fri Oct 16 00:45:32 UTC 2026] Finished exp1_qwen06b_lora_r8 with exit code 0
+[Sat Oct 17 21:33:26 UTC 2026] Starting/Resuming exp1_qwen06b_lora_r8 (LoRA R=8) on nl-exp1-spot-r256 (us-east4-b)
+W1017 21:33:27.775000 2013793 torch/distributed/run.py:792] 
+W1017 21:33:27.775000 2013793 torch/distributed/run.py:792] *****************************************
+W1017 21:33:27.775000 2013793 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:33:27.775000 2013793 torch/distributed/run.py:792] *****************************************
+[Sat Oct 17 21:33:29 UTC 2026] Finished exp1_qwen06b_lora_r8 with exit code 137
+[Sat Oct 17 21:33:41 UTC 2026] Starting/Resuming exp1_qwen06b_lora_r8 (LoRA R=8) on nl-exp1-spot-r256 (us-east4-b)
+W1017 21:33:45.123000 2015567 torch/distributed/run.py:792] 
+W1017 21:33:45.123000 2015567 torch/distributed/run.py:792] *****************************************
+W1017 21:33:45.123000 2015567 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:33:45.123000 2015567 torch/distributed/run.py:792] *****************************************
+W1017 21:33:49.079000 2015567 torch/distributed/elastic/agent/server/api.py:719] Received Signals.SIGTERM death signal, shutting down workers
+W1017 21:33:49.080000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015859 closing signal SIGTERM
+W1017 21:33:49.080000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015860 closing signal SIGTERM
+W1017 21:33:49.080000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015861 closing signal SIGTERM
+W1017 21:33:49.080000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015862 closing signal SIGTERM
+W1017 21:33:49.096000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015859 closing signal SIGTERM
+W1017 21:33:49.096000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015860 closing signal SIGTERM
+W1017 21:33:49.096000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015861 closing signal SIGTERM
+W1017 21:33:49.096000 2015567 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2015862 closing signal SIGTERM
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 711, in run
+    result = self._invoke_run(role)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 870, in _invoke_run
+    time.sleep(monitor_interval)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2015567 got signal: 15
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 260, in launch_agent
+    result = agent.run()
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 720, in run
+    self._shutdown(e.sigval)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py", line 372, in _shutdown
+    self._pcontext.close(death_sig)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 572, in close
+    self._close(death_sig=death_sig, timeout=timeout)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 909, in _close
+    handler.proc.wait(time_to_wait)
+  File "/var/tmp/nl_env/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/var/tmp/nl_env/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/subprocess.py", line 1953, in _wait
+    time.sleep(delay)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2015567 got signal: 15
+[Sat Oct 17 21:34:03 UTC 2026] Starting/Resuming exp1_qwen06b_lora_r8 (LoRA R=8) on nl-exp1-spot-r256 (us-east4-b)
+W1017 21:34:06.990000 2017229 torch/distributed/run.py:792] 
+W1017 21:34:06.990000 2017229 torch/distributed/run.py:792] *****************************************
+W1017 21:34:06.990000 2017229 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:34:06.990000 2017229 torch/distributed/run.py:792] *****************************************
+W1017 21:34:15.177000 2017229 torch/distributed/elastic/agent/server/api.py:719] Received Signals.SIGTERM death signal, shutting down workers
+W1017 21:34:15.178000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017381 closing signal SIGTERM
+W1017 21:34:15.178000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017382 closing signal SIGTERM
+W1017 21:34:15.178000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017383 closing signal SIGTERM
+W1017 21:34:15.178000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017384 closing signal SIGTERM
+W1017 21:34:15.193000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017381 closing signal SIGTERM
+W1017 21:34:15.194000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017382 closing signal SIGTERM
+W1017 21:34:15.194000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017383 closing signal SIGTERM
+W1017 21:34:15.194000 2017229 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2017384 closing signal SIGTERM
+[Sat Oct 17 21:34:31 UTC 2026] Starting/Resuming exp1_qwen06b_lora_r8 (LoRA R=8) on nl-exp1-spot-r256 (us-east4-b)
+W1017 21:34:35.186000 2019126 torch/distributed/run.py:792] 
+W1017 21:34:35.186000 2019126 torch/distributed/run.py:792] *****************************************
+W1017 21:34:35.186000 2019126 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:34:35.186000 2019126 torch/distributed/run.py:792] *****************************************
+W1017 21:34:38.938000 2019126 torch/distributed/elastic/agent/server/api.py:719] Received Signals.SIGTERM death signal, shutting down workers
+W1017 21:34:38.939000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019355 closing signal SIGTERM
+W1017 21:34:38.939000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019356 closing signal SIGTERM
+W1017 21:34:38.939000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019357 closing signal SIGTERM
+W1017 21:34:38.939000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019358 closing signal SIGTERM
+W1017 21:34:38.955000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019355 closing signal SIGTERM
+W1017 21:34:38.955000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019356 closing signal SIGTERM
+W1017 21:34:38.955000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019357 closing signal SIGTERM
+W1017 21:34:38.955000 2019126 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2019358 closing signal SIGTERM
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 711, in run
+    result = self._invoke_run(role)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 870, in _invoke_run
+    time.sleep(monitor_interval)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2019126 got signal: 15
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 260, in launch_agent
+    result = agent.run()
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/api.py", line 720, in run
+    self._shutdown(e.sigval)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/agent/server/local_elastic_agent.py", line 372, in _shutdown
+    self._pcontext.close(death_sig)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 572, in close
+    self._close(death_sig=death_sig, timeout=timeout)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 909, in _close
+    handler.proc.wait(time_to_wait)
+  File "/var/tmp/nl_env/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/subprocess.py", line 1209, in wait
+    return self._wait(timeout=timeout)
+  File "/var/tmp/nl_env/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/subprocess.py", line 1953, in _wait
+    time.sleep(delay)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 84, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 2019126 got signal: 15
+[Sat Oct 17 21:34:53 UTC 2026] Starting/Resuming exp1_qwen06b_lora_r8 (LoRA R=8) on nl-exp1-spot-r256 (us-east4-b)
+W1017 21:34:56.930000 2020699 torch/distributed/run.py:792] 
+W1017 21:34:56.930000 2020699 torch/distributed/run.py:792] *****************************************
+W1017 21:34:56.930000 2020699 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:34:56.930000 2020699 torch/distributed/run.py:792] *****************************************
+W1017 21:35:05.295000 2020699 torch/distributed/elastic/agent/server/api.py:719] Received Signals.SIGTERM death signal, shutting down workers
+W1017 21:35:05.295000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020863 closing signal SIGTERM
+W1017 21:35:05.295000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020864 closing signal SIGTERM
+W1017 21:35:05.295000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020865 closing signal SIGTERM
+W1017 21:35:05.295000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020866 closing signal SIGTERM
+W1017 21:35:05.311000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020863 closing signal SIGTERM
+W1017 21:35:05.311000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020864 closing signal SIGTERM
+W1017 21:35:05.311000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020865 closing signal SIGTERM
+W1017 21:35:05.312000 2020699 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 2020866 closing signal SIGTERM
+[Sat Oct 17 21:35:22 UTC 2026] Starting/Resuming exp1_qwen06b_lora_r8 (LoRA R=8) on nl-exp1-spot-r256 (us-east4-b)
+W1017 21:35:25.308000 2022550 torch/distributed/run.py:792] 
+W1017 21:35:25.308000 2022550 torch/distributed/run.py:792] *****************************************
+W1017 21:35:25.308000 2022550 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:35:25.308000 2022550 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=8 to 256, step=8
+[CURRICULUM] Expected stages: 32
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 8
+                  batch_size: 48
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 4
+      gradient_checkpointing: True
+                      job_id: exp1_qwen06b_lora_r8
+               learning_rate: 5e-05
+            linear_lookahead: True
+              lookahead_step: 8
+                lora_dropout: 0.1
+                   lora_rank: 8
+                   max_alpha: 1.0
+              max_input_size: 1536
+               max_lookahead: 256
+            max_total_pflops: 0.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: Qwen/Qwen3-0.6B
+                    n_stages: 32
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp1_qwen06b_lora_r8
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+      save_pflops_milestones: 
+                  save_steps: 100
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 1
+                        task: search
+           use_chat_template: False
+                   use_liger: True
+                    use_lora: True
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp1_qwen06b_lora_r8 
+
+[CKPT] Auto-resuming from local run: /root/nl_output/search/job_exp1_qwen06b_lora_r8/checkpoint-43125
+[ATTN-KERNEL] NL_ATTN_KERNEL=fa2 -> attn_implementation=flash_attention_2 (hopper=True); in-run evals use sdpa
+[LIGER] liger-kernel not installed, continuing without
+[ATTENTION] Using: flash_attention_2
+[FLASH] flash_sdp_enabled: True
+[FLASH] mem_efficient_sdp_enabled: True
+[FLASH] math_sdp_enabled: True
+[ATTN-KERNEL] verified: config._attn_implementation=flash_attention_2; varlen kernel from flash_attn.flash_attn_interface; 28 qwen decoder layers are GradientCheckpointingLayer
+[MEM] model.config.use_cache = False (training)
+[INIT] Applying LoRA...
+[INIT] LoRA targets: ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+[MEM] Enabled input grads for Gradient Checkpointing + LoRA
+trainable params: 5,046,272 || all params: 601,096,192 || trainable%: 0.8395
+[EVAL-DATA] Generating eval sets (once for all evals)...
+[EVAL-DATA] Hard (alpha=1.0): n=500, fingerprint=b314f2896d4d
+[EVAL-DATA] Easy (alpha=0.1): n=500, fingerprint=1251352a0ae7
+[DATASET] Using PackedSequenceDataset (batch_size=48)
+[DATASET] Packed Map-style | batch_size=48 | epoch_size=1000000000
+[CURRICULUM] Restored stage=17, stage_start_step=43125, wall_time_offset=513669.7s from /root/nl_output/search/job_exp1_qwen06b_lora_r8/checkpoint-43125/curriculum_state.json
+[CURRICULUM] Restored 43125 loss records from JSONL (truncated to step 43125)
+[CURRICULUM] Will mark next entry as resume point (step ~43125)
+[CURRICULUM] Restored 16 stage eval records
+[CURRICULUM] Synced state with checkpoint: /root/nl_output/search/job_exp1_qwen06b_lora_r8/checkpoint-43125
+[CURRICULUM] Loaded 3 existing resume points
+[LOSS] Wrote 43125 records to JSONL in /root/nl_output/search/job_exp1_qwen06b_lora_r8
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': None, 'pad_token_id': 151643}.
+[DDP] cross-rank gradient averaging: OFF (status quo: compute_loss bypasses DistributedDataParallel.forward, so each rank trains its own replica between checkpoint reloads; set NL_DDP_GRAD_AVERAGE=1 to all-reduce)
+[HEAD] NL_HEAD=sparse: lm_head/argmax/CE on labelled rows only (valid_mask), in --ce_chunk_size=4096 row pieces; per-step rows logged as head_rows next to tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay 6N*tokens, which overstates this path)
+[CURRICULUM] Restored 0 first_token_correct entries
+[CURRICULUM] Restored 0 full_word_correct entries
+[CURRICULUM] Restored 100 recent_losses entries
+[FLOPS] Model has 0.60B params, ~3.6B FLOPs/token
+[FLOPS] Output head: N_head=155.6M params, 6*N_head=0.93B FLOPs per head row; NL_HEAD=sparse: achieved_tflops counts executed FLOPs (6(N-N_head)*tokens + 6*N_head*head_rows)
+
+[TRAIN] Starting training...
+
+[CURRICULUM] Resuming from step 43125
+[CKPT-GATE] recomputing every 1 layer(s) at 125,282 tokens/micro-batch (every_n=1, relax_max=0)
+[Stage 17/32 L=136] step 43130 | loss_avg=0.0171(100) | First=98.25% | Full=96.75% | lr=0.00e+00 | grad_norm=0.00 | Speed=34.3 samples/s (88.7K toks/s) | 237.2 TFLOPs/s | Stage time=1.9m | seqs/step=192.0 | toks/step=497144 | eff=100.0%
+{'loss': 0.0756, 'grad_norm': 2.7447874546051025, 'learning_rate': 5e-05, 'epoch': 2e-08}
