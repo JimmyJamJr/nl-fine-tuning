@@ -502,3 +502,1464 @@ Root Cause (first observed failure):
   traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
 ============================================================
 [Sat Oct 17 21:40:11 UTC 2026] Finished exp2_pythia14b_step143000 with exit code 1
+[Sat Oct 17 21:40:24 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east5-a) Starting/Resuming exp2_pythia14b_step143000 (revision=step143000) on nl-exp2-spot-step143000
+W1017 21:40:25.028000 26835 torch/distributed/run.py:792] 
+W1017 21:40:25.028000 26835 torch/distributed/run.py:792] *****************************************
+W1017 21:40:25.028000 26835 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:40:25.028000 26835 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 1
+                  batch_size: 24
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 2
+      gradient_checkpointing: True
+                      job_id: exp2_pythia14b_step143000
+               learning_rate: 2.7e-05
+            linear_lookahead: True
+              lookahead_step: 1
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 576
+               max_lookahead: 96
+            max_total_pflops: 500000.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: EleutherAI/pythia-1.4b
+                    n_stages: 96
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp2_pythia14b_step143000
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+                    revision: step143000
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 8
+                        task: search
+           use_chat_template: False
+                   use_liger: False
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp2_pythia14b_step143000 
+
+[CKPT] Fresh start
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank2]:     hf_hub_download(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank2]:     return _hf_hub_download_to_cache_dir(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank2]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank2]:     raise LocalEntryNotFoundError(
+[rank2]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank2]: The above exception was the direct cause of the following exception:
+
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank2]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank2]:     config = AutoConfig.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank2]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank2]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank2]:     resolved_config_file = cached_file(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank2]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank2]:     raise OSError(
+[rank2]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank2]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank0]:     hf_hub_download(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank0]:     return _hf_hub_download_to_cache_dir(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank0]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank0]:     raise LocalEntryNotFoundError(
+[rank0]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank0]: The above exception was the direct cause of the following exception:
+
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank0]:     sys.exit(main())
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank0]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank0]:     config = AutoConfig.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank0]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank0]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank0]:     resolved_config_file = cached_file(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank0]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank0]:     raise OSError(
+[rank0]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank0]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank1]:     hf_hub_download(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank1]:     return _hf_hub_download_to_cache_dir(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank1]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank1]:     raise LocalEntryNotFoundError(
+[rank1]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank1]: The above exception was the direct cause of the following exception:
+
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank1]:     sys.exit(main())
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank1]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank1]:     config = AutoConfig.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank1]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank1]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank1]:     resolved_config_file = cached_file(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank1]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank1]:     raise OSError(
+[rank1]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank1]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank3]:     hf_hub_download(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank3]:     return _hf_hub_download_to_cache_dir(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank3]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank3]:     raise LocalEntryNotFoundError(
+[rank3]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank3]: The above exception was the direct cause of the following exception:
+
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank3]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank3]:     config = AutoConfig.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank3]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank3]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank3]:     resolved_config_file = cached_file(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank3]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank3]:     raise OSError(
+[rank3]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank3]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank0]:[W1017 21:40:39.127181788 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W1017 21:40:39.882000 26835 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 27039 closing signal SIGTERM
+E1017 21:40:41.299000 26835 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 27038) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-17_21:40:39
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 27040)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-17_21:40:39
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 27041)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-17_21:40:39
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 27038)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Sat Oct 17 21:40:41 UTC 2026] Finished exp2_pythia14b_step143000 with exit code 1
+[Sat Oct 17 21:40:53 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east5-a) Starting/Resuming exp2_pythia14b_step143000 (revision=step143000) on nl-exp2-spot-step143000
+W1017 21:40:54.887000 27910 torch/distributed/run.py:792] 
+W1017 21:40:54.887000 27910 torch/distributed/run.py:792] *****************************************
+W1017 21:40:54.887000 27910 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:40:54.887000 27910 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 1
+                  batch_size: 24
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 2
+      gradient_checkpointing: True
+                      job_id: exp2_pythia14b_step143000
+               learning_rate: 2.7e-05
+            linear_lookahead: True
+              lookahead_step: 1
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 576
+               max_lookahead: 96
+            max_total_pflops: 500000.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: EleutherAI/pythia-1.4b
+                    n_stages: 96
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp2_pythia14b_step143000
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+                    revision: step143000
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 8
+                        task: search
+           use_chat_template: False
+                   use_liger: False
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp2_pythia14b_step143000 
+
+[CKPT] Fresh start
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank0]:     hf_hub_download(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank0]:     return _hf_hub_download_to_cache_dir(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank0]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank0]:     raise LocalEntryNotFoundError(
+[rank0]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank0]: The above exception was the direct cause of the following exception:
+
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank0]:     sys.exit(main())
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank0]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank0]:     config = AutoConfig.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank0]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank0]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank0]:     resolved_config_file = cached_file(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank0]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank0]:     raise OSError(
+[rank0]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank0]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank2]:     hf_hub_download(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank2]:     return _hf_hub_download_to_cache_dir(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank2]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank2]:     raise LocalEntryNotFoundError(
+[rank2]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank2]: The above exception was the direct cause of the following exception:
+
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank2]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank2]:     config = AutoConfig.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank2]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank2]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank2]:     resolved_config_file = cached_file(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank2]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank2]:     raise OSError(
+[rank2]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank2]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank3]:     hf_hub_download(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank3]:     return _hf_hub_download_to_cache_dir(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank3]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank3]:     raise LocalEntryNotFoundError(
+[rank3]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank3]: The above exception was the direct cause of the following exception:
+
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank3]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank3]:     config = AutoConfig.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank3]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank3]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank3]:     resolved_config_file = cached_file(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank3]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank3]:     raise OSError(
+[rank3]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank3]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank1]:     hf_hub_download(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank1]:     return _hf_hub_download_to_cache_dir(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank1]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank1]:     raise LocalEntryNotFoundError(
+[rank1]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank1]: The above exception was the direct cause of the following exception:
+
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank1]:     sys.exit(main())
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank1]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank1]:     config = AutoConfig.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank1]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank1]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank1]:     resolved_config_file = cached_file(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank1]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank1]:     raise OSError(
+[rank1]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank1]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank0]:[W1017 21:41:08.438569943 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W1017 21:41:09.144000 27910 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 27976 closing signal SIGTERM
+E1017 21:41:10.511000 27910 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 27975) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-17_21:41:09
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 27977)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-17_21:41:09
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 27978)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-17_21:41:09
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 27975)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Sat Oct 17 21:41:10 UTC 2026] Finished exp2_pythia14b_step143000 with exit code 1
+[Sat Oct 17 21:41:23 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east5-a) Starting/Resuming exp2_pythia14b_step143000 (revision=step143000) on nl-exp2-spot-step143000
+W1017 21:41:24.377000 28433 torch/distributed/run.py:792] 
+W1017 21:41:24.377000 28433 torch/distributed/run.py:792] *****************************************
+W1017 21:41:24.377000 28433 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:41:24.377000 28433 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 1
+                  batch_size: 24
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 2
+      gradient_checkpointing: True
+                      job_id: exp2_pythia14b_step143000
+               learning_rate: 2.7e-05
+            linear_lookahead: True
+              lookahead_step: 1
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 576
+               max_lookahead: 96
+            max_total_pflops: 500000.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: EleutherAI/pythia-1.4b
+                    n_stages: 96
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp2_pythia14b_step143000
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+                    revision: step143000
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 8
+                        task: search
+           use_chat_template: False
+                   use_liger: False
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp2_pythia14b_step143000 
+
+[CKPT] Fresh start
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank2]:     hf_hub_download(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank2]:     return _hf_hub_download_to_cache_dir(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank2]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank2]:     raise LocalEntryNotFoundError(
+[rank2]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank2]: The above exception was the direct cause of the following exception:
+
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank2]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank2]:     config = AutoConfig.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank2]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank2]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank2]:     resolved_config_file = cached_file(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank2]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank2]:     raise OSError(
+[rank2]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank2]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank0]:     hf_hub_download(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank0]:     return _hf_hub_download_to_cache_dir(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank0]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank0]:     raise LocalEntryNotFoundError(
+[rank0]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank0]: The above exception was the direct cause of the following exception:
+
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank0]:     sys.exit(main())
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank0]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank0]:     config = AutoConfig.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank0]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank0]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank0]:     resolved_config_file = cached_file(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank0]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank0]:     raise OSError(
+[rank0]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank0]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank1]:     hf_hub_download(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank1]:     return _hf_hub_download_to_cache_dir(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank1]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank1]:     raise LocalEntryNotFoundError(
+[rank1]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank1]: The above exception was the direct cause of the following exception:
+
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank1]:     sys.exit(main())
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank1]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank1]:     config = AutoConfig.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank1]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank1]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank1]:     resolved_config_file = cached_file(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank1]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank1]:     raise OSError(
+[rank1]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank1]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank3]:     hf_hub_download(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank3]:     return _hf_hub_download_to_cache_dir(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank3]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank3]:     raise LocalEntryNotFoundError(
+[rank3]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank3]: The above exception was the direct cause of the following exception:
+
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank3]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank3]:     config = AutoConfig.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank3]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank3]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank3]:     resolved_config_file = cached_file(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank3]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank3]:     raise OSError(
+[rank3]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank3]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank0]:[W1017 21:41:37.863393448 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W1017 21:41:38.634000 28433 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 28503 closing signal SIGTERM
+E1017 21:41:39.949000 28433 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 0 (pid: 28502) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-17_21:41:38
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 28504)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-17_21:41:38
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 28505)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-17_21:41:38
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 28502)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Sat Oct 17 21:41:40 UTC 2026] Finished exp2_pythia14b_step143000 with exit code 1
+[Sat Oct 17 21:41:52 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east5-a) Starting/Resuming exp2_pythia14b_step143000 (revision=step143000) on nl-exp2-spot-step143000
+W1017 21:41:53.127000 29130 torch/distributed/run.py:792] 
+W1017 21:41:53.127000 29130 torch/distributed/run.py:792] *****************************************
+W1017 21:41:53.127000 29130 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:41:53.127000 29130 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+C++ module `generator` loaded.
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 1
+                  batch_size: 24
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 2
+      gradient_checkpointing: True
+                      job_id: exp2_pythia14b_step143000
+               learning_rate: 2.7e-05
+            linear_lookahead: True
+              lookahead_step: 1
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 576
+               max_lookahead: 96
+            max_total_pflops: 500000.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: EleutherAI/pythia-1.4b
+                    n_stages: 96
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp2_pythia14b_step143000
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+                    revision: step143000
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 8
+                        task: search
+           use_chat_template: False
+                   use_liger: False
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp2_pythia14b_step143000 
+
+[CKPT] Fresh start
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank0]:     hf_hub_download(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank0]:     return _hf_hub_download_to_cache_dir(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank0]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank0]:     raise LocalEntryNotFoundError(
+[rank0]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank0]: The above exception was the direct cause of the following exception:
+
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank0]:     sys.exit(main())
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank0]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank0]:     config = AutoConfig.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank0]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank0]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank0]:     resolved_config_file = cached_file(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank0]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank0]:     raise OSError(
+[rank0]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank0]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank2]:     hf_hub_download(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank2]:     return _hf_hub_download_to_cache_dir(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank2]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank2]:     raise LocalEntryNotFoundError(
+[rank2]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank2]: The above exception was the direct cause of the following exception:
+
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank2]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank2]:     config = AutoConfig.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank2]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank2]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank2]:     resolved_config_file = cached_file(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank2]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank2]:     raise OSError(
+[rank2]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank2]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank1]:     hf_hub_download(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank1]:     return _hf_hub_download_to_cache_dir(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank1]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank1]:     raise LocalEntryNotFoundError(
+[rank1]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank1]: The above exception was the direct cause of the following exception:
+
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank1]:     sys.exit(main())
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank1]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank1]:     config = AutoConfig.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank1]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank1]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank1]:     resolved_config_file = cached_file(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank1]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank1]:     raise OSError(
+[rank1]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank1]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank3]:     hf_hub_download(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank3]:     return _hf_hub_download_to_cache_dir(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank3]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank3]:     raise LocalEntryNotFoundError(
+[rank3]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank3]: The above exception was the direct cause of the following exception:
+
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank3]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank3]:     config = AutoConfig.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank3]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank3]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank3]:     resolved_config_file = cached_file(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank3]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank3]:     raise OSError(
+[rank3]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank3]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank0]:[W1017 21:42:06.608886846 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W1017 21:42:07.178000 29130 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 29195 closing signal SIGTERM
+E1017 21:42:08.544000 29130 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 1 (pid: 29196) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-17_21:42:07
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 29197)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-10-17_21:42:07
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 29198)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-17_21:42:07
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 29196)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Sat Oct 17 21:42:08 UTC 2026] Finished exp2_pythia14b_step143000 with exit code 1
+[Sat Oct 17 21:42:21 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east5-a) Starting/Resuming exp2_pythia14b_step143000 (revision=step143000) on nl-exp2-spot-step143000
+W1017 21:42:22.377000 29588 torch/distributed/run.py:792] 
+W1017 21:42:22.377000 29588 torch/distributed/run.py:792] *****************************************
+W1017 21:42:22.377000 29588 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:42:22.377000 29588 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 1
+                  batch_size: 24
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 2
+      gradient_checkpointing: True
+                      job_id: exp2_pythia14b_step143000
+               learning_rate: 2.7e-05
+            linear_lookahead: True
+              lookahead_step: 1
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 576
+               max_lookahead: 96
+            max_total_pflops: 500000.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: EleutherAI/pythia-1.4b
+                    n_stages: 96
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp2_pythia14b_step143000
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+                    revision: step143000
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 8
+                        task: search
+           use_chat_template: False
+                   use_liger: False
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp2_pythia14b_step143000 
+
+[CKPT] Fresh start
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank0]:     hf_hub_download(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank0]:     return _hf_hub_download_to_cache_dir(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank0]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank0]:     raise LocalEntryNotFoundError(
+[rank0]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank0]: The above exception was the direct cause of the following exception:
+
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank0]:     sys.exit(main())
+[rank0]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank0]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank0]:     config = AutoConfig.from_pretrained(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank0]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank0]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank0]:     resolved_config_file = cached_file(
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank0]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank0]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank0]:     raise OSError(
+[rank0]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank0]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank3]:     hf_hub_download(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank3]:     return _hf_hub_download_to_cache_dir(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank3]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank3]:     raise LocalEntryNotFoundError(
+[rank3]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank3]: The above exception was the direct cause of the following exception:
+
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank3]:     sys.exit(main())
+[rank3]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank3]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank3]:     config = AutoConfig.from_pretrained(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank3]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank3]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank3]:     resolved_config_file = cached_file(
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank3]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank3]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank3]:     raise OSError(
+[rank3]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank3]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank1]:     hf_hub_download(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank1]:     return _hf_hub_download_to_cache_dir(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank1]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank1]:     raise LocalEntryNotFoundError(
+[rank1]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank1]: The above exception was the direct cause of the following exception:
+
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank1]:     sys.exit(main())
+[rank1]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank1]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank1]:     config = AutoConfig.from_pretrained(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank1]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank1]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank1]:     resolved_config_file = cached_file(
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank1]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank1]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank1]:     raise OSError(
+[rank1]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank1]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[rank2]:     hf_hub_download(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1014, in hf_hub_download
+[rank2]:     return _hf_hub_download_to_cache_dir(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+[rank2]:     _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1653, in _raise_on_head_call_error
+[rank2]:     raise LocalEntryNotFoundError(
+[rank2]: huggingface_hub.errors.LocalEntryNotFoundError: Cannot find the requested files in the disk cache and outgoing traffic has been disabled. To enable hf.co look-ups and downloads online, set 'local_files_only' to False.
+
+[rank2]: The above exception was the direct cause of the following exception:
+
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 3611, in <module>
+[rank2]:     sys.exit(main())
+[rank2]:   File "/root/nl-fine-tuning/nl/tuning_nl.py", line 2878, in main
+[rank2]:     tokenizer = AutoTokenizer.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/tokenization_auto.py", line 1109, in from_pretrained
+[rank2]:     config = AutoConfig.from_pretrained(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/models/auto/configuration_auto.py", line 1332, in from_pretrained
+[rank2]:     config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[rank2]:     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[rank2]:     resolved_config_file = cached_file(
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[rank2]:     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[rank2]:   File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/transformers/utils/hub.py", line 553, in cached_files
+[rank2]:     raise OSError(
+[rank2]: OSError: We couldn't connect to 'https://huggingface.co' to load the files, and couldn't find them in the cached files.
+[rank2]: Check your internet connection or see how to run the library in offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'.
+[rank0]:[W1017 21:42:35.912875863 ProcessGroupNCCL.cpp:1496] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W1017 21:42:36.432000 29588 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 29653 closing signal SIGTERM
+W1017 21:42:36.433000 29588 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 29655 closing signal SIGTERM
+W1017 21:42:36.433000 29588 torch/distributed/elastic/multiprocessing/api.py:897] Sending process 29656 closing signal SIGTERM
+E1017 21:42:37.816000 29588 torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 1) local_rank: 1 (pid: 29654) of binary: /var/tmp/nl_env/venv/bin/python
+Traceback (most recent call last):
+  File "/var/tmp/nl_env/venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/var/tmp/nl_env/venv/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tuning_nl.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-17_21:42:36
+  host      : nl-exp2-spot-step143000.us-east5-a.c.research-sandbox-88180.internal
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 29654)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[Sat Oct 17 21:42:38 UTC 2026] Finished exp2_pythia14b_step143000 with exit code 1
+[Sat Oct 17 21:42:50 UTC 2026] [WRAPPER] GPUs=0,1,2,3 (Spot H100 us-east5-a) Starting/Resuming exp2_pythia14b_step143000 (revision=step143000) on nl-exp2-spot-step143000
+W1017 21:42:51.524000 30165 torch/distributed/run.py:792] 
+W1017 21:42:51.524000 30165 torch/distributed/run.py:792] *****************************************
+W1017 21:42:51.524000 30165 torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1017 21:42:51.524000 30165 torch/distributed/run.py:792] *****************************************
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+C++ module `generator` loaded.
+FlashAttention available: True
+PyTorch version: 2.6.0+cu124
+[CURRICULUM] Linear lookahead mode: L=1 to 96, step=1
+[CURRICULUM] Expected stages: 96
+C++ module `generator` loaded.
+[DISTRIBUTED] Initialized rank 0/4 on device cuda:0
+[SEED] Setting all random seeds to 1234
+
+============================================================
+          accuracy_threshold: 0.98
+             accuracy_window: 800
+                  base_alpha: 0.1
+              base_lookahead: 1
+                  batch_size: 24
+                     breadth: 2
+                   cache_dir: None
+               ce_chunk_size: 4096
+                 check_every: 25
+                 do_baseline: False
+               do_final_eval: False
+               do_stage_eval: True
+            eval_every_steps: 0
+                eval_samples: 500
+     first_token_soft_weight: 0.0
+ gradient_accumulation_steps: 2
+      gradient_checkpointing: True
+                      job_id: exp2_pythia14b_step143000
+               learning_rate: 2.7e-05
+            linear_lookahead: True
+              lookahead_step: 1
+                lora_dropout: 0.1
+                   lora_rank: 16
+                   max_alpha: 1.0
+              max_input_size: 576
+               max_lookahead: 96
+            max_total_pflops: 500000.0
+             max_train_steps: 0
+         min_steps_per_stage: 200
+           mix_pretrain_data: None
+        mix_pretrain_max_len: 2048
+          mix_pretrain_ratio: 0.1
+         mix_pretrain_subset: None
+                  model_name: EleutherAI/pythia-1.4b
+                    n_stages: 96
+                       optim: adamw_torch_fused
+                  output_dir: /root/nl_output/search/job_exp2_pythia14b_step143000
+               persist_every: 0
+         print_eval_examples: 0
+              reinit_weights: False
+             resume_from_job: None
+                resume_stage: None
+         resume_weights_path: None
+                    revision: step143000
+      save_pflops_milestones: 
+                  save_steps: 500
+            save_total_limit: 2
+                 scratch_dir: /scratch/user
+                        seed: 1234
+            shuffled_mixture: None
+       skip_stage_alpha_eval: False
+            stage_eval_every: 8
+                        task: search
+           use_chat_template: False
+                   use_liger: False
+                    use_lora: False
+                  vocab_pool: none
+============================================================
+
+[CKPT] Output root       : /root/nl_output
+[CKPT] Task output base  : /root/nl_output/search
+[CKPT] This run dir      : /root/nl_output/search/job_exp2_pythia14b_step143000 
+
+[CKPT] Fresh start
+[ATTN-KERNEL] NL_ATTN_KERNEL=fa2 -> attn_implementation=flash_attention_2 (hopper=True); in-run evals use sdpa
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.54s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.60s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.59s/it]Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.59s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.32it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.14it/s]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.28it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.11it/s]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.29it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.12it/s]
+[INIT] Loaded EleutherAI/pythia-1.4b at revision=step143000
+[ATTENTION] Using: flash_attention_2
+[FLASH] flash_sdp_enabled: True
+[FLASH] mem_efficient_sdp_enabled: True
+[FLASH] math_sdp_enabled: True
+[ATTN-KERNEL] verified: config._attn_implementation=flash_attention_2; varlen kernel from flash_attn.flash_attn_interface; 24 gpt_neox decoder layers are GradientCheckpointingLayer
+[MEM] model.config.use_cache = False (training)
+trainable params: 1,414,647,808 || all params: 1,414,647,808 || trainable%: 100.0000
+[EVAL-DATA] Generating eval sets (once for all evals)...
+Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.30it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.12it/s]
+[EVAL-DATA] Hard (alpha=1.0): n=500, fingerprint=ebe682697aee
+[EVAL-DATA] Easy (alpha=0.1): n=500, fingerprint=3fbd7826fc0b
+[DATASET] Using PackedSequenceDataset (batch_size=24)
+[DATASET] Packed Map-style | batch_size=24 | epoch_size=1000000000
+[PFLOPS] Will stop training at 500000.0 PFLOPS
+[DDP] cross-rank gradient averaging: OFF (status quo: compute_loss bypasses DistributedDataParallel.forward, so each rank trains its own replica between checkpoint reloads; set NL_DDP_GRAD_AVERAGE=1 to all-reduce)
+[HEAD] NL_HEAD=sparse: lm_head/argmax/CE on labelled rows only (valid_mask), in --ce_chunk_size=4096 row pieces; per-step rows logged as head_rows next to tokens in loss_history (achieved_tflops counts executed FLOPs; cumulative PFLOPs stay 6N*tokens, which overstates this path)
+[FLOPS] Model has 1.41B params, ~8.5B FLOPs/token
+[FLOPS] Output head: N_head=103.0M params, 6*N_head=0.62B FLOPs per head row; NL_HEAD=sparse: achieved_tflops counts executed FLOPs (6(N-N_head)*tokens + 6*N_head*head_rows)
+[RANK 0] Saved config to /root/nl_output/search/job_exp2_pythia14b_step143000/run_config.json: {'batch_size': 24, 'grad_acc': 2, 'master_port': 29500, 'provenance': {'head': 'sparse', 'revision': 'step143000', 'attn_implementation': 'flash_attention_2', 'NL_ATTN_KERNEL': 'fa2', 'NL_CKPT_EVERY_N_LAYERS': '1', 'NL_CKPT_RELAX_MAX_TOKENS': '0', 'NL_DDP_GRAD_AVERAGE': '0', 'FLASH_ATTENTION_DETERMINISTIC': None, 'CUBLAS_WORKSPACE_CONFIG': None, 'versions': {'torch': '2.6.0+cu124', 'transformers': '4.57.5', 'flash_attn': '2.7.4.post1', 'flash_attn_3': None, 'liger_kernel': '0.5.10', 'peft': '0.18.1'}}}
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'pad_token_id': 0}.
+
+[TRAIN] Starting training...
+
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'pad_token_id': 0}.
+The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'pad_token_id': 0}.
+[CKPT-GATE] recomputing every 1 layer(s) at 1,795 tokens/micro-batch (every_n=1, relax_max=0)
+[Stage 1/96 L=1] step 10 | loss_avg=0.1681(20) | First=100.00% | Full=100.00% | lr=0.00e+00 | grad_norm=0.00 | Speed=689.0 samples/s (51.7K toks/s) | 408.7 TFLOPs/s | Stage time=0.0m | seqs/step=48.0 | toks/step=3599 | eff=100.0%
+{'loss': 0.3318, 'grad_norm': 0.185546875, 'learning_rate': 2.7e-05, 'epoch': 2e-08}
+[Stage 1/96 L=1] step 20 | loss_avg=0.0842(40) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.19 | Speed=771.7 samples/s (58.0K toks/s) | 458.8 TFLOPs/s | Stage time=0.1m | seqs/step=48.0 | toks/step=3607 | eff=100.0%
+{'loss': 0.0007, 'grad_norm': 4.5, 'learning_rate': 2.7e-05, 'epoch': 4e-08}
+[Stage 1/96 L=1] step 30 | loss_avg=0.0562(60) | First=100.00% | Full=99.88% | lr=2.70e-05 | grad_norm=4.50 | Speed=821.8 samples/s (61.9K toks/s) | 489.5 TFLOPs/s | Stage time=0.1m | seqs/step=48.0 | toks/step=3614 | eff=100.0%
+{'loss': 0.0005, 'grad_norm': 0.11767578125, 'learning_rate': 2.7e-05, 'epoch': 6e-08}
+[Stage 1/96 L=1] step 40 | loss_avg=0.0422(80) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.12 | Speed=850.4 samples/s (63.9K toks/s) | 505.4 TFLOPs/s | Stage time=0.2m | seqs/step=48.0 | toks/step=3606 | eff=100.0%
+{'loss': 0.0002, 'grad_norm': 0.007080078125, 'learning_rate': 2.7e-05, 'epoch': 8e-08}
+[Stage 1/96 L=1] step 50 | loss_avg=0.0338(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.01 | Speed=867.7 samples/s (65.3K toks/s) | 516.6 TFLOPs/s | Stage time=0.2m | seqs/step=48.0 | toks/step=3613 | eff=100.0%
+{'loss': 0.0003, 'grad_norm': 0.0133056640625, 'learning_rate': 2.7e-05, 'epoch': 1e-07}
+[Stage 1/96 L=1] step 60 | loss_avg=0.0002(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.01 | Speed=865.0 samples/s (65.2K toks/s) | 515.8 TFLOPs/s | Stage time=0.2m | seqs/step=48.0 | toks/step=3618 | eff=100.0%
+{'loss': 0.0003, 'grad_norm': 0.10546875, 'learning_rate': 2.7e-05, 'epoch': 1.2e-07}
+[Stage 1/96 L=1] step 70 | loss_avg=0.0001(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.11 | Speed=875.1 samples/s (66.0K toks/s) | 522.4 TFLOPs/s | Stage time=0.3m | seqs/step=48.0 | toks/step=3623 | eff=100.0%
+{'loss': 0.0005, 'grad_norm': 0.0595703125, 'learning_rate': 2.7e-05, 'epoch': 1.4e-07}
+[Stage 1/96 L=1] step 80 | loss_avg=0.0002(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.06 | Speed=882.7 samples/s (66.7K toks/s) | 527.3 TFLOPs/s | Stage time=0.3m | seqs/step=48.0 | toks/step=3624 | eff=100.0%
+{'loss': 0.0005, 'grad_norm': 0.07080078125, 'learning_rate': 2.7e-05, 'epoch': 1.6e-07}
+[Stage 1/96 L=1] step 90 | loss_avg=0.0003(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.07 | Speed=883.5 samples/s (66.6K toks/s) | 527.2 TFLOPs/s | Stage time=0.3m | seqs/step=48.0 | toks/step=3621 | eff=100.0%
+{'loss': 0.0004, 'grad_norm': 0.030517578125, 'learning_rate': 2.7e-05, 'epoch': 1.8e-07}
+[Stage 1/96 L=1] step 100 | loss_avg=0.0003(100) | First=99.88% | Full=99.88% | lr=2.70e-05 | grad_norm=0.03 | Speed=888.9 samples/s (67.1K toks/s) | 530.6 TFLOPs/s | Stage time=0.4m | seqs/step=48.0 | toks/step=3622 | eff=100.0%
+{'loss': 0.0006, 'grad_norm': 0.02392578125, 'learning_rate': 2.7e-05, 'epoch': 2e-07}
+[Stage 1/96 L=1] step 110 | loss_avg=0.0027(100) | First=100.00% | Full=99.88% | lr=2.70e-05 | grad_norm=0.02 | Speed=888.8 samples/s (67.0K toks/s) | 530.4 TFLOPs/s | Stage time=0.4m | seqs/step=48.0 | toks/step=3620 | eff=100.0%
+{'loss': 0.0064, 'grad_norm': 0.00421142578125, 'learning_rate': 2.7e-05, 'epoch': 2.2e-07}
+[Stage 1/96 L=1] step 120 | loss_avg=0.0031(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.00 | Speed=893.5 samples/s (67.4K toks/s) | 533.6 TFLOPs/s | Stage time=0.4m | seqs/step=48.0 | toks/step=3623 | eff=100.0%
+{'loss': 0.003, 'grad_norm': 0.05078125, 'learning_rate': 2.7e-05, 'epoch': 2.4e-07}
+[Stage 1/96 L=1] step 130 | loss_avg=0.0031(100) | First=100.00% | Full=99.88% | lr=2.70e-05 | grad_norm=0.05 | Speed=890.8 samples/s (67.3K toks/s) | 532.0 TFLOPs/s | Stage time=0.5m | seqs/step=48.0 | toks/step=3624 | eff=100.0%
+{'loss': 0.0012, 'grad_norm': 0.0458984375, 'learning_rate': 2.7e-05, 'epoch': 2.6e-07}
+[Stage 1/96 L=1] step 140 | loss_avg=0.0029(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.05 | Speed=895.0 samples/s (67.6K toks/s) | 535.1 TFLOPs/s | Stage time=0.5m | seqs/step=48.0 | toks/step=3628 | eff=100.0%
+{'loss': 0.0003, 'grad_norm': 0.016845703125, 'learning_rate': 2.7e-05, 'epoch': 2.8e-07}
+[Stage 1/96 L=1] step 150 | loss_avg=0.0029(100) | First=100.00% | Full=99.88% | lr=2.70e-05 | grad_norm=0.02 | Speed=898.8 samples/s (67.9K toks/s) | 537.1 TFLOPs/s | Stage time=0.5m | seqs/step=48.0 | toks/step=3626 | eff=100.0%
+{'loss': 0.0014, 'grad_norm': 0.05029296875, 'learning_rate': 2.7e-05, 'epoch': 3e-07}
+[Stage 1/96 L=1] step 160 | loss_avg=0.0006(100) | First=99.75% | Full=99.75% | lr=2.70e-05 | grad_norm=0.05 | Speed=902.2 samples/s (68.2K toks/s) | 539.2 TFLOPs/s | Stage time=0.6m | seqs/step=48.0 | toks/step=3626 | eff=100.0%
+{'loss': 0.0038, 'grad_norm': 0.006561279296875, 'learning_rate': 2.7e-05, 'epoch': 3.2e-07}
+[Stage 1/96 L=1] step 170 | loss_avg=0.0002(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.01 | Speed=899.5 samples/s (68.0K toks/s) | 537.7 TFLOPs/s | Stage time=0.6m | seqs/step=48.0 | toks/step=3627 | eff=100.0%
+{'loss': 0.0002, 'grad_norm': 0.00921630859375, 'learning_rate': 2.7e-05, 'epoch': 3.4e-07}
+[Stage 1/96 L=1] step 180 | loss_avg=0.0001(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.01 | Speed=902.7 samples/s (68.2K toks/s) | 539.4 TFLOPs/s | Stage time=0.6m | seqs/step=48.0 | toks/step=3625 | eff=100.0%
+{'loss': 0.0005, 'grad_norm': 0.005279541015625, 'learning_rate': 2.7e-05, 'epoch': 3.6e-07}
+[Stage 1/96 L=1] step 190 | loss_avg=0.0001(100) | First=100.00% | Full=100.00% | lr=2.70e-05 | grad_norm=0.01 | Speed=902.8 samples/s (68.2K toks/s) | 539.5 TFLOPs/s | Stage time=0.7m | seqs/step=48.0 | toks/step=3626 | eff=100.0%
+{'loss': 0.0024, 'grad_norm': 0.00506591796875, 'learning_rate': 2.7e-05, 'epoch': 3.8e-07}
+[Stage 1/96 L=1] step 200 | loss_avg=0.0002(100) | First=100.00% | Full=99.88% | lr=2.70e-05 | grad_norm=0.01 | Speed=903.3 samples/s (68.3K toks/s) | 539.9 TFLOPs/s | Stage time=0.7m | seqs/step=48.0 | toks/step=3627 | eff=100.0%
+[CHECK] Stage 1 full=99.87% target>=98.00%
+[COMPLETE] Stage 1 complete in 200 steps, 0.7 minutes | 38,400 samples | 903.3 samples/s
+[STAGE-CKPT] Saving persistent checkpoint to /root/nl_output/search/job_exp2_pythia14b_step143000/stage_checkpoints/stage_1_step_200_L1
+[STAGE-CKPT] Saved stage 1 checkpoint
+[PLOT] Saved loss_stage_1.png
+[PLOT] Saved loss_overall.png (0 stages with exp fits)
