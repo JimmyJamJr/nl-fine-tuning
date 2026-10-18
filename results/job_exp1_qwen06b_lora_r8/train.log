@@ -11733,3 +11733,19 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 {'loss': 0.08, 'grad_norm': 5.850791931152344, 'learning_rate': 5e-05, 'epoch': 5.42e-06}
 [Stage 17/32 L=136] step 44490 | loss_avg=0.0179(100) | First=97.00% | Full=95.25% | lr=5.00e-05 | grad_norm=5.85 | Speed=34.4 samples/s (89.7K toks/s) | 239.9 TFLOPs/s | Stage time=508.1m | seqs/step=192.0 | toks/step=500838 | eff=100.0%
 {'loss': 0.0788, 'grad_norm': 9.880993843078613, 'learning_rate': 5e-05, 'epoch': 5.46e-06}
+[Stage 17/32 L=136] step 44500 | loss_avg=0.0187(100) | First=98.50% | Full=97.12% | lr=5.00e-05 | grad_norm=9.88 | Speed=34.4 samples/s (89.7K toks/s) | 239.9 TFLOPs/s | Stage time=511.8m | seqs/step=192.0 | toks/step=500843 | eff=100.0%
+[CHECK] Stage 17 full=97.12% target>=98.00%
+{'loss': 0.0807, 'grad_norm': 7.254683017730713, 'learning_rate': 5e-05, 'epoch': 5.5e-06}
+[Stage 17/32 L=136] step 44510 | loss_avg=0.0182(100) | First=98.12% | Full=96.75% | lr=5.00e-05 | grad_norm=7.25 | Speed=34.4 samples/s (89.7K toks/s) | 239.9 TFLOPs/s | Stage time=515.6m | seqs/step=192.0 | toks/step=500828 | eff=100.0%
+{'loss': 0.0647, 'grad_norm': 4.202292442321777, 'learning_rate': 5e-05, 'epoch': 5.54e-06}
+[Stage 17/32 L=136] step 44520 | loss_avg=0.0164(100) | First=97.38% | Full=96.00% | lr=5.00e-05 | grad_norm=4.20 | Speed=34.4 samples/s (89.7K toks/s) | 239.9 TFLOPs/s | Stage time=519.3m | seqs/step=192.0 | toks/step=500811 | eff=100.0%
+{'loss': 0.0789, 'grad_norm': 7.513212203979492, 'learning_rate': 5e-05, 'epoch': 5.58e-06}
+[CHECK] Stage 17 full=98.12% target>=98.00%
+[COMPLETE] Stage 17 complete in 1400 steps, 521.1 minutes | 1,075,200 samples | 34.4 samples/s
+
+[STAGE-EVAL] Stage 17 complete (step 44525, L=136), evaluating at alpha=1.0...
+[EVAL-TF] Loss=0.1324 (n=500)
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+`generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
+`generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
+`generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
