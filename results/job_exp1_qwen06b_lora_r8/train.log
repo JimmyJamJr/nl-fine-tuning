@@ -11592,3 +11592,15 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [Stage 17/32 L=136] step 43900 | loss_avg=0.0207(100) | First=98.62% | Full=97.25% | lr=5.00e-05 | grad_norm=5.37 | Speed=34.4 samples/s (89.7K toks/s) | 239.9 TFLOPs/s | Stage time=288.5m | seqs/step=192.0 | toks/step=500816 | eff=100.0%
 [CHECK] Stage 17 full=97.25% target>=98.00%
 {'loss': 0.0764, 'grad_norm': 2.9173901081085205, 'learning_rate': 5e-05, 'epoch': 3.1e-06}
+[Stage 17/32 L=136] step 43910 | loss_avg=0.0199(100) | First=98.12% | Full=96.38% | lr=5.00e-05 | grad_norm=2.92 | Speed=34.4 samples/s (89.7K toks/s) | 239.8 TFLOPs/s | Stage time=292.3m | seqs/step=192.0 | toks/step=500781 | eff=100.0%
+{'loss': 0.0805, 'grad_norm': 27.003875732421875, 'learning_rate': 5e-05, 'epoch': 3.14e-06}
+[Stage 17/32 L=136] step 43920 | loss_avg=0.0192(100) | First=98.62% | Full=97.38% | lr=5.00e-05 | grad_norm=27.00 | Speed=34.4 samples/s (89.7K toks/s) | 239.9 TFLOPs/s | Stage time=296.0m | seqs/step=192.0 | toks/step=500882 | eff=100.0%
+{'loss': 0.0727, 'grad_norm': 5.350980758666992, 'learning_rate': 5e-05, 'epoch': 3.18e-06}
+[CHECK] Stage 17 full=96.25% target>=98.00%
+[Stage 17/32 L=136] step 43930 | loss_avg=0.0200(100) | First=97.12% | Full=96.38% | lr=5.00e-05 | grad_norm=5.35 | Speed=34.4 samples/s (89.7K toks/s) | 239.8 TFLOPs/s | Stage time=299.8m | seqs/step=192.0 | toks/step=500842 | eff=100.0%
+{'loss': 0.0813, 'grad_norm': 28.075393676757812, 'learning_rate': 5e-05, 'epoch': 3.22e-06}
+[Stage 17/32 L=136] step 43940 | loss_avg=0.0212(100) | First=97.50% | Full=95.50% | lr=5.00e-05 | grad_norm=28.08 | Speed=34.4 samples/s (89.7K toks/s) | 239.8 TFLOPs/s | Stage time=303.5m | seqs/step=192.0 | toks/step=500868 | eff=100.0%
+{'loss': 0.0868, 'grad_norm': 8.606603622436523, 'learning_rate': 5e-05, 'epoch': 3.26e-06}
+[Stage 17/32 L=136] step 43950 | loss_avg=0.0213(100) | First=98.62% | Full=96.12% | lr=5.00e-05 | grad_norm=8.61 | Speed=34.4 samples/s (89.7K toks/s) | 239.9 TFLOPs/s | Stage time=307.2m | seqs/step=192.0 | toks/step=500929 | eff=100.0%
+[CHECK] Stage 17 full=96.13% target>=98.00%
+{'loss': 0.0706, 'grad_norm': 4.964040756225586, 'learning_rate': 5e-05, 'epoch': 3.3e-06}
