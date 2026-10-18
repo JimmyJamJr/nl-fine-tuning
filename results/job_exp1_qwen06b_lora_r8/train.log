@@ -11749,3 +11749,29 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 `generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
 `generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
 `generation_config` default values have been modified to match model-specific defaults: {'do_sample': True, 'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}. If this is not desired, please set these values explicitly.
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Also evaluating at stage alpha=0.5353 (L=136)...
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Stage 17 | Step 44525 | L=136 | TF Loss=0.1324 | Greedy: First=74.20%, Full=73.00%
+[STAGE-EVAL] Stage 17 | Step 44525 | L=136 (stage-alpha) | Greedy: First=97.80%, Full=97.40%
+[PLOT] Saved stage_eval.png (17 stages)
+[PLOT] Saved eval_acc_vs_step.png (17 evals)
+[PLOT] Saved eval_acc_vs_flops.png (17 evals)
+[STAGE-CKPT] Saving persistent checkpoint to /root/nl_output/search/job_exp1_qwen06b_lora_r8/stage_checkpoints/stage_17_step_44525_L136
+[STAGE-CKPT] Saved stage 17 checkpoint
+[PLOT] Saved loss_stage_17.png
+[PLOT] Saved loss_overall.png (2 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 1032.4 TFLOPs/s)
+
+[TRAIN-TIMING] Steps=5600 | DataWait=451.2ms (8.1%) | Compute=5132.1ms | Wall=5583.4ms | Throughput=0.2 steps/s
+
+ -> Advanced to stage 18 | alpha=0.567 | L=144/256
+[Stage 18/32 L=144] step 44530 | loss_avg=0.0158(100) | First=97.38% | Full=96.50% | lr=5.00e-05 | grad_norm=7.51 | Speed=33.7 samples/s (90.4K toks/s) | 241.7 TFLOPs/s | Stage time=1.9m | seqs/step=192.0 | toks/step=514349 | eff=100.0%
+{'loss': 0.0744, 'grad_norm': 5.028244495391846, 'learning_rate': 5e-05, 'epoch': 5.62e-06}
+[Stage 18/32 L=144] step 44540 | loss_avg=0.0189(100) | First=96.25% | Full=94.62% | lr=5.00e-05 | grad_norm=5.03 | Speed=32.7 samples/s (89.3K toks/s) | 238.9 TFLOPs/s | Stage time=5.9m | seqs/step=192.0 | toks/step=523763 | eff=100.0%
+{'loss': 0.0913, 'grad_norm': 11.315607070922852, 'learning_rate': 5e-05, 'epoch': 5.66e-06}
+[Stage 18/32 L=144] step 44550 | loss_avg=0.0227(100) | First=97.00% | Full=96.00% | lr=5.00e-05 | grad_norm=11.32 | Speed=32.6 samples/s (89.4K toks/s) | 239.0 TFLOPs/s | Stage time=9.8m | seqs/step=192.0 | toks/step=526891 | eff=100.0%
+{'loss': 0.0999, 'grad_norm': 8.716556549072266, 'learning_rate': 5e-05, 'epoch': 5.7e-06}
