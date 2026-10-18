@@ -12350,3 +12350,35 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [Stage 18/32 L=144] step 46970 | loss_avg=0.0178(100) | First=97.50% | Full=96.88% | lr=5.00e-05 | grad_norm=30.73 | Speed=32.2 samples/s (88.9K toks/s) | 237.8 TFLOPs/s | Stage time=972.4m | seqs/step=192.0 | toks/step=530502 | eff=100.0%
 {'loss': 0.0713, 'grad_norm': 5.606800556182861, 'learning_rate': 5e-05, 'epoch': 1.538e-05}
 [CHECK] Stage 18 full=96.75% target>=98.00%
+[Stage 18/32 L=144] step 46980 | loss_avg=0.0188(100) | First=99.12% | Full=97.38% | lr=5.00e-05 | grad_norm=5.61 | Speed=32.2 samples/s (88.9K toks/s) | 237.8 TFLOPs/s | Stage time=976.4m | seqs/step=192.0 | toks/step=530512 | eff=100.0%
+{'loss': 0.0709, 'grad_norm': 7.311474800109863, 'learning_rate': 5e-05, 'epoch': 1.542e-05}
+[Stage 18/32 L=144] step 46990 | loss_avg=0.0195(100) | First=98.25% | Full=96.75% | lr=5.00e-05 | grad_norm=7.31 | Speed=32.2 samples/s (88.9K toks/s) | 237.9 TFLOPs/s | Stage time=980.4m | seqs/step=192.0 | toks/step=530519 | eff=100.0%
+{'loss': 0.0819, 'grad_norm': 3.4129481315612793, 'learning_rate': 5e-05, 'epoch': 1.546e-05}
+[Stage 18/32 L=144] step 47000 | loss_avg=0.0182(100) | First=98.62% | Full=98.12% | lr=5.00e-05 | grad_norm=3.41 | Speed=32.2 samples/s (88.9K toks/s) | 237.9 TFLOPs/s | Stage time=984.4m | seqs/step=192.0 | toks/step=530528 | eff=100.0%
+[CHECK] Stage 18 full=98.12% target>=98.00%
+[COMPLETE] Stage 18 complete in 2475 steps, 984.4 minutes | 1,900,800 samples | 32.2 samples/s
+
+[STAGE-EVAL] Stage 18 complete (step 47000, L=144), evaluating at alpha=1.0...
+[EVAL-TF] Loss=0.1357 (n=500)
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Also evaluating at stage alpha=0.5667 (L=144)...
+[EVAL-GREEDY] Starting generation on 500 samples (Local: 125, Pad: 0)
+[EVAL-GREEDY] Completed. Global samples: 500
+[STAGE-EVAL] Stage 18 | Step 47000 | L=144 | TF Loss=0.1357 | Greedy: First=76.40%, Full=75.40%
+[STAGE-EVAL] Stage 18 | Step 47000 | L=144 (stage-alpha) | Greedy: First=97.60%, Full=97.60%
+[PLOT] Saved stage_eval.png (18 stages)
+[PLOT] Saved eval_acc_vs_step.png (18 evals)
+[PLOT] Saved eval_acc_vs_flops.png (18 evals)
+[STAGE-CKPT] Saving persistent checkpoint to /root/nl_output/search/job_exp1_qwen06b_lora_r8/stage_checkpoints/stage_18_step_47000_L144
+[STAGE-CKPT] Saved stage 18 checkpoint
+[PLOT] Saved loss_stage_18.png
+[PLOT] Saved loss_overall.png (2 stages with exp fits)
+[PLOT] Saved loss_vs_flops.png
+[PLOT] Saved loss_vs_walltime.png
+[PLOT] Saved achieved_tflops.png (avg: 1032.6 TFLOPs/s)
+
+[TRAIN-TIMING] Steps=9900 | DataWait=477.0ms (8.0%) | Compute=5488.8ms | Wall=5965.8ms | Throughput=0.2 steps/s
+
+ -> Advanced to stage 19 | alpha=0.598 | L=152/256
+{'loss': 0.074, 'grad_norm': 1.8425722122192383, 'learning_rate': 5e-05, 'epoch': 1.55e-05}
