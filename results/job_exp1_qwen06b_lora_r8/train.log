@@ -14007,3 +14007,10 @@ The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and g
 [Stage 21/32 L=168] step 53650 | loss_avg=0.0205(100) | First=97.62% | Full=96.38% | lr=5.00e-05 | grad_norm=5.38 | Speed=27.3 samples/s (87.9K toks/s) | 235.0 TFLOPs/s | Stage time=1743.7m | seqs/step=192.0 | toks/step=616968 | eff=100.0%
 [CHECK] Stage 21 full=96.38% target>=98.00%
 {'loss': 0.0762, 'grad_norm': 16.328407287597656, 'learning_rate': 5e-05, 'epoch': 4.21e-05}
+[Stage 21/32 L=168] step 53660 | loss_avg=0.0198(100) | First=98.25% | Full=96.88% | lr=5.00e-05 | grad_norm=16.33 | Speed=27.3 samples/s (87.9K toks/s) | 235.0 TFLOPs/s | Stage time=1748.4m | seqs/step=192.0 | toks/step=616960 | eff=100.0%
+{'loss': 0.0789, 'grad_norm': 4.0328288078308105, 'learning_rate': 5e-05, 'epoch': 4.214e-05}
+[Stage 21/32 L=168] step 53670 | loss_avg=0.0198(100) | First=98.38% | Full=97.88% | lr=5.00e-05 | grad_norm=4.03 | Speed=27.3 samples/s (87.9K toks/s) | 235.0 TFLOPs/s | Stage time=1753.0m | seqs/step=192.0 | toks/step=616960 | eff=100.0%
+{'loss': 0.0734, 'grad_norm': 9.280117988586426, 'learning_rate': 5e-05, 'epoch': 4.218e-05}
+[CHECK] Stage 21 full=97.62% target>=98.00%
+[Stage 21/32 L=168] step 53680 | loss_avg=0.0192(100) | First=98.38% | Full=97.38% | lr=5.00e-05 | grad_norm=9.28 | Speed=27.3 samples/s (87.9K toks/s) | 235.0 TFLOPs/s | Stage time=1757.7m | seqs/step=192.0 | toks/step=616964 | eff=100.0%
+{'loss': 0.0726, 'grad_norm': 4.284672737121582, 'learning_rate': 5e-05, 'epoch': 4.222e-05}
